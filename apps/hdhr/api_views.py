@@ -163,7 +163,7 @@ class LineupAPIView(APIView):
             lineup.append(
                 {
                     "GuideNumber": formatted_channel_number,
-                    "GuideName": ch.name,
+                    "GuideName": ch.effective_name,
                     "URL": request.build_absolute_uri(f"/proxy/ts/stream/{ch.uuid}"),
                     "Guide_ID": formatted_channel_number,
                     "Station": formatted_channel_number,

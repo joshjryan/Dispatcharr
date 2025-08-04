@@ -87,15 +87,15 @@ def match_epg_channels():
             # Normalize TVG ID - strip whitespace and convert to lowercase
             normalized_tvg_id = channel.tvg_id.strip().lower() if channel.tvg_id else ""
             if normalized_tvg_id:
-                logger.info(f"Processing channel {channel.id} '{channel.name}' with TVG ID='{normalized_tvg_id}'")
+                logger.info(f"Processing channel {channel.id} '{channel.effective_name}' with TVG ID='{normalized_tvg_id}'")
 
             channels_json.append({
                 "id": channel.id,
-                "name": channel.name,
+                "name": channel.effective_name,
                 "tvg_id": normalized_tvg_id,  # Use normalized TVG ID
                 "original_tvg_id": channel.tvg_id,  # Keep original for reference
-                "fallback_name": normalized_tvg_id if normalized_tvg_id else channel.name,
-                "norm_chan": normalize_name(normalized_tvg_id if normalized_tvg_id else channel.name)
+                "fallback_name": normalized_tvg_id if normalized_tvg_id else channel.effective_name,
+                "norm_chan": normalize_name(normalized_tvg_id if normalized_tvg_id else channel.effective_name)
             })
 
         # Similarly normalize EPG data TVG IDs

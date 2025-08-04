@@ -90,7 +90,7 @@ class LineupAPIView(APIView):
         lineup = [
             {
                 "GuideNumber": str(ch.channel_number),
-                "GuideName": ch.name,
+                "GuideName": ch.effective_name,
                 "URL": request.build_absolute_uri(f"/proxy/ts/stream/{ch.uuid}"),
             }
             for ch in channels
