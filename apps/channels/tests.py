@@ -19,14 +19,14 @@ class ChannelUserEditedMetadataTests(TestCase):
         )
     
     def test_channel_effective_name_precedence(self):
-        """Test that effective_name returns user_name over m3u_name over name."""
+        """Test that effective_name returns updated_name over m3u_name over name."""
         channel = Channel.objects.create(
             channel_number=1.0,
             name="Original Name",
             channel_group=self.channel_group
         )
         
-        # No user_name or m3u_name, should return name
+        # No updated_name or m3u_name, should return name
         self.assertEqual(channel.effective_name, "Original Name")
         
         # Set m3u_name, should return m3u_name
@@ -34,18 +34,18 @@ class ChannelUserEditedMetadataTests(TestCase):
         channel.save()
         self.assertEqual(channel.effective_name, "M3U Name")
         
-        # Set user_name, should return user_name (highest priority)
-        channel.user_name = "User Name"
+        # Set updated_name, should return updated_name (highest priority)
+        channel.updated_name = "Updated Name"
         channel.save()
         self.assertEqual(channel.effective_name, "User Name")
         
-        # Clear user_name, should fall back to m3u_name
-        channel.user_name = None
+        # Clear updated_name, should fall back to m3u_name
+        channel.updated_name = None
         channel.save()
         self.assertEqual(channel.effective_name, "M3U Name")
     
     def test_channel_effective_logo_precedence(self):
-        """Test that effective_logo returns user_logo over logo derived from m3u_logo_url over logo."""
+        """Test that effective_logo returns updated_logo over logo derived from m3u_logo_url over logo."""
         channel = Channel.objects.create(
             channel_number=2.0,
             name="Test Channel",
@@ -53,7 +53,7 @@ class ChannelUserEditedMetadataTests(TestCase):
             logo=self.logo1
         )
         
-        # No user_logo or m3u_logo_url, should return logo
+        # No updated_logo or m3u_logo_url, should return logo
         self.assertEqual(channel.effective_logo, self.logo1)
         
         # Set m3u_logo_url but keep existing logo, should still return logo
@@ -61,13 +61,13 @@ class ChannelUserEditedMetadataTests(TestCase):
         channel.save()
         self.assertEqual(channel.effective_logo, self.logo1)
         
-        # Set user_logo, should return user_logo (highest priority)
-        channel.user_logo = self.logo2
+        # Set updated_logo, should return updated_logo (highest priority)
+        channel.updated_logo = self.logo2
         channel.save()
         self.assertEqual(channel.effective_logo, self.logo2)
         
-        # Clear user_logo, should fall back to original logo
-        channel.user_logo = None
+        # Clear updated_logo, should fall back to original logo
+        channel.updated_logo = None
         channel.save()
         self.assertEqual(channel.effective_logo, self.logo1)
     
@@ -86,8 +86,8 @@ class ChannelUserEditedMetadataTests(TestCase):
         )
         
         # User customizes the channel
-        channel.user_name = "My Custom Name"
-        channel.user_logo = self.logo2
+        channel.updated_name = "My Custom Name"
+        channel.updated_logo = self.logo2
         channel.save()
         
         # Verify user customizations are returned
@@ -99,8 +99,8 @@ class ChannelUserEditedMetadataTests(TestCase):
         channel.refresh_from_db()  # Simulate reload from sync process
         
         # User customizations should still be intact
-        self.assertEqual(channel.user_name, "My Custom Name")
-        self.assertEqual(channel.user_logo, self.logo2)
+        self.assertEqual(channel.updated_name, "My Custom Name")
+        self.assertEqual(channel.updated_logo, self.logo2)
         self.assertEqual(channel.effective_name, "My Custom Name")
         self.assertEqual(channel.effective_logo, self.logo2)
     
@@ -118,8 +118,8 @@ class ChannelUserEditedMetadataTests(TestCase):
         )
         
         # User has NOT customized the channel
-        self.assertIsNone(channel.user_name)
-        self.assertIsNone(channel.user_logo)
+        self.assertIsNone(channel.updated_name)
+        self.assertIsNone(channel.updated_logo)
         
         # Simulate M3U sync with changed values
         # This should update both m3u_* fields and the default fields since user hasn't customized
@@ -156,7 +156,7 @@ class ChannelUserEditedMetadataTests(TestCase):
             channel_number=6.0,
             name="Original Name",
             m3u_name="M3U Name", 
-            user_name="User Name",
+            updated_name="User Name",
             channel_group=self.channel_group
         )
         

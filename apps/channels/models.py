@@ -259,7 +259,7 @@ class Channel(models.Model):
         null=True,
         help_text="User-edited name, takes precedence over M3U name"
     )
-    user_logo = models.ForeignKey(
+    updated_logo = models.ForeignKey(
         "Logo",
         on_delete=models.SET_NULL,
         null=True,
@@ -340,8 +340,8 @@ class Channel(models.Model):
     @property
     def effective_logo(self):
         """Return user-edited logo if available, otherwise logo derived from M3U logo URL, otherwise current logo"""
-        if self.user_logo:
-            return self.user_logo
+        if self.updated_logo:
+            return self.updated_logo
         elif self.m3u_logo_url and not self.logo:
             # Try to find or create logo from M3U URL
             try:

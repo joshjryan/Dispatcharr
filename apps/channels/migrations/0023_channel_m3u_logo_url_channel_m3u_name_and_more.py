@@ -23,12 +23,12 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='channel',
-            name='user_logo',
+            name='updated_logo',
             field=models.ForeignKey(blank=True, help_text='User-edited logo, takes precedence over M3U logo', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='user_channels', to='dispatcharr_channels.logo'),
         ),
         migrations.AddField(
             model_name='channel',
-            name='user_name',
+            name='updated_name',
             field=models.CharField(blank=True, help_text='User-edited name, takes precedence over M3U name', max_length=255, null=True),
         ),
     ]
