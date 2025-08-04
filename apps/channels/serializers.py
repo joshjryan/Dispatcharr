@@ -212,6 +212,29 @@ class ChannelSerializer(serializers.ModelSerializer):
         allow_null=True,
         required=False,
     )
+    
+    # Fields for user-edited values
+    user_name = serializers.CharField(
+        max_length=255,
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+        help_text="User-edited name, takes precedence over M3U name"
+    )
+    
+    user_logo_id = serializers.PrimaryKeyRelatedField(
+        queryset=Logo.objects.all(),
+        source="user_logo",
+        allow_null=True,
+        required=False,
+        help_text="User-edited logo, takes precedence over M3U logo"
+    )
+    
+    # Read-only fields to expose effective values and M3U source values
+    effective_name = serializers.ReadOnlyField()
+    effective_logo_id = serializers.SerializerMethodField()
+    m3u_name = serializers.ReadOnlyField()
+    m3u_logo_url = serializers.ReadOnlyField()
 
     auto_created_by_name = serializers.SerializerMethodField()
 
@@ -233,6 +256,14 @@ class ChannelSerializer(serializers.ModelSerializer):
             "auto_created",
             "auto_created_by",
             "auto_created_by_name",
+            # New fields for user-edited values
+            "user_name",
+            "user_logo_id",
+            # Read-only effective and M3U source values
+            "effective_name", 
+            "effective_logo_id",
+            "m3u_name",
+            "m3u_logo_url",
         ]
 
     def to_representation(self, instance):
@@ -336,6 +367,11 @@ class ChannelSerializer(serializers.ModelSerializer):
         if obj.auto_created_by:
             return obj.auto_created_by.name
         return None
+    
+    def get_effective_logo_id(self, obj):
+        """Get the ID of the effective logo."""
+        effective_logo = obj.effective_logo
+        return effective_logo.id if effective_logo else None
 
 
 class ChannelGroupM3UAccountSerializer(serializers.ModelSerializer):

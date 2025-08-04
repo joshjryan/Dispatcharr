@@ -238,6 +238,35 @@ class Channel(models.Model):
         blank=True,
         related_name="channels",
     )
+    
+    # Fields to store last M3U source values
+    m3u_name = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True,
+        help_text="Last name value from M3U source"
+    )
+    m3u_logo_url = models.TextField(
+        blank=True, 
+        null=True,
+        help_text="Last logo URL value from M3U source"
+    )
+    
+    # Fields to store user-edited values
+    user_name = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True,
+        help_text="User-edited name, takes precedence over M3U name"
+    )
+    user_logo = models.ForeignKey(
+        "Logo",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="user_channels",
+        help_text="User-edited logo, takes precedence over M3U logo"
+    )
 
     # M2M to Stream now in the same file
     streams = models.ManyToManyField(
@@ -301,7 +330,30 @@ class Channel(models.Model):
             )
 
     def __str__(self):
-        return f"{self.channel_number} - {self.name}"
+        return f"{self.channel_number} - {self.effective_name}"
+
+    @property
+    def effective_name(self):
+        """Return user-edited name if available, otherwise M3U name, otherwise current name field"""
+        return self.user_name or self.m3u_name or self.name
+    
+    @property
+    def effective_logo(self):
+        """Return user-edited logo if available, otherwise logo derived from M3U logo URL, otherwise current logo"""
+        if self.user_logo:
+            return self.user_logo
+        elif self.m3u_logo_url and not self.logo:
+            # Try to find or create logo from M3U URL
+            try:
+                logo, _ = Logo.objects.get_or_create(
+                    url=self.m3u_logo_url,
+                    defaults={"name": self.effective_name or "Unknown"}
+                )
+                return logo
+            except Exception:
+                return self.logo
+        else:
+            return self.logo
 
     @classmethod
     def get_next_available_channel_number(cls, starting_from=1):
