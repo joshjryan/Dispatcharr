@@ -214,7 +214,7 @@ class ChannelSerializer(serializers.ModelSerializer):
     )
     
     # Fields for user-edited values
-    user_name = serializers.CharField(
+    updated_name = serializers.CharField(
         max_length=255,
         allow_blank=True,
         allow_null=True,
@@ -222,9 +222,9 @@ class ChannelSerializer(serializers.ModelSerializer):
         help_text="User-edited name, takes precedence over M3U name"
     )
     
-    user_logo_id = serializers.PrimaryKeyRelatedField(
+    updated_logo_id = serializers.PrimaryKeyRelatedField(
         queryset=Logo.objects.all(),
-        source="user_logo",
+        source="updated_logo",
         allow_null=True,
         required=False,
         help_text="User-edited logo, takes precedence over M3U logo"
@@ -256,9 +256,8 @@ class ChannelSerializer(serializers.ModelSerializer):
             "auto_created",
             "auto_created_by",
             "auto_created_by_name",
-            # New fields for user-edited values
-            "user_name",
-            "user_logo_id",
+            "updated_name",
+            "updated_logo_id",
             # Read-only effective and M3U source values
             "effective_name", 
             "effective_logo_id",

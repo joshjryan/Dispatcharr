@@ -253,7 +253,7 @@ class Channel(models.Model):
     )
     
     # Fields to store user-edited values
-    user_name = models.CharField(
+    updated_name = models.CharField(
         max_length=255, 
         blank=True, 
         null=True,
@@ -335,7 +335,7 @@ class Channel(models.Model):
     @property
     def effective_name(self):
         """Return user-edited name if available, otherwise M3U name, otherwise current name field"""
-        return self.user_name or self.m3u_name or self.name
+        return self.updated_name or self.m3u_name or self.name
     
     @property
     def effective_logo(self):
