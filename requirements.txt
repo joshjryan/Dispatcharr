@@ -1,8 +1,6 @@
 Django==5.2.4
 psycopg2-binary==2.9.10
-redis==6.2.0
-celery
-celery[redis]
+celery[redis]==5.5.3
 djangorestframework==3.16.0
 requests==2.32.4
 psutil==7.0.0
@@ -25,7 +23,7 @@ tzlocal
 torch==2.7.1+cpu
 
 # ML/NLP dependencies
-sentence-transformers==5.0.0
+sentence-transformers==5.1.0
 channels
 channels-redis==4.3.0
 django-filter
