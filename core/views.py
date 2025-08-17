@@ -41,7 +41,7 @@ def stream_view(request, channel_uuid):
 
         # Retrieve the channel by the provided stream_id.
         channel = Channel.objects.get(uuid=channel_uuid)
-        logger.debug("Channel retrieved: ID=%s, Name=%s", channel.id, channel.name)
+        logger.debug("Channel retrieved: ID=%s, Name=%s", channel.id, channel.effective_name)
 
         # Ensure the channel has at least one stream.
         if not channel.streams.exists():

@@ -111,21 +111,22 @@ def generate_m3u(request, profile_name=None, user=None):
             # Default to channel number (original behavior)
             tvg_id = str(formatted_channel_number) if formatted_channel_number != "" else str(channel.id)
 
-        tvg_name = channel.name
+        tvg_name = channel.effective_name
 
         tvg_logo = ""
-        if channel.logo:
+        effective_logo = channel.effective_logo
+        if effective_logo:
             if use_cached_logos:
                 # Use cached logo as before
-                tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[channel.logo.id]))
+                tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[effective_logo.id]))
             else:
                 # Try to find direct logo URL from channel's streams
-                direct_logo = channel.logo.url if channel.logo.url.startswith(('http://', 'https://')) else None
+                direct_logo = effective_logo.url if effective_logo.url.startswith(('http://', 'https://')) else None
                 # If direct logo found, use it; otherwise fall back to cached version
                 if direct_logo:
                     tvg_logo = direct_logo
                 else:
-                    tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[channel.logo.id]))
+                    tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[effective_logo.id]))
 
         # create possible gracenote id insertion
         tvc_guide_stationid = ""
@@ -136,7 +137,7 @@ def generate_m3u(request, profile_name=None, user=None):
 
         extinf_line = (
             f'#EXTINF:-1 tvg-id="{tvg_id}" tvg-name="{tvg_name}" tvg-logo="{tvg_logo}" '
-            f'tvg-chno="{formatted_channel_number}" {tvc_guide_stationid}group-title="{group_title}",{channel.name}\n'
+            f'tvg-chno="{formatted_channel_number}" {tvc_guide_stationid}group-title="{group_title}",{channel.effective_name}\n'
         )
 
         # Determine the stream URL based on the direct parameter
@@ -366,19 +367,20 @@ def generate_epg(request, profile_name=None, user=None):
 
             # Add channel logo if available
             tvg_logo = ""
-            if channel.logo:
+            effective_logo = channel.effective_logo
+            if effective_logo:
                 if use_cached_logos:
                     # Use cached logo as before
-                    tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[channel.logo.id]))
+                    tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[effective_logo.id]))
                 else:
                     # Try to find direct logo URL from channel's streams
-                    direct_logo = channel.logo.url if channel.logo.url.startswith(('http://', 'https://')) else None
+                    direct_logo = effective_logo.url if effective_logo.url.startswith(('http://', 'https://')) else None
                     # If direct logo found, use it; otherwise fall back to cached version
                     if direct_logo:
                         tvg_logo = direct_logo
                     else:
-                        tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[channel.logo.id]))
-            display_name = channel.name
+                        tvg_logo = request.build_absolute_uri(reverse('api:channels:logo-cache', args=[effective_logo.id]))
+            display_name = channel.effective_name
             xml_lines.append(f'  <channel id="{channel_id}">')
             xml_lines.append(f'    <display-name>{html.escape(display_name)}</display-name>')
             xml_lines.append(f'    <icon src="{html.escape(tvg_logo)}" />')
@@ -408,7 +410,7 @@ def generate_epg(request, profile_name=None, user=None):
                 # Default to channel number
                 channel_id = str(formatted_channel_number) if formatted_channel_number != "" else str(channel.id)
 
-            display_name = channel.epg_data.name if channel.epg_data else channel.name
+            display_name = channel.epg_data.name if channel.epg_data else channel.effective_name
 
             if not channel.epg_data:
                 # Use the enhanced dummy EPG generation function with defaults
@@ -895,14 +897,14 @@ def xc_get_live_streams(request, user, category_id=None):
         streams.append(
             {
                 "num": int(channel.channel_number) if channel.channel_number.is_integer() else channel.channel_number,
-                "name": channel.name,
+                "name": channel.effective_name,
                 "stream_type": "live",
                 "stream_id": channel.id,
                 "stream_icon": (
                     None
-                    if not channel.logo
+                    if not channel.effective_logo
                     else request.build_absolute_uri(
-                        reverse("api:channels:logo-cache", args=[channel.logo.id])
+                        reverse("api:channels:logo-cache", args=[channel.effective_logo.id])
                     )
                 ),
                 "epg_channel_id": str(int(channel.channel_number)) if channel.channel_number.is_integer() else str(channel.channel_number),
@@ -953,7 +955,7 @@ def xc_get_epg(request, user, short=False):
         else:
             programs = channel.epg_data.programs.all().order_by('start_time')[:limit]
     else:
-        programs = generate_dummy_programs(channel_id=channel_id, channel_name=channel.name)
+        programs = generate_dummy_programs(channel_id=channel_id, channel_name=channel.effective_name)
 
     output = {"epg_listings": []}
     for program in programs:

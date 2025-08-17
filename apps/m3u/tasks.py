@@ -1067,13 +1067,43 @@ def sync_auto_channels(account_id, scan_start_time=None):
                     existing_channel = existing_channel_map.get(stream.id)
 
                     if existing_channel:
-                        # Update existing channel if needed (channel number already handled above)
                         channel_updated = False
 
-                        # Use new_name instead of stream.name
-                        if existing_channel.name != new_name:
-                            existing_channel.name = new_name
+                        logger.debug(
+                            f"Checking updates for channel ID={existing_channel.id}, "
+                            f"current name='{existing_channel.name}', m3u_name='{existing_channel.m3u_name}', "
+                            f"new_name='{new_name}', channel_number={existing_channel.channel_number}, "
+                            f"target_number={current_channel_number}"
+                        )
+
+                        # Only update m3u_name and channel name if new_name differs from m3u_name
+                        if existing_channel.m3u_name != new_name:
+                            logger.info(
+                                f"Updating m3u_name for channel ID={existing_channel.id} from '{existing_channel.m3u_name}' to '{new_name}'"
+                            )
+                            existing_channel.m3u_name = new_name
                             channel_updated = True
+
+                            # Only update channel name if it differs from m3u_name
+                            if existing_channel.name != new_name:
+                                logger.info(
+                                    f"Updating channel name for channel ID={existing_channel.id} from '{existing_channel.name}' to '{new_name}'"
+                                )
+                                existing_channel.name = new_name
+                                channel_updated = True
+                            else:
+                                logger.debug(
+                                    f"Channel name for channel ID={existing_channel.id} already matches new m3u_name '{new_name}', no update needed."
+                                )
+                        else:
+                            logger.debug(
+                                f"m3u_name for channel ID={existing_channel.id} already matches new_name '{new_name}', no update needed."
+                            )
+
+                        # Do NOT update channel_number for existing channels
+                        logger.debug(
+                            f"Skipping channel_number update for existing channel ID={existing_channel.id} (current: {existing_channel.channel_number})"
+                        )
 
                         if existing_channel.tvg_id != stream.tvg_id:
                             existing_channel.tvg_id = stream.tvg_id
@@ -1089,18 +1119,33 @@ def sync_auto_channels(account_id, scan_start_time=None):
                             channel_updated = True
                             logger.info(f"Moved auto channel '{existing_channel.name}' from '{existing_channel.channel_group.name if existing_channel.channel_group else 'None'}' to '{target_group.name}'")
 
-                        # Handle logo updates
-                        current_logo = None
-                        if stream.logo_url:
-                            from apps.channels.models import Logo
-                            current_logo, _ = Logo.objects.get_or_create(
-                                url=stream.logo_url,
-                                defaults={"name": stream.name or stream.tvg_id or "Unknown"}
-                            )
-
-                        if existing_channel.logo != current_logo:
-                            existing_channel.logo = current_logo
+                        # Handle logo updates with smart user-edited value preservation
+                        if existing_channel.m3u_logo_url != stream.logo_url:
+                            # M3U logo URL has changed, update it
+                            existing_channel.m3u_logo_url = stream.logo_url
                             channel_updated = True
+                            
+                            # Only overwrite updated_logo if user hasn't customized it
+                            if existing_channel.updated_logo is None:
+                                # User hasn't customized logo, update the fallback logo field
+                                current_logo = None
+                                if stream.logo_url:
+                                    from apps.channels.models import Logo
+                                    current_logo, _ = Logo.objects.get_or_create(
+                                        url=stream.logo_url,
+                                        defaults={"name": stream.name or stream.tvg_id or "Unknown"}
+                                    )
+                                existing_channel.logo = current_logo
+                        else:
+                            # M3U logo URL hasn't changed, but ensure logo field is populated if needed
+                            if existing_channel.logo is None and stream.logo_url and existing_channel.updated_logo is None:
+                                from apps.channels.models import Logo
+                                current_logo, _ = Logo.objects.get_or_create(
+                                    url=stream.logo_url,
+                                    defaults={"name": stream.name or stream.tvg_id or "Unknown"}
+                                )
+                                existing_channel.logo = current_logo
+                                channel_updated = True
 
                         # Handle EPG data updates
                         current_epg_data = None
@@ -1159,6 +1204,9 @@ def sync_auto_channels(account_id, scan_start_time=None):
                         channel = Channel.objects.create(
                             channel_number=target_number,
                             name=new_name,
+                            m3u_name=new_name,  # Store M3U source name
+                            m3u_logo_url=stream.logo_url,  # Store M3U source logo URL
+                            # updated_name and updated_logo remain None for new channels (use M3U values)
                             tvg_id=stream.tvg_id,
                             tvc_guide_stationid=tvc_guide_stationid,
                             channel_group=target_group,
