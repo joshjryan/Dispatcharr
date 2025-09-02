@@ -456,6 +456,23 @@ export default class API {
     }
   }
 
+  // Bulk update with per-channel payloads (e.g., regex renames)
+  static async bulkUpdateChannels(updates) {
+    try {
+      const response = await request(
+        `${host}/api/channels/channels/edit/bulk/`,
+        {
+          method: 'PATCH',
+          body: updates,
+        }
+      );
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to update channels', e);
+    }
+  }
+
   static async setChannelEPG(channelId, epgDataId) {
     try {
       const response = await request(
