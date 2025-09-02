@@ -1045,7 +1045,8 @@ def xc_get_vod_categories(user):
 
 def xc_get_vod_streams(request, user, category_id=None):
     """Get VOD streams (movies) for XtreamCodes API"""
-    from apps.vod.models import Movie
+    from apps.vod.models import Movie, M3UMovieRelation
+    from django.db.models import Prefetch
 
     streams = []
 
@@ -1068,44 +1069,53 @@ def xc_get_vod_streams(request, user, category_id=None):
     if category_id:
         filters["m3u_relations__category_id"] = category_id
 
-    # Get movies directly with their relations
-    movies = Movie.objects.filter(**filters).select_related('logo').distinct()
+    # Optimize with prefetch_related to eliminate N+1 queries
+    # This loads all relations in a single query instead of one per movie
+    movies = Movie.objects.filter(**filters).select_related('logo').prefetch_related(
+        Prefetch(
+            'm3u_relations',
+            queryset=M3UMovieRelation.objects.filter(
+                m3u_account__is_active=True
+            ).select_related('m3u_account', 'category').order_by('-m3u_account__priority', 'id'),
+            to_attr='active_relations'
+        )
+    ).distinct()
 
     for movie in movies:
-        # Get the highest priority relation for this movie (for metadata like container_extension)
-        relation = movie.m3u_relations.filter(
-            m3u_account__is_active=True
-        ).select_related('m3u_account').order_by('-m3u_account__priority', 'id').first()
+        # Get the first (highest priority) relation from prefetched data
+        # This avoids the N+1 query problem entirely
+        if hasattr(movie, 'active_relations') and movie.active_relations:
+            relation = movie.active_relations[0]
+        else:
+            # Fallback - should rarely be needed with proper prefetching
+            continue
 
-        if relation:
-            relation_custom = relation.custom_properties or {}
-            relation_info = relation_custom.get('basic_data', {})
-            streams.append({
-                "num": movie.id,
-                "name": movie.name,
-                "stream_type": "movie",
-                "stream_id": movie.id,
-                "stream_icon": (
-                    None if not movie.logo
-                    else build_absolute_uri_with_port(
-                        request,
-                        reverse("api:channels:logo-cache", args=[movie.logo.id])
-                    )
-                ),
-                #'stream_icon': movie.logo.url if movie.logo else '',
-                "rating": movie.rating or "0",
-                "rating_5based": round(float(movie.rating or 0) / 2, 2) if movie.rating else 0,
-                "added": str(movie.created_at.timestamp()),
-                "is_adult": 0,
-                "tmdb_id": movie.tmdb_id or "",
-                "imdb_id": movie.imdb_id or "",
-                "trailer": (movie.custom_properties or {}).get('youtube_trailer') or relation_info.get('youtube_trailer') or relation_info.get('trailer', ''),
-                "category_id": str(relation.category.id) if relation.category else "0",
-                "category_ids": [int(relation.category.id)] if relation.category else [],
-                "container_extension": relation.container_extension or "mp4",
-                "custom_sid": None,
-                "direct_source": "",
-            })
+        streams.append({
+            "num": movie.id,
+            "name": movie.name,
+            "stream_type": "movie",
+            "stream_id": movie.id,
+            "stream_icon": (
+                None if not movie.logo
+                else build_absolute_uri_with_port(
+                    request,
+                    reverse("api:channels:logo-cache", args=[movie.logo.id])
+                )
+            ),
+            #'stream_icon': movie.logo.url if movie.logo else '',
+            "rating": movie.rating or "0",
+            "rating_5based": round(float(movie.rating or 0) / 2, 2) if movie.rating else 0,
+            "added": str(movie.created_at.timestamp()),
+            "is_adult": 0,
+            "tmdb_id": movie.tmdb_id or "",
+            "imdb_id": movie.imdb_id or "",
+            "trailer": (movie.custom_properties or {}).get('youtube_trailer'),
+            "category_id": str(relation.category.id) if relation.category else "0",
+            "category_ids": [int(relation.category.id)] if relation.category else [],
+            "container_extension": relation.container_extension or "mp4",
+            "custom_sid": None,
+            "direct_source": "",
+        })
 
     return streams
 
@@ -1444,9 +1454,12 @@ def xc_get_vod_info(request, user, vod_id):
             raise Http404()
 
     try:
-        movie_relation = M3UMovieRelation.objects.select_related('movie', 'movie__logo').get(**filters)
+        # Order by account priority to get the best relation when multiple exist
+        movie_relation = M3UMovieRelation.objects.select_related('movie', 'movie__logo').filter(**filters).order_by('-m3u_account__priority', 'id').first()
+        if not movie_relation:
+            raise Http404()
         movie = movie_relation.movie
-    except M3UMovieRelation.DoesNotExist:
+    except (M3UMovieRelation.DoesNotExist, M3UMovieRelation.MultipleObjectsReturned):
         raise Http404()
 
     # Initialize basic movie data first
@@ -1605,8 +1618,11 @@ def xc_movie_stream(request, username, password, stream_id, extension):
             return JsonResponse({"error": "No accessible content"}, status=403)
 
     try:
-        movie_relation = M3UMovieRelation.objects.select_related('movie').get(**filters)
-    except M3UMovieRelation.DoesNotExist:
+        # Order by account priority to get the best relation when multiple exist
+        movie_relation = M3UMovieRelation.objects.select_related('movie').filter(**filters).order_by('-m3u_account__priority', 'id').first()
+        if not movie_relation:
+            return JsonResponse({"error": "Movie not found"}, status=404)
+    except (M3UMovieRelation.DoesNotExist, M3UMovieRelation.MultipleObjectsReturned):
         return JsonResponse({"error": "Movie not found"}, status=404)
 
     # Redirect to the VOD proxy endpoint
