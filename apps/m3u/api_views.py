@@ -100,11 +100,8 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
 
         # Check current VOD setting
         if instance.custom_properties:
-            try:
-                custom_props = json.loads(instance.custom_properties)
-                old_vod_enabled = custom_props.get("enable_vod", False)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            custom_props = instance.custom_properties or {}
+            old_vod_enabled = custom_props.get("enable_vod", False)
 
         # Handle file upload first, if any
         file_path = None
@@ -187,11 +184,8 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
         # Check if VOD is enabled
         vod_enabled = False
         if account.custom_properties:
-            try:
-                custom_props = json.loads(account.custom_properties)
-                vod_enabled = custom_props.get("enable_vod", False)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            custom_props = account.custom_properties or {}
+            vod_enabled = custom_props.get("enable_vod", False)
 
         if not vod_enabled:
             return Response(
@@ -236,11 +230,7 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
                             "enabled": enabled,
                             "auto_channel_sync": auto_sync,
                             "auto_sync_channel_start": sync_start,
-                            "custom_properties": (
-                                custom_properties
-                                if isinstance(custom_properties, str)
-                                else json.dumps(custom_properties)
-                            ),
+                            "custom_properties": custom_properties,
                         },
                     )
 
@@ -255,11 +245,7 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
                         m3u_account=account,
                         defaults={
                             "enabled": enabled,
-                            "custom_properties": (
-                                custom_properties
-                                if isinstance(custom_properties, str)
-                                else json.dumps(custom_properties)
-                            ),
+                            "custom_properties": custom_properties,
                         },
                     )
 

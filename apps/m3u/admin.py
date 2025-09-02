@@ -43,11 +43,8 @@ class M3UAccountAdmin(admin.ModelAdmin):
     def vod_enabled_display(self, obj):
         """Display whether VOD is enabled for this account"""
         if obj.custom_properties:
-            try:
-                custom_props = json.loads(obj.custom_properties)
-                return "Yes" if custom_props.get('enable_vod', False) else "No"
-            except (json.JSONDecodeError, TypeError):
-                pass
+            custom_props = obj.custom_properties or {}
+            return "Yes" if custom_props.get('enable_vod', False) else "No"
         return "No"
     vod_enabled_display.short_description = "VOD Enabled"
     vod_enabled_display.boolean = True

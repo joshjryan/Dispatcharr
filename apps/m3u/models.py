@@ -85,7 +85,7 @@ class M3UAccount(models.Model):
     account_type = models.CharField(choices=Types.choices, default=Types.STADNARD)
     username = models.CharField(max_length=255, null=True, blank=True)
     password = models.CharField(max_length=255, null=True, blank=True)
-    custom_properties = models.TextField(null=True, blank=True)
+    custom_properties = models.JSONField(default=dict, blank=True, null=True)
     refresh_interval = models.IntegerField(default=0)
     refresh_task = models.ForeignKey(
         PeriodicTask, on_delete=models.SET_NULL, null=True, blank=True
@@ -184,7 +184,7 @@ class M3UFilter(models.Model):
         help_text="If True, matching items are excluded; if False, only matches are included.",
     )
     order = models.PositiveIntegerField(default=0)
-    custom_properties = models.TextField(null=True, blank=True)
+    custom_properties = models.JSONField(default=dict, blank=True, null=True)
 
     def applies_to(self, stream_name, group_name):
         target = group_name if self.filter_type == "group" else stream_name

@@ -538,21 +538,13 @@ def process_groups(account, groups):
 
     for group in group_objs:
         custom_props = groups.get(group.name, {})
-        custom_props_json = json.dumps(custom_props)
 
         if group.name in existing_relationships:
             # Update existing relationship if xc_id has changed (preserve other custom properties)
             existing_rel = existing_relationships[group.name]
 
-            # Parse existing custom properties
-            try:
-                existing_custom_props = (
-                    json.loads(existing_rel.custom_properties)
-                    if existing_rel.custom_properties
-                    else {}
-                )
-            except (json.JSONDecodeError, TypeError):
-                existing_custom_props = {}
+            # Get existing custom properties (now JSONB, no need to parse)
+            existing_custom_props = existing_rel.custom_properties or {}
 
             # Get the new xc_id from groups data
             new_xc_id = custom_props.get("xc_id")
@@ -568,16 +560,40 @@ def process_groups(account, groups):
                     # Remove xc_id if it's no longer provided (e.g., converting from XC to standard)
                     del updated_custom_props["xc_id"]
 
-                existing_rel.custom_properties = json.dumps(updated_custom_props)
+                existing_rel.custom_properties = updated_custom_props
                 relations_to_update.append(existing_rel)
-                logger.debug(f"Updated custom properties for group '{group.name}' - account {account.id}")
+                logger.debug(f"Updated xc_id for group '{group.name}' from '{existing_xc_id}' to '{new_xc_id}' - account {account.id}")
+            else:
+                logger.debug(f"xc_id unchanged for group '{group.name}' - account {account.id}")
         else:
+            # Create new relationship - but check if there's an existing relationship that might have user settings
+            # This can happen if the group was temporarily removed and is now back
+            try:
+                potential_existing = ChannelGroupM3UAccount.objects.filter(
+                    m3u_account=account,
+                    channel_group=group
+                ).first()
+
+                if potential_existing:
+                    # Merge with existing custom properties to preserve user settings
+                    existing_custom_props = potential_existing.custom_properties or {}
+
+                    # Merge new properties with existing ones
+                    merged_custom_props = existing_custom_props.copy()
+                    merged_custom_props.update(custom_props)
+                    custom_props = merged_custom_props
+                    logger.debug(f"Merged custom properties for existing relationship: group '{group.name}' - account {account.id}")
+            except Exception as e:
+                logger.debug(f"Could not check for existing relationship: {str(e)}")
+                # Fall back to using just the new custom properties
+                pass
+
             # Create new relationship
             relations_to_create.append(
                 ChannelGroupM3UAccount(
                     channel_group=group,
                     m3u_account=account,
-                    custom_properties=custom_props_json,
+                    custom_properties=custom_props,
                     enabled=True,  # Default to enabled
                 )
             )
@@ -768,7 +784,7 @@ def process_xc_category_direct(account_id, batch, groups, hash_keys):
                             "m3u_account": account,
                             "channel_group_id": int(group_id),
                             "stream_hash": stream_hash,
-                            "custom_properties": json.dumps(stream),
+                            "custom_properties": stream,
                         }
 
                         if stream_hash not in stream_hashes:
@@ -870,7 +886,7 @@ def process_m3u_batch_direct(account_id, batch, groups, hash_keys):
                 f.regex_pattern,
                 (
                     re.IGNORECASE
-                    if json.loads(f.custom_properties or "{}").get(
+                    if (f.custom_properties or {}).get(
                         "case_sensitive", True
                     )
                     == False
@@ -933,7 +949,7 @@ def process_m3u_batch_direct(account_id, batch, groups, hash_keys):
                 "m3u_account": account,
                 "channel_group_id": int(groups.get(group_title)),
                 "stream_hash": stream_hash,
-                "custom_properties": json.dumps(stream_info["attributes"]),
+                "custom_properties": stream_info["attributes"],
             }
 
             if stream_hash not in stream_hashes:
@@ -1506,31 +1522,20 @@ def sync_auto_channels(account_id, scan_start_time=None):
             channel_sort_reverse = False
             stream_profile_id = None
             if group_relation.custom_properties:
-                try:
-                    group_custom_props = json.loads(group_relation.custom_properties)
-                    force_dummy_epg = group_custom_props.get("force_dummy_epg", False)
-                    override_group_id = group_custom_props.get("group_override")
-                    name_regex_pattern = group_custom_props.get("name_regex_pattern")
-                    name_replace_pattern = group_custom_props.get(
-                        "name_replace_pattern"
-                    )
-                    name_match_regex = group_custom_props.get("name_match_regex")
-                    channel_profile_ids = group_custom_props.get("channel_profile_ids")
-                    channel_sort_order = group_custom_props.get("channel_sort_order")
-                    channel_sort_reverse = group_custom_props.get(
-                        "channel_sort_reverse", False
-                    )
-                    stream_profile_id = group_custom_props.get("stream_profile_id")
-                except Exception:
-                    force_dummy_epg = False
-                    override_group_id = None
-                    name_regex_pattern = None
-                    name_replace_pattern = None
-                    name_match_regex = None
-                    channel_profile_ids = None
-                    channel_sort_order = None
-                    channel_sort_reverse = False
-                    stream_profile_id = None
+                group_custom_props = group_relation.custom_properties
+                force_dummy_epg = group_custom_props.get("force_dummy_epg", False)
+                override_group_id = group_custom_props.get("group_override")
+                name_regex_pattern = group_custom_props.get("name_regex_pattern")
+                name_replace_pattern = group_custom_props.get(
+                    "name_replace_pattern"
+                )
+                name_match_regex = group_custom_props.get("name_match_regex")
+                channel_profile_ids = group_custom_props.get("channel_profile_ids")
+                channel_sort_order = group_custom_props.get("channel_sort_order")
+                channel_sort_reverse = group_custom_props.get(
+                    "channel_sort_reverse", False
+                )
+                stream_profile_id = group_custom_props.get("stream_profile_id")
 
             # Determine which group to use for created channels
             target_group = channel_group
@@ -1730,11 +1735,7 @@ def sync_auto_channels(account_id, scan_start_time=None):
                 processed_stream_ids.add(stream.id)
                 try:
                     # Parse custom properties for additional info
-                    stream_custom_props = (
-                        json.loads(stream.custom_properties)
-                        if stream.custom_properties
-                        else {}
-                    )
+                    stream_custom_props = stream.custom_properties or {}
                     tvc_guide_stationid = stream_custom_props.get("tvc-guide-stationid")
 
                     # --- REGEX FIND/REPLACE LOGIC ---
@@ -2018,11 +2019,8 @@ def refresh_single_m3u_account(account_id):
         # Check if VOD is enabled for this account
         vod_enabled = False
         if account.custom_properties:
-            try:
-                custom_props = json.loads(account.custom_properties)
-                vod_enabled = custom_props.get('enable_vod', False)
-            except (json.JSONDecodeError, TypeError):
-                vod_enabled = False
+            custom_props = account.custom_properties or {}
+            vod_enabled = custom_props.get('enable_vod', False)
 
     except M3UAccount.DoesNotExist:
         # The M3U account doesn't exist, so delete the periodic task if it exists
@@ -2257,27 +2255,18 @@ def refresh_single_m3u_account(account_id):
                 group_id = rel.channel_group.id
 
                 # Load the custom properties with the xc_id
-                try:
-                    custom_props = (
-                        json.loads(rel.custom_properties)
-                        if rel.custom_properties
-                        else {}
+                custom_props = rel.custom_properties or {}
+                if "xc_id" in custom_props:
+                    filtered_groups[group_name] = {
+                        "xc_id": custom_props["xc_id"],
+                        "channel_group_id": group_id,
+                    }
+                    logger.debug(
+                        f"Added group {group_name} with xc_id {custom_props['xc_id']}"
                     )
-                    if "xc_id" in custom_props:
-                        filtered_groups[group_name] = {
-                            "xc_id": custom_props["xc_id"],
-                            "channel_group_id": group_id,
-                        }
-                        logger.debug(
-                            f"Added group {group_name} with xc_id {custom_props['xc_id']}"
-                        )
-                    else:
-                        logger.warning(
-                            f"No xc_id found in custom properties for group {group_name}"
-                        )
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.error(
-                        f"Error parsing custom properties for group {group_name}: {str(e)}"
+                else:
+                    logger.warning(
+                        f"No xc_id found in custom properties for group {group_name}"
                     )
 
             logger.info(

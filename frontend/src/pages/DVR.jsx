@@ -44,7 +44,7 @@ const RecordingCard = ({ recording }) => {
     API.deleteRecording(id);
   };
 
-  const customProps = JSON.parse(recording.custom_properties || '{}');
+  const customProps = recording.custom_properties || {};
   let recordingName = 'Custom Recording';
   if (customProps.program) {
     recordingName = customProps.program.title;

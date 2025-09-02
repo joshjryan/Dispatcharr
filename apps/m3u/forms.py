@@ -28,12 +28,8 @@ class M3UAccountForm(forms.ModelForm):
 
         # Set initial value for enable_vod from custom_properties
         if self.instance and self.instance.custom_properties:
-            try:
-                import json
-                custom_props = json.loads(self.instance.custom_properties)
-                self.fields['enable_vod'].initial = custom_props.get('enable_vod', False)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            custom_props = self.instance.custom_properties or {}
+            self.fields['enable_vod'].initial = custom_props.get('enable_vod', False)
 
     def save(self, commit=True):
         instance = super().save(commit=False)
@@ -42,17 +38,11 @@ class M3UAccountForm(forms.ModelForm):
         enable_vod = self.cleaned_data.get('enable_vod', False)
 
         # Parse existing custom_properties
-        custom_props = {}
-        if instance.custom_properties:
-            try:
-                import json
-                custom_props = json.loads(instance.custom_properties)
-            except (json.JSONDecodeError, TypeError):
-                custom_props = {}
+        custom_props = instance.custom_properties or {}
 
         # Update VOD preference
         custom_props['enable_vod'] = enable_vod
-        instance.custom_properties = json.dumps(custom_props)
+        instance.custom_properties = custom_props
 
         if commit:
             instance.save()

@@ -129,12 +129,7 @@ class M3UAccountSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
 
         # Parse custom_properties to get VOD preference
-        custom_props = {}
-        if instance.custom_properties:
-            try:
-                custom_props = json.loads(instance.custom_properties)
-            except (json.JSONDecodeError, TypeError):
-                custom_props = {}
+        custom_props = instance.custom_properties or {}
 
         data["enable_vod"] = custom_props.get("enable_vod", False)
         return data
@@ -144,17 +139,12 @@ class M3UAccountSerializer(serializers.ModelSerializer):
         enable_vod = validated_data.pop("enable_vod", None)
 
         if enable_vod is not None:
-            # Parse existing custom_properties
-            custom_props = {}
-            if instance.custom_properties:
-                try:
-                    custom_props = json.loads(instance.custom_properties)
-                except (json.JSONDecodeError, TypeError):
-                    custom_props = {}
+            # Get existing custom_properties
+            custom_props = instance.custom_properties or {}
 
             # Update VOD preference
             custom_props["enable_vod"] = enable_vod
-            validated_data["custom_properties"] = json.dumps(custom_props)
+            validated_data["custom_properties"] = custom_props
 
         # Pop out channel group memberships so we can handle them manually
         channel_group_data = validated_data.pop("channel_group", [])
@@ -192,16 +182,11 @@ class M3UAccountSerializer(serializers.ModelSerializer):
         enable_vod = validated_data.pop("enable_vod", False)
 
         # Parse existing custom_properties or create new
-        custom_props = {}
-        if validated_data.get("custom_properties"):
-            try:
-                custom_props = json.loads(validated_data["custom_properties"])
-            except (json.JSONDecodeError, TypeError):
-                custom_props = {}
+        custom_props = validated_data.get("custom_properties", {})
 
         # Set VOD preference
         custom_props["enable_vod"] = enable_vod
-        validated_data["custom_properties"] = json.dumps(custom_props)
+        validated_data["custom_properties"] = custom_props
 
         return super().create(validated_data)
 
