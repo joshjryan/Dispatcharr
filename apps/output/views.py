@@ -1090,8 +1090,6 @@ def xc_get_vod_streams(request, user, category_id=None):
             # Fallback - should rarely be needed with proper prefetching
             continue
 
-        relation_custom = relation.custom_properties or {}
-        relation_info = relation_custom.get('basic_data', {})
         streams.append({
             "num": movie.id,
             "name": movie.name,
@@ -1111,7 +1109,7 @@ def xc_get_vod_streams(request, user, category_id=None):
             "is_adult": 0,
             "tmdb_id": movie.tmdb_id or "",
             "imdb_id": movie.imdb_id or "",
-            "trailer": (movie.custom_properties or {}).get('youtube_trailer') or relation_info.get('youtube_trailer') or relation_info.get('trailer', ''),
+            "trailer": (movie.custom_properties or {}).get('youtube_trailer'),
             "category_id": str(relation.category.id) if relation.category else "0",
             "category_ids": [int(relation.category.id)] if relation.category else [],
             "container_extension": relation.container_extension or "mp4",
