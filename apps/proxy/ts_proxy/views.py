@@ -467,9 +467,7 @@ def stream_xc(request, username, password, channel_id):
     extension = pathlib.Path(channel_id).suffix
     channel_id = pathlib.Path(channel_id).stem
 
-    custom_properties = (
-        json.loads(user.custom_properties) if user.custom_properties else {}
-    )
+    custom_properties = user.custom_properties or {}
 
     if "xc_password" not in custom_properties:
         return Response({"error": "Invalid credentials"}, status=401)

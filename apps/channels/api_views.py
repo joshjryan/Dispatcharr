@@ -537,9 +537,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
             name = stream.name
 
         # Check if client provided a channel_number; if not, auto-assign one.
-        stream_custom_props = (
-            json.loads(stream.custom_properties) if stream.custom_properties else {}
-        )
+        stream_custom_props = stream.custom_properties or {}
 
         channel_number = None
         if "tvg-chno" in stream_custom_props:
@@ -734,9 +732,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
             channel_group = stream.channel_group
 
-            stream_custom_props = (
-                json.loads(stream.custom_properties) if stream.custom_properties else {}
-            )
+            stream_custom_props = stream.custom_properties or {}
 
             channel_number = None
             if "tvg-chno" in stream_custom_props:

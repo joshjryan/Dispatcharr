@@ -101,22 +101,18 @@ const M3UGroupFilter = ({ playlist = null, isOpen, onClose }) => {
   const submit = async () => {
     setIsLoading(true);
     try {
-      // Prepare groupStates for API: custom_properties must be stringified
+      // Prepare groupStates for API
       // Send ALL group states like the original code did, don't filter by enabled changes
       const groupSettings = groupStates.map((state) => ({
         ...state,
-        custom_properties: state.custom_properties
-          ? JSON.stringify(state.custom_properties)
-          : undefined,
+        custom_properties: state.custom_properties || undefined,
       }));
 
       const categorySettings = movieCategoryStates
         .concat(seriesCategoryStates)
         .map((state) => ({
           ...state,
-          custom_properties: state.custom_properties
-            ? JSON.stringify(state.custom_properties)
-            : undefined,
+          custom_properties: state.custom_properties || undefined,
         }))
         .filter((state) => state.enabled !== state.original_enabled);
 

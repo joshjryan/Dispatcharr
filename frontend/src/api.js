@@ -761,10 +761,6 @@ export default class API {
   }
 
   static async addPlaylist(values) {
-    if (values.custom_properties) {
-      values.custom_properties = JSON.stringify(values.custom_properties);
-    }
-
     try {
       let body = null;
       if (values.file) {

@@ -211,17 +211,12 @@ class ChannelGroupM3UAccountSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
 
-        custom_props = {}
-        if instance.custom_properties:
-            try:
-                custom_props = json.loads(instance.custom_properties)
-            except (json.JSONDecodeError, TypeError):
-                custom_props = {}
+        custom_props = instance.custom_properties or {}
 
         return data
 
     def to_internal_value(self, data):
-        # Accept both dict and JSON string for custom_properties
+        # Accept both dict and JSON string for custom_properties (for backward compatibility)
         val = data.get("custom_properties")
         if isinstance(val, str):
             try:

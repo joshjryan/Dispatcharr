@@ -288,9 +288,9 @@ export default function TVChannelGuide({ startDate, endDate }) {
       channel: `${channel.id}`,
       start_time: program.start_time,
       end_time: program.end_time,
-      custom_properties: JSON.stringify({
+      custom_properties: {
         program,
-      }),
+      },
     });
     notifications.show({ title: 'Recording scheduled' });
   };
@@ -353,7 +353,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     // Check if this program has a recording
     const programRecording = recordings.find((recording) => {
       if (recording.custom_properties) {
-        const customProps = JSON.parse(recording.custom_properties);
+        const customProps = recording.custom_properties || {};
         if (customProps.program && customProps.program.id == program.id) {
           return true;
         }
@@ -513,7 +513,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     // Check if we have a recording for this program
     const recording = recordings.find((recording) => {
       if (recording.custom_properties) {
-        const customProps = JSON.parse(recording.custom_properties);
+        const customProps = recording.custom_properties || {};
         if (customProps.program && customProps.program.id == program.id) {
           return recording;
         }
