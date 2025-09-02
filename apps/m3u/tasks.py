@@ -517,8 +517,24 @@ def process_groups(account, groups):
         ).select_related('channel_group')
     }
 
+    # Get ALL existing relationships for this account to identify orphaned ones
+    all_existing_relationships = {
+        rel.channel_group.name: rel
+        for rel in ChannelGroupM3UAccount.objects.filter(
+            m3u_account=account
+        ).select_related('channel_group')
+    }
+
     relations_to_create = []
     relations_to_update = []
+    relations_to_delete = []
+
+    # Find orphaned relationships (groups that no longer exist in the source)
+    current_group_names = set(groups.keys())
+    for group_name, rel in all_existing_relationships.items():
+        if group_name not in current_group_names:
+            relations_to_delete.append(rel)
+            logger.debug(f"Marking relationship for deletion: group '{group_name}' no longer exists in source for account {account.id}")
 
     for group in group_objs:
         custom_props = groups.get(group.name, {})
@@ -551,6 +567,37 @@ def process_groups(account, groups):
     if relations_to_update:
         ChannelGroupM3UAccount.objects.bulk_update(relations_to_update, ['custom_properties'])
         logger.info(f"Updated {len(relations_to_update)} existing group relationships with new custom properties for account {account.id}")
+
+    # Delete orphaned relationships
+    if relations_to_delete:
+        ChannelGroupM3UAccount.objects.filter(
+            id__in=[rel.id for rel in relations_to_delete]
+        ).delete()
+        logger.info(f"Deleted {len(relations_to_delete)} orphaned group relationships for account {account.id}: {[rel.channel_group.name for rel in relations_to_delete]}")
+
+        # Check if any of the deleted relationships left groups with no remaining associations
+        orphaned_group_ids = []
+        for rel in relations_to_delete:
+            group = rel.channel_group
+
+            # Check if this group has any remaining M3U account relationships
+            remaining_m3u_relationships = ChannelGroupM3UAccount.objects.filter(
+                channel_group=group
+            ).exists()
+
+            # Check if this group has any direct channels (not through M3U accounts)
+            has_direct_channels = group.related_channels().exists()
+
+            # If no relationships and no direct channels, it's safe to delete
+            if not remaining_m3u_relationships and not has_direct_channels:
+                orphaned_group_ids.append(group.id)
+                logger.debug(f"Group '{group.name}' has no remaining associations and will be deleted")
+
+        # Delete truly orphaned groups
+        if orphaned_group_ids:
+            deleted_groups = list(ChannelGroup.objects.filter(id__in=orphaned_group_ids).values_list('name', flat=True))
+            ChannelGroup.objects.filter(id__in=orphaned_group_ids).delete()
+            logger.info(f"Deleted {len(orphaned_group_ids)} orphaned groups that had no remaining associations: {deleted_groups}")
 
 
 def collect_xc_streams(account_id, enabled_groups):
