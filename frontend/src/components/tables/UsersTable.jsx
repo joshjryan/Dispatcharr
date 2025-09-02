@@ -231,14 +231,10 @@ const UsersTable = () => {
           const userId = row.original.id;
           const isVisible = visiblePasswords[userId];
 
-          // Parse custom_properties and extract xc_password
+          // Extract xc_password from custom_properties
           let password = 'N/A';
-          try {
-            const customProps = JSON.parse(getValue() || '{}');
-            password = customProps.xc_password || 'N/A';
-          } catch {
-            password = 'N/A';
-          }
+          const customProps = getValue() || {};
+          password = customProps.xc_password || 'N/A';
 
           return (
             <Group gap={4} style={{ alignItems: 'center' }}>
