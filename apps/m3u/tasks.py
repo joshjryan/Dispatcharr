@@ -541,10 +541,34 @@ def process_groups(account, groups):
         custom_props_json = json.dumps(custom_props)
 
         if group.name in existing_relationships:
-            # Update existing relationship if custom properties changed
+            # Update existing relationship if xc_id has changed (preserve other custom properties)
             existing_rel = existing_relationships[group.name]
-            if existing_rel.custom_properties != custom_props_json:
-                existing_rel.custom_properties = custom_props_json
+
+            # Parse existing custom properties
+            try:
+                existing_custom_props = (
+                    json.loads(existing_rel.custom_properties)
+                    if existing_rel.custom_properties
+                    else {}
+                )
+            except (json.JSONDecodeError, TypeError):
+                existing_custom_props = {}
+
+            # Get the new xc_id from groups data
+            new_xc_id = custom_props.get("xc_id")
+            existing_xc_id = existing_custom_props.get("xc_id")
+
+            # Only update if xc_id has changed
+            if new_xc_id != existing_xc_id:
+                # Merge new xc_id with existing custom properties to preserve user settings
+                updated_custom_props = existing_custom_props.copy()
+                if new_xc_id is not None:
+                    updated_custom_props["xc_id"] = new_xc_id
+                elif "xc_id" in updated_custom_props:
+                    # Remove xc_id if it's no longer provided (e.g., converting from XC to standard)
+                    del updated_custom_props["xc_id"]
+
+                existing_rel.custom_properties = json.dumps(updated_custom_props)
                 relations_to_update.append(existing_rel)
                 logger.debug(f"Updated custom properties for group '{group.name}' - account {account.id}")
         else:
@@ -566,7 +590,7 @@ def process_groups(account, groups):
     # Bulk update existing relationships
     if relations_to_update:
         ChannelGroupM3UAccount.objects.bulk_update(relations_to_update, ['custom_properties'])
-        logger.info(f"Updated {len(relations_to_update)} existing group relationships with new custom properties for account {account.id}")
+        logger.info(f"Updated {len(relations_to_update)} existing group relationships with new xc_id values for account {account.id}")
 
     # Delete orphaned relationships
     if relations_to_delete:
