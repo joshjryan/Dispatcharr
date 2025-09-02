@@ -1454,9 +1454,12 @@ def xc_get_vod_info(request, user, vod_id):
             raise Http404()
 
     try:
-        movie_relation = M3UMovieRelation.objects.select_related('movie', 'movie__logo').get(**filters)
+        # Order by account priority to get the best relation when multiple exist
+        movie_relation = M3UMovieRelation.objects.select_related('movie', 'movie__logo').filter(**filters).order_by('-m3u_account__priority', 'id').first()
+        if not movie_relation:
+            raise Http404()
         movie = movie_relation.movie
-    except M3UMovieRelation.DoesNotExist:
+    except (M3UMovieRelation.DoesNotExist, M3UMovieRelation.MultipleObjectsReturned):
         raise Http404()
 
     # Initialize basic movie data first
@@ -1615,8 +1618,11 @@ def xc_movie_stream(request, username, password, stream_id, extension):
             return JsonResponse({"error": "No accessible content"}, status=403)
 
     try:
-        movie_relation = M3UMovieRelation.objects.select_related('movie').get(**filters)
-    except M3UMovieRelation.DoesNotExist:
+        # Order by account priority to get the best relation when multiple exist
+        movie_relation = M3UMovieRelation.objects.select_related('movie').filter(**filters).order_by('-m3u_account__priority', 'id').first()
+        if not movie_relation:
+            return JsonResponse({"error": "Movie not found"}, status=404)
+    except (M3UMovieRelation.DoesNotExist, M3UMovieRelation.MultipleObjectsReturned):
         return JsonResponse({"error": "Movie not found"}, status=404)
 
     # Redirect to the VOD proxy endpoint
