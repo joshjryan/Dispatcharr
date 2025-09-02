@@ -29,6 +29,7 @@ class M3UAccount(models.Model):
         max_length=255, unique=True, help_text="Unique name for this M3U account"
     )
     server_url = models.URLField(
+        max_length=1000,
         blank=True,
         null=True,
         help_text="The base URL of the M3U server (optional if a file is uploaded)",
