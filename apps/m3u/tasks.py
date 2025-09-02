@@ -508,20 +508,49 @@ def process_groups(account, groups):
         logger.debug(f"Created {len(created)} groups")
         group_objs.extend(created)
 
-    relations = []
-    for group in group_objs:
-        # Ensure we include the xc_id in the custom_properties
-        custom_props = groups.get(group.name, {})
-        relations.append(
-            ChannelGroupM3UAccount(
-                channel_group=group,
-                m3u_account=account,
-                custom_properties=json.dumps(custom_props),
-                enabled=True,  # Default to enabled
-            )
-        )
+    # Get existing relationships for this account
+    existing_relationships = {
+        rel.channel_group.name: rel
+        for rel in ChannelGroupM3UAccount.objects.filter(
+            m3u_account=account,
+            channel_group__name__in=groups.keys()
+        ).select_related('channel_group')
+    }
 
-    ChannelGroupM3UAccount.objects.bulk_create(relations, ignore_conflicts=True)
+    relations_to_create = []
+    relations_to_update = []
+
+    for group in group_objs:
+        custom_props = groups.get(group.name, {})
+        custom_props_json = json.dumps(custom_props)
+
+        if group.name in existing_relationships:
+            # Update existing relationship if custom properties changed
+            existing_rel = existing_relationships[group.name]
+            if existing_rel.custom_properties != custom_props_json:
+                existing_rel.custom_properties = custom_props_json
+                relations_to_update.append(existing_rel)
+                logger.debug(f"Updated custom properties for group '{group.name}' - account {account.id}")
+        else:
+            # Create new relationship
+            relations_to_create.append(
+                ChannelGroupM3UAccount(
+                    channel_group=group,
+                    m3u_account=account,
+                    custom_properties=custom_props_json,
+                    enabled=True,  # Default to enabled
+                )
+            )
+
+    # Bulk create new relationships
+    if relations_to_create:
+        ChannelGroupM3UAccount.objects.bulk_create(relations_to_create, ignore_conflicts=True)
+        logger.debug(f"Created {len(relations_to_create)} new group relationships for account {account.id}")
+
+    # Bulk update existing relationships
+    if relations_to_update:
+        ChannelGroupM3UAccount.objects.bulk_update(relations_to_update, ['custom_properties'])
+        logger.info(f"Updated {len(relations_to_update)} existing group relationships with new custom properties for account {account.id}")
 
 
 def collect_xc_streams(account_id, enabled_groups):
