@@ -522,7 +522,21 @@ def rehash_streams(keys):
                         existing_stream = Stream.objects.get(id=existing_stream_id)
 
                         # Move any channel relationships from duplicate to existing stream
-                        ChannelStream.objects.filter(stream_id=obj.id).update(stream_id=existing_stream_id)
+                        # Handle potential unique constraint violations
+                        for channel_stream in ChannelStream.objects.filter(stream_id=obj.id):
+                            # Check if this channel already has a relationship with the target stream
+                            existing_relationship = ChannelStream.objects.filter(
+                                channel_id=channel_stream.channel_id,
+                                stream_id=existing_stream_id
+                            ).first()
+
+                            if existing_relationship:
+                                # Relationship already exists, just delete the duplicate
+                                channel_stream.delete()
+                            else:
+                                # Safe to update the relationship
+                                channel_stream.stream_id = existing_stream_id
+                                channel_stream.save()
 
                         # Update the existing stream with the most recent data
                         if obj.updated_at > existing_stream.updated_at:
@@ -546,7 +560,21 @@ def rehash_streams(keys):
                         if existing_stream:
                             # Found duplicate in database - merge the streams
                             # Move any channel relationships from duplicate to existing stream
-                            ChannelStream.objects.filter(stream_id=obj.id).update(stream_id=existing_stream.id)
+                            # Handle potential unique constraint violations
+                            for channel_stream in ChannelStream.objects.filter(stream_id=obj.id):
+                                # Check if this channel already has a relationship with the target stream
+                                existing_relationship = ChannelStream.objects.filter(
+                                    channel_id=channel_stream.channel_id,
+                                    stream_id=existing_stream.id
+                                ).first()
+
+                                if existing_relationship:
+                                    # Relationship already exists, just delete the duplicate
+                                    channel_stream.delete()
+                                else:
+                                    # Safe to update the relationship
+                                    channel_stream.stream_id = existing_stream.id
+                                    channel_stream.save()
 
                             # Update the existing stream with the most recent data
                             if obj.updated_at > existing_stream.updated_at:
