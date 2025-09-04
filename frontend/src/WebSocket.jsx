@@ -170,6 +170,54 @@ export const WebsocketProvider = ({ children }) => {
 
           // Handle standard message format for other event types
           switch (parsedEvent.data?.type) {
+            case 'comskip_status': {
+              const rid = parsedEvent.data.recording_id;
+              const id = `comskip-${rid}`;
+              const status = parsedEvent.data.status;
+              const title = parsedEvent.data.title || 'Recording';
+              if (status === 'started') {
+                notifications.show({
+                  id,
+                  title: 'Removing commercials',
+                  message: `Processing ${title}...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Commercials removed',
+                  message: `${title} — kept ${parsedEvent.data.segments_kept} segments`,
+                  color: 'green.5',
+                  loading: false,
+                  autoClose: 4000,
+                });
+                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+              } else if (status === 'skipped') {
+                notifications.update({
+                  id,
+                  title: 'No commercials to remove',
+                  message: parsedEvent.data.reason || '',
+                  color: 'teal',
+                  loading: false,
+                  autoClose: 3000,
+                });
+                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+              } else if (status === 'error') {
+                notifications.update({
+                  id,
+                  title: 'Comskip failed',
+                  message: parsedEvent.data.reason || 'Unknown error',
+                  color: 'red',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+              }
+              break;
+            }
             case 'epg_file':
               fetchEPGs();
               notifications.show({
@@ -283,11 +331,32 @@ export const WebsocketProvider = ({ children }) => {
               );
               break;
 
+            case 'recording_updated':
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on update:', e);
+              }
+              break;
+
+            case 'recordings_refreshed':
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on refreshed:', e);
+              }
+              break;
+
             case 'recording_started':
               notifications.show({
                 title: 'Recording started!',
                 message: `Started recording channel ${parsedEvent.data.channel}`,
               });
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on start:', e);
+              }
               break;
 
             case 'recording_ended':
@@ -295,6 +364,11 @@ export const WebsocketProvider = ({ children }) => {
                 title: 'Recording finished!',
                 message: `Stopped recording channel ${parsedEvent.data.channel}`,
               });
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on end:', e);
+              }
               break;
 
             case 'epg_fetch_error':

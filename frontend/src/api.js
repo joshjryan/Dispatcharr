@@ -1251,6 +1251,19 @@ export default class API {
     }
   }
 
+  static async createSetting(values) {
+    try {
+      const response = await request(`${host}/api/core/settings/`, {
+        method: 'POST',
+        body: values,
+      });
+      useSettingsStore.getState().updateSetting(response);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to create setting', e);
+    }
+  }
+
   static async getChannelStats(uuid = null) {
     try {
       const response = await request(`${host}/proxy/ts/status`);
@@ -1645,13 +1658,99 @@ export default class API {
 
   static async deleteRecording(id) {
     try {
-      await request(`${host}/api/channels/recordings/${id}/`, {
-        method: 'DELETE',
-      });
-
-      useChannelsStore.getState().fetchRecordings();
+      await request(`${host}/api/channels/recordings/${id}/`, { method: 'DELETE' });
+      // Optimistically remove locally for instant UI update
+      try { useChannelsStore.getState().removeRecording(id); } catch {}
     } catch (e) {
       errorNotification(`Failed to delete recording ${id}`, e);
+    }
+  }
+
+  static async runComskip(recordingId) {
+    try {
+      const resp = await request(`${host}/api/channels/recordings/${recordingId}/comskip/`, {
+        method: 'POST',
+      });
+      // Refresh recordings list to reflect comskip status when done later
+      // This endpoint just queues the task; the websocket/refresh will update eventually
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to run comskip', e);
+      throw e;
+    }
+  }
+
+  // DVR Series Rules
+  static async listSeriesRules() {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/`);
+      return resp?.rules || [];
+    } catch (e) {
+      errorNotification('Failed to load series rules', e);
+      return [];
+    }
+  }
+
+  static async createSeriesRule(values) {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/`, {
+        method: 'POST',
+        body: values,
+      });
+      notifications.show({ title: 'Series rule saved' });
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to save series rule', e);
+      throw e;
+    }
+  }
+
+  static async deleteSeriesRule(tvgId) {
+    try {
+      await request(`${host}/api/channels/series-rules/${tvgId}/`, { method: 'DELETE' });
+      notifications.show({ title: 'Series rule removed' });
+    } catch (e) {
+      errorNotification('Failed to remove series rule', e);
+      throw e;
+    }
+  }
+
+  static async deleteAllUpcomingRecordings() {
+    try {
+      const resp = await request(`${host}/api/channels/recordings/bulk-delete-upcoming/`, {
+        method: 'POST',
+      });
+      notifications.show({ title: `Removed ${resp.removed || 0} upcoming` });
+      useChannelsStore.getState().fetchRecordings();
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to delete upcoming recordings', e);
+      throw e;
+    }
+  }
+
+  static async evaluateSeriesRules(tvgId = null) {
+    try {
+      await request(`${host}/api/channels/series-rules/evaluate/`, {
+        method: 'POST',
+        body: tvgId ? { tvg_id: tvgId } : {},
+      });
+    } catch (e) {
+      errorNotification('Failed to evaluate series rules', e);
+    }
+  }
+
+  static async bulkRemoveSeriesRecordings({ tvg_id, title = null, scope = 'title' }) {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/bulk-remove/`, {
+        method: 'POST',
+        body: { tvg_id, title, scope },
+      });
+      notifications.show({ title: `Removed ${resp.removed || 0} scheduled` });
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to bulk-remove scheduled recordings', e);
+      throw e;
     }
   }
 

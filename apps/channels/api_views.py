@@ -39,7 +39,7 @@ from .serializers import (
     ChannelProfileSerializer,
     RecordingSerializer,
 )
-from .tasks import match_epg_channels
+from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -47,6 +47,7 @@ from apps.epg.models import EPGData
 from apps.vod.models import Movie, Series
 from django.db.models import Q
 from django.http import StreamingHttpResponse, FileResponse, Http404
+from django.utils import timezone
 import mimetypes
 
 from rest_framework.pagination import PageNumberPagination
@@ -1674,7 +1675,299 @@ class RecordingViewSet(viewsets.ModelViewSet):
     serializer_class = RecordingSerializer
 
     def get_permissions(self):
+        # Allow unauthenticated playback of recording files (like other streaming endpoints)
+        if getattr(self, 'action', None) == 'file':
+            return [AllowAny()]
         try:
             return [perm() for perm in permission_classes_by_action[self.action]]
         except KeyError:
             return [Authenticated()]
+
+    @action(detail=True, methods=["post"], url_path="comskip")
+    def comskip(self, request, pk=None):
+        """Trigger comskip processing for this recording."""
+        from .tasks import comskip_process_recording
+        rec = get_object_or_404(Recording, pk=pk)
+        try:
+            comskip_process_recording.delay(rec.id)
+            return Response({"success": True, "queued": True})
+        except Exception as e:
+            return Response({"success": False, "error": str(e)}, status=400)
+
+    @action(detail=True, methods=["get"], url_path="file")
+    def file(self, request, pk=None):
+        """Stream a recorded file with HTTP Range support for seeking."""
+        recording = get_object_or_404(Recording, pk=pk)
+        cp = recording.custom_properties or {}
+        file_path = cp.get("file_path")
+        file_name = cp.get("file_name") or "recording"
+
+        if not file_path or not os.path.exists(file_path):
+            raise Http404("Recording file not found")
+
+        # Guess content type
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".mp4":
+            content_type = "video/mp4"
+        elif ext == ".mkv":
+            content_type = "video/x-matroska"
+        else:
+            content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+
+        file_size = os.path.getsize(file_path)
+        range_header = request.META.get("HTTP_RANGE", "").strip()
+
+        def file_iterator(path, start=0, end=None, chunk_size=8192):
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = (end - start + 1) if end is not None else None
+                while True:
+                    if remaining is not None and remaining <= 0:
+                        break
+                    bytes_to_read = min(chunk_size, remaining) if remaining is not None else chunk_size
+                    data = f.read(bytes_to_read)
+                    if not data:
+                        break
+                    if remaining is not None:
+                        remaining -= len(data)
+                    yield data
+
+        if range_header and range_header.startswith("bytes="):
+            # Parse Range header
+            try:
+                range_spec = range_header.split("=", 1)[1]
+                start_str, end_str = range_spec.split("-", 1)
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else file_size - 1
+                start = max(0, start)
+                end = min(file_size - 1, end)
+                length = end - start + 1
+
+                resp = StreamingHttpResponse(
+                    file_iterator(file_path, start, end),
+                    status=206,
+                    content_type=content_type,
+                )
+                resp["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+                resp["Content-Length"] = str(length)
+                resp["Accept-Ranges"] = "bytes"
+                resp["Content-Disposition"] = f"inline; filename=\"{file_name}\""
+                return resp
+            except Exception:
+                # Fall back to full file if parsing fails
+                pass
+
+        # Full file response
+        response = FileResponse(open(file_path, "rb"), content_type=content_type)
+        response["Content-Length"] = str(file_size)
+        response["Accept-Ranges"] = "bytes"
+        response["Content-Disposition"] = f"inline; filename=\"{file_name}\""
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete the Recording and ensure any active DVR client connection is closed.
+
+        Also removes the associated file(s) from disk if present.
+        """
+        instance = self.get_object()
+
+        # Attempt to close the DVR client connection for this channel if active
+        try:
+            channel_uuid = str(instance.channel.uuid)
+            # Lazy imports to avoid module overhead if proxy isn't used
+            from core.utils import RedisClient
+            from apps.proxy.ts_proxy.redis_keys import RedisKeys
+            from apps.proxy.ts_proxy.services.channel_service import ChannelService
+
+            r = RedisClient.get_client()
+            if r:
+                client_set_key = RedisKeys.clients(channel_uuid)
+                client_ids = r.smembers(client_set_key) or []
+                stopped = 0
+                for raw_id in client_ids:
+                    try:
+                        cid = raw_id.decode("utf-8") if isinstance(raw_id, (bytes, bytearray)) else str(raw_id)
+                        meta_key = RedisKeys.client_metadata(channel_uuid, cid)
+                        ua = r.hget(meta_key, "user_agent")
+                        ua_s = ua.decode("utf-8") if isinstance(ua, (bytes, bytearray)) else (ua or "")
+                        # Identify DVR recording client by its user agent
+                        if ua_s and "Dispatcharr-DVR" in ua_s:
+                            try:
+                                ChannelService.stop_client(channel_uuid, cid)
+                                stopped += 1
+                            except Exception as inner_e:
+                                logger.debug(f"Failed to stop DVR client {cid} for channel {channel_uuid}: {inner_e}")
+                    except Exception as inner:
+                        logger.debug(f"Error while checking client metadata: {inner}")
+                if stopped:
+                    logger.info(f"Stopped {stopped} DVR client(s) for channel {channel_uuid} due to recording cancellation")
+                # If no clients remain after stopping DVR clients, proactively stop the channel
+                try:
+                    remaining = r.scard(client_set_key) or 0
+                except Exception:
+                    remaining = 0
+                if remaining == 0:
+                    try:
+                        ChannelService.stop_channel(channel_uuid)
+                        logger.info(f"Stopped channel {channel_uuid} (no clients remain)")
+                    except Exception as sc_e:
+                        logger.debug(f"Unable to stop channel {channel_uuid}: {sc_e}")
+        except Exception as e:
+            logger.debug(f"Unable to stop DVR clients for cancelled recording: {e}")
+
+        # Capture paths before deletion
+        cp = instance.custom_properties or {}
+        file_path = cp.get("file_path")
+        temp_ts_path = cp.get("_temp_file_path")
+
+        # Perform DB delete first, then try to remove files
+        response = super().destroy(request, *args, **kwargs)
+
+        # Notify frontends to refresh recordings
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed"})
+        except Exception:
+            pass
+
+        library_dir = '/app/data'
+        allowed_roots = ['/data/', library_dir.rstrip('/') + '/']
+
+        def _safe_remove(path: str):
+            if not path or not isinstance(path, str):
+                return
+            try:
+                if any(path.startswith(root) for root in allowed_roots) and os.path.exists(path):
+                    os.remove(path)
+                    logger.info(f"Deleted recording artifact: {path}")
+            except Exception as ex:
+                logger.warning(f"Failed to delete recording artifact {path}: {ex}")
+
+        _safe_remove(file_path)
+        _safe_remove(temp_ts_path)
+
+        return response
+
+
+class BulkDeleteUpcomingRecordingsAPIView(APIView):
+    """Delete all upcoming (future) recordings."""
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def post(self, request):
+        now = timezone.now()
+        qs = Recording.objects.filter(start_time__gt=now)
+        removed = qs.count()
+        qs.delete()
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed", "removed": removed})
+        except Exception:
+            pass
+        return Response({"success": True, "removed": removed})
+
+
+class SeriesRulesAPIView(APIView):
+    """Manage DVR series recording rules (list/add)."""
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def get(self, request):
+        return Response({"rules": CoreSettings.get_dvr_series_rules()})
+
+    def post(self, request):
+        data = request.data or {}
+        tvg_id = str(data.get("tvg_id") or "").strip()
+        mode = (data.get("mode") or "all").lower()
+        title = data.get("title") or ""
+        if mode not in ("all", "new"):
+            return Response({"error": "mode must be 'all' or 'new'"}, status=status.HTTP_400_BAD_REQUEST)
+        if not tvg_id:
+            return Response({"error": "tvg_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        rules = CoreSettings.get_dvr_series_rules()
+        # Upsert by tvg_id
+        existing = next((r for r in rules if str(r.get("tvg_id")) == tvg_id), None)
+        if existing:
+            existing.update({"mode": mode, "title": title})
+        else:
+            rules.append({"tvg_id": tvg_id, "mode": mode, "title": title})
+        CoreSettings.set_dvr_series_rules(rules)
+        # Evaluate immediately for this tvg_id (async)
+        try:
+            evaluate_series_rules.delay(tvg_id)
+        except Exception:
+            pass
+        return Response({"success": True, "rules": rules})
+
+
+class DeleteSeriesRuleAPIView(APIView):
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def delete(self, request, tvg_id):
+        tvg_id = str(tvg_id)
+        rules = [r for r in CoreSettings.get_dvr_series_rules() if str(r.get("tvg_id")) != tvg_id]
+        CoreSettings.set_dvr_series_rules(rules)
+        return Response({"success": True, "rules": rules})
+
+
+class EvaluateSeriesRulesAPIView(APIView):
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def post(self, request):
+        tvg_id = request.data.get("tvg_id")
+        # Run synchronously so UI sees results immediately
+        result = evaluate_series_rules_impl(str(tvg_id)) if tvg_id else evaluate_series_rules_impl()
+        return Response({"success": True, **result})
+
+
+class BulkRemoveSeriesRecordingsAPIView(APIView):
+    """Bulk remove scheduled recordings for a series rule.
+
+    POST body:
+      - tvg_id: required (EPG channel id)
+      - title: optional (series title)
+      - scope: 'title' (default) or 'channel'
+    """
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def post(self, request):
+        from django.utils import timezone
+        tvg_id = str(request.data.get("tvg_id") or "").strip()
+        title = request.data.get("title")
+        scope = (request.data.get("scope") or "title").lower()
+        if not tvg_id:
+            return Response({"error": "tvg_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = Recording.objects.filter(
+            start_time__gte=timezone.now(),
+            custom_properties__program__tvg_id=tvg_id,
+        )
+        if scope == "title" and title:
+            qs = qs.filter(custom_properties__program__title=title)
+
+        count = qs.count()
+        qs.delete()
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed", "removed": count})
+        except Exception:
+            pass
+        return Response({"success": True, "removed": count})

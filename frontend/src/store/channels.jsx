@@ -408,6 +408,28 @@ const useChannelsStore = create((set, get) => ({
     }
   },
 
+  // Optimistically remove a single recording from the local store
+  removeRecording: (id) =>
+    set((state) => {
+      const target = String(id);
+      const current = state.recordings;
+      if (Array.isArray(current)) {
+        return {
+          recordings: current.filter((r) => String(r?.id) !== target),
+        };
+      }
+      if (current && typeof current === 'object') {
+        const next = { ...current };
+        for (const k of Object.keys(next)) {
+          try {
+            if (String(next[k]?.id) === target) delete next[k];
+          } catch {}
+        }
+        return { recordings: next };
+      }
+      return {};
+    }),
+
   // Add helper methods for validation
   canEditChannelGroup: (groupIdOrGroup) => {
     const groupId =

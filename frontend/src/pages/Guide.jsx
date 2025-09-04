@@ -21,6 +21,9 @@ import {
   ActionIcon,
   Tooltip,
   Transition,
+  Modal,
+  Stack,
+  useMantineTheme,
 } from '@mantine/core';
 import { Search, X, Clock, Video, Calendar, Play } from 'lucide-react';
 import './guide.css';
@@ -36,6 +39,7 @@ const MINUTE_INCREMENT = 15; // For positioning programs every 15 min
 const MINUTE_BLOCK_WIDTH = HOUR_WIDTH / (60 / MINUTE_INCREMENT);
 
 export default function TVChannelGuide({ startDate, endDate }) {
+  const theme = useMantineTheme();
   const channels = useChannelsStore((s) => s.channels);
   const recordings = useChannelsStore((s) => s.recordings);
   const channelGroups = useChannelsStore((s) => s.channelGroups);
@@ -50,6 +54,11 @@ export default function TVChannelGuide({ startDate, endDate }) {
   const [now, setNow] = useState(dayjs());
   const [expandedProgramId, setExpandedProgramId] = useState(null); // Track expanded program
   const [recordingForProgram, setRecordingForProgram] = useState(null);
+  const [recordChoiceOpen, setRecordChoiceOpen] = useState(false);
+  const [recordChoiceProgram, setRecordChoiceProgram] = useState(null);
+  const [existingRuleMode, setExistingRuleMode] = useState(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [initialScrollComplete, setInitialScrollComplete] = useState(false);
 
@@ -282,17 +291,62 @@ export default function TVChannelGuide({ startDate, endDate }) {
     );
   }
 
-  const record = async (program) => {
+  const openRecordChoice = async (program) => {
+    setRecordChoiceProgram(program);
+    setRecordChoiceOpen(true);
+    try {
+      const rules = await API.listSeriesRules();
+      // Only treat as existing if the rule matches this specific show's title (or has no title constraint)
+      const rule = (rules || []).find(
+        (r) => String(r.tvg_id) === String(program.tvg_id) && (!r.title || r.title === program.title)
+      );
+      setExistingRuleMode(rule ? rule.mode : null);
+    } catch {}
+    // Also detect if this program already has a scheduled recording
+    try {
+      const rec = (recordings || []).find((r) => r?.custom_properties?.program?.id == program.id);
+      setRecordingForProgram(rec || null);
+    } catch {}
+  };
+
+  const recordOne = async (program) => {
     const channel = findChannelByTvgId(program.tvg_id);
     await API.createRecording({
       channel: `${channel.id}`,
       start_time: program.start_time,
       end_time: program.end_time,
-      custom_properties: {
-        program,
-      },
+      custom_properties: { program },
     });
     notifications.show({ title: 'Recording scheduled' });
+  };
+
+  const saveSeriesRule = async (program, mode) => {
+    await API.createSeriesRule({ tvg_id: program.tvg_id, mode, title: program.title });
+    await API.evaluateSeriesRules(program.tvg_id);
+    // Refresh recordings so icons and DVR reflect new schedules
+    try {
+      await useChannelsStore.getState().fetchRecordings();
+    } catch (e) {
+      console.warn('Failed to refresh recordings after saving series rule', e);
+    }
+    notifications.show({ title: mode === 'new' ? 'Record new episodes' : 'Record all episodes' });
+  };
+
+  const openRules = async () => {
+    setRulesOpen(true);
+    try {
+      const r = await API.listSeriesRules();
+      setRules(r);
+    } catch (e) {
+      // handled by API
+    }
+  };
+
+  const deleteAllUpcoming = async () => {
+    const ok = window.confirm('Delete ALL upcoming recordings?');
+    if (!ok) return;
+    await API.deleteAllUpcomingRecordings();
+    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
   };
 
   // The “Watch Now” click => show floating video
@@ -671,8 +725,8 @@ export default function TVChannelGuide({ startDate, endDate }) {
           {isExpanded && (
             <Box style={{ marginTop: 'auto' }}>
               <Flex gap="md" justify="flex-end" mt={8}>
-                {/* Only show Record button if not already recording AND not in the past */}
-                {!recording && !isPast && (
+                {/* Always show Record for not-past; it opens options (schedule/remove) */}
+                {!isPast && (
                   <Button
                     leftSection={<Calendar size={14} />}
                     variant="filled"
@@ -680,7 +734,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
                     size="xs"
                     onClick={(e) => {
                       e.stopPropagation();
-                      record(program);
+                      openRecordChoice(program);
                     }}
                   >
                     Record
@@ -872,6 +926,19 @@ export default function TVChannelGuide({ startDate, endDate }) {
               Clear Filters
             </Button>
           )}
+
+          <Button
+            variant="filled"
+            size="sm"
+            onClick={openRules}
+            style={{
+              backgroundColor: '#245043',
+              border: '1px solid #3BA882',
+              color: '#FFFFFF',
+            }}
+          >
+            Series Rules
+          </Button>
 
           <Text size="sm" color="dimmed">
             {filteredChannels.length}{' '}
@@ -1298,7 +1365,92 @@ export default function TVChannelGuide({ startDate, endDate }) {
         </Box>
       </Box>
 
-      {/* Modal removed since we're using expanded rows instead */}
+      {/* Record choice modal */}
+      {recordChoiceOpen && recordChoiceProgram && (
+        <Modal
+          opened={recordChoiceOpen}
+          onClose={() => setRecordChoiceOpen(false)}
+          title={`Record: ${recordChoiceProgram.title}`}
+          centered
+          radius="md"
+          zIndex={9999}
+          overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
+          styles={{
+            content: { backgroundColor: '#18181B', color: 'white' },
+            header: { backgroundColor: '#18181B', color: 'white' },
+            title: { color: 'white' },
+          }}
+        >
+          <Flex direction="column" gap="sm">
+            <Button onClick={() => { recordOne(recordChoiceProgram); setRecordChoiceOpen(false); }}>Just this one</Button>
+            <Button variant="light" onClick={() => { saveSeriesRule(recordChoiceProgram, 'all'); setRecordChoiceOpen(false); }}>Every episode</Button>
+            <Button variant="light" onClick={() => { saveSeriesRule(recordChoiceProgram, 'new'); setRecordChoiceOpen(false); }}>New episodes only</Button>
+            {recordingForProgram && (
+              <>
+                <Button color="orange" variant="light" onClick={async () => {
+                  try { await API.deleteRecording(recordingForProgram.id); } catch {}
+                  try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                  setRecordChoiceOpen(false);
+                }}>Remove this recording</Button>
+                <Button color="red" variant="light" onClick={async () => {
+                  try {
+                    await API.bulkRemoveSeriesRecordings({ tvg_id: recordChoiceProgram.tvg_id, title: recordChoiceProgram.title, scope: 'title' });
+                  } catch {}
+                  try { await API.deleteSeriesRule(recordChoiceProgram.tvg_id); } catch {}
+                  try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                  setRecordChoiceOpen(false);
+                }}>Remove this series (scheduled)</Button>
+              </>
+            )}
+            {existingRuleMode && (
+              <Button color="red" variant="subtle" onClick={async () => { await API.deleteSeriesRule(recordChoiceProgram.tvg_id); setExistingRuleMode(null); setRecordChoiceOpen(false); }}>Remove series rule ({existingRuleMode})</Button>
+            )}
+          </Flex>
+        </Modal>
+      )}
+
+      {/* Series rules modal */}
+      {rulesOpen && (
+        <Modal
+          opened={rulesOpen}
+          onClose={() => setRulesOpen(false)}
+          title="Series Recording Rules"
+          centered
+          radius="md"
+          zIndex={9999}
+          overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
+          styles={{
+            content: { backgroundColor: '#18181B', color: 'white' },
+            header: { backgroundColor: '#18181B', color: 'white' },
+            title: { color: 'white' },
+          }}
+        >
+          <Stack gap="sm">
+            {(!rules || rules.length === 0) && (
+              <Text size="sm" c="dimmed">No series rules configured</Text>
+            )}
+            {rules && rules.map((r) => (
+              <Flex key={`${r.tvg_id}-${r.mode}`} justify="space-between" align="center">
+                <Text size="sm">{r.title || r.tvg_id} — {r.mode === 'new' ? 'New episodes' : 'Every episode'}</Text>
+                <Group gap="xs">
+                  <Button size="xs" variant="subtle" onClick={async () => {
+                    await API.evaluateSeriesRules(r.tvg_id);
+                    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                    notifications.show({ title: 'Evaluated', message: 'Checked for episodes' });
+                  }}>Evaluate Now</Button>
+                  <Button size="xs" variant="light" color="orange" onClick={async () => {
+                    await API.bulkRemoveSeriesRecordings({ tvg_id: r.tvg_id, title: r.title, scope: 'title' });
+                    try { await API.deleteSeriesRule(r.tvg_id); } catch {}
+                    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                    const updated = await API.listSeriesRules();
+                    setRules(updated);
+                  }}>Remove this series (scheduled)</Button>
+                </Group>
+              </Flex>
+            ))}
+          </Stack>
+        </Modal>
+      )}
     </Box>
   );
 }

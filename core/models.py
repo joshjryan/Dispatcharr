@@ -151,6 +151,13 @@ PREFERRED_REGION_KEY = slugify("Preferred Region")
 AUTO_IMPORT_MAPPED_FILES = slugify("Auto-Import Mapped Files")
 NETWORK_ACCESS = slugify("Network Access")
 PROXY_SETTINGS_KEY = slugify("Proxy Settings")
+DVR_TV_TEMPLATE_KEY = slugify("DVR TV Template")
+DVR_MOVIE_TEMPLATE_KEY = slugify("DVR Movie Template")
+DVR_SERIES_RULES_KEY = slugify("DVR Series Rules")
+DVR_TV_FALLBACK_DIR_KEY = slugify("DVR TV Fallback Dir")
+DVR_TV_FALLBACK_TEMPLATE_KEY = slugify("DVR TV Fallback Template")
+DVR_MOVIE_FALLBACK_TEMPLATE_KEY = slugify("DVR Movie Fallback Template")
+DVR_COMSKIP_ENABLED_KEY = slugify("DVR Comskip Enabled")
 
 
 class CoreSettings(models.Model):
@@ -213,3 +220,80 @@ class CoreSettings(models.Model):
                 "channel_shutdown_delay": 0,
                 "channel_init_grace_period": 5,
             }
+
+    @classmethod
+    def get_dvr_tv_template(cls):
+        try:
+            return cls.objects.get(key=DVR_TV_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            # Default: relative to recordings root (/data/recordings)
+            return "TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
+
+    @classmethod
+    def get_dvr_movie_template(cls):
+        try:
+            return cls.objects.get(key=DVR_MOVIE_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            return "Movies/{title} ({year}).mkv"
+
+    @classmethod
+    def get_dvr_tv_fallback_dir(cls):
+        """Folder name to use when a TV episode has no season/episode information.
+        Defaults to 'TV_Show' to match existing behavior but can be overridden in settings.
+        """
+        try:
+            return cls.objects.get(key=DVR_TV_FALLBACK_DIR_KEY).value or "TV_Shows"
+        except cls.DoesNotExist:
+            return "TV_Shows"
+
+    @classmethod
+    def get_dvr_tv_fallback_template(cls):
+        """Full path template used when season/episode are missing for a TV airing."""
+        try:
+            return cls.objects.get(key=DVR_TV_FALLBACK_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            # default requested by user
+            return "Recordings/TV_Shows/{show}/{start}.mkv"
+
+    @classmethod
+    def get_dvr_movie_fallback_template(cls):
+        """Full path template used when movie metadata is incomplete."""
+        try:
+            return cls.objects.get(key=DVR_MOVIE_FALLBACK_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            return "Recordings/Movies/{start}.mkv"
+
+    @classmethod
+    def get_dvr_comskip_enabled(cls):
+        """Return boolean-like string value ('true'/'false') for comskip enablement."""
+        try:
+            val = cls.objects.get(key=DVR_COMSKIP_ENABLED_KEY).value
+            return str(val).lower() in ("1", "true", "yes", "on")
+        except cls.DoesNotExist:
+            return False
+
+    @classmethod
+    def get_dvr_series_rules(cls):
+        """Return list of series recording rules. Each: {tvg_id, title, mode: 'all'|'new'}"""
+        import json
+        try:
+            raw = cls.objects.get(key=DVR_SERIES_RULES_KEY).value
+            rules = json.loads(raw) if raw else []
+            if isinstance(rules, list):
+                return rules
+            return []
+        except cls.DoesNotExist:
+            # Initialize empty if missing
+            cls.objects.create(key=DVR_SERIES_RULES_KEY, name="DVR Series Rules", value="[]")
+            return []
+
+    @classmethod
+    def set_dvr_series_rules(cls, rules):
+        import json
+        try:
+            obj, _ = cls.objects.get_or_create(key=DVR_SERIES_RULES_KEY, defaults={"name": "DVR Series Rules", "value": "[]"})
+            obj.value = json.dumps(rules)
+            obj.save(update_fields=["value"])
+            return rules
+        except Exception:
+            return rules
