@@ -151,6 +151,9 @@ PREFERRED_REGION_KEY = slugify("Preferred Region")
 AUTO_IMPORT_MAPPED_FILES = slugify("Auto-Import Mapped Files")
 NETWORK_ACCESS = slugify("Network Access")
 PROXY_SETTINGS_KEY = slugify("Proxy Settings")
+DVR_TV_TEMPLATE_KEY = slugify("DVR TV Template")
+DVR_MOVIE_TEMPLATE_KEY = slugify("DVR Movie Template")
+DVR_SERIES_RULES_KEY = slugify("DVR Series Rules")
 
 
 class CoreSettings(models.Model):
@@ -213,3 +216,44 @@ class CoreSettings(models.Model):
                 "channel_shutdown_delay": 0,
                 "channel_init_grace_period": 5,
             }
+
+    @classmethod
+    def get_dvr_tv_template(cls):
+        try:
+            return cls.objects.get(key=DVR_TV_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            # Default: relative to recordings root (/data/recordings)
+            return "TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
+
+    @classmethod
+    def get_dvr_movie_template(cls):
+        try:
+            return cls.objects.get(key=DVR_MOVIE_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            return "Movies/{title} ({year}).mkv"
+
+    @classmethod
+    def get_dvr_series_rules(cls):
+        """Return list of series recording rules. Each: {tvg_id, title, mode: 'all'|'new'}"""
+        import json
+        try:
+            raw = cls.objects.get(key=DVR_SERIES_RULES_KEY).value
+            rules = json.loads(raw) if raw else []
+            if isinstance(rules, list):
+                return rules
+            return []
+        except cls.DoesNotExist:
+            # Initialize empty if missing
+            cls.objects.create(key=DVR_SERIES_RULES_KEY, name="DVR Series Rules", value="[]")
+            return []
+
+    @classmethod
+    def set_dvr_series_rules(cls, rules):
+        import json
+        try:
+            obj, _ = cls.objects.get_or_create(key=DVR_SERIES_RULES_KEY, defaults={"name": "DVR Series Rules", "value": "[]"})
+            obj.value = json.dumps(rules)
+            obj.save(update_fields=["value"])
+            return rules
+        except Exception:
+            return rules

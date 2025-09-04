@@ -1655,6 +1655,80 @@ export default class API {
     }
   }
 
+  // DVR Series Rules
+  static async listSeriesRules() {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/`);
+      return resp?.rules || [];
+    } catch (e) {
+      errorNotification('Failed to load series rules', e);
+      return [];
+    }
+  }
+
+  static async createSeriesRule(values) {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/`, {
+        method: 'POST',
+        body: values,
+      });
+      notifications.show({ title: 'Series rule saved' });
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to save series rule', e);
+      throw e;
+    }
+  }
+
+  static async deleteSeriesRule(tvgId) {
+    try {
+      await request(`${host}/api/channels/series-rules/${tvgId}/`, { method: 'DELETE' });
+      notifications.show({ title: 'Series rule removed' });
+    } catch (e) {
+      errorNotification('Failed to remove series rule', e);
+      throw e;
+    }
+  }
+
+  static async deleteAllUpcomingRecordings() {
+    try {
+      const resp = await request(`${host}/api/channels/recordings/bulk-delete-upcoming/`, {
+        method: 'POST',
+      });
+      notifications.show({ title: `Removed ${resp.removed || 0} upcoming` });
+      useChannelsStore.getState().fetchRecordings();
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to delete upcoming recordings', e);
+      throw e;
+    }
+  }
+
+  static async evaluateSeriesRules(tvgId = null) {
+    try {
+      await request(`${host}/api/channels/series-rules/evaluate/`, {
+        method: 'POST',
+        body: tvgId ? { tvg_id: tvgId } : {},
+      });
+    } catch (e) {
+      errorNotification('Failed to evaluate series rules', e);
+    }
+  }
+
+  static async bulkRemoveSeriesRecordings({ tvg_id, title = null, scope = 'title' }) {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/bulk-remove/`, {
+        method: 'POST',
+        body: { tvg_id, title, scope },
+      });
+      notifications.show({ title: `Removed ${resp.removed || 0} scheduled` });
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to bulk-remove scheduled recordings', e);
+      throw e;
+    }
+  }
+
   static async switchStream(channelId, streamId) {
     try {
       const response = await request(

@@ -283,11 +283,32 @@ export const WebsocketProvider = ({ children }) => {
               );
               break;
 
+            case 'recording_updated':
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on update:', e);
+              }
+              break;
+
+            case 'recordings_refreshed':
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on refreshed:', e);
+              }
+              break;
+
             case 'recording_started':
               notifications.show({
                 title: 'Recording started!',
                 message: `Started recording channel ${parsedEvent.data.channel}`,
               });
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on start:', e);
+              }
               break;
 
             case 'recording_ended':
@@ -295,6 +316,11 @@ export const WebsocketProvider = ({ children }) => {
                 title: 'Recording finished!',
                 message: `Stopped recording channel ${parsedEvent.data.channel}`,
               });
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on end:', e);
+              }
               break;
 
             case 'epg_fetch_error':

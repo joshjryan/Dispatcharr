@@ -403,6 +403,36 @@ const SettingsPage = () => {
 
           {authUser.user_level == USER_LEVELS.ADMIN && (
             <>
+              <Accordion.Item value="dvr-settings">
+                <Accordion.Control>DVR Recording Paths</Accordion.Control>
+                <Accordion.Panel>
+                  <form onSubmit={form.onSubmit(onSubmit)}>
+                    <Stack gap="sm">
+                      <TextInput
+                        label="TV Path Template"
+                        description="Supports {show}, {season}, {episode}, {sub_title}, {channel}, {year}, {start}, {end}. Use format specifiers like {season:02d}. Relative paths are under your library dir."
+                        placeholder="Recordings/TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
+                        {...form.getInputProps('dvr-tv-template')}
+                        key={form.key('dvr-tv-template')}
+                        id={settings['dvr-tv-template']?.id || 'dvr-tv-template'}
+                        name={settings['dvr-tv-template']?.key || 'dvr-tv-template'}
+                      />
+                      <TextInput
+                        label="Movie Path Template"
+                        description="Supports {title}, {year}, {channel}, {start}, {end}. Relative paths are under your library dir."
+                        placeholder="Recordings/Movies/{title} ({year}).mkv"
+                        {...form.getInputProps('dvr-movie-template')}
+                        key={form.key('dvr-movie-template')}
+                        id={settings['dvr-movie-template']?.id || 'dvr-movie-template'}
+                        name={settings['dvr-movie-template']?.key || 'dvr-movie-template'}
+                      />
+                      <Flex mih={50} gap="xs" justify="flex-end" align="flex-end">
+                        <Button type="submit" variant="default">Save</Button>
+                      </Flex>
+                    </Stack>
+                  </form>
+                </Accordion.Panel>
+              </Accordion.Item>
               <Accordion.Item value="stream-settings">
                 <Accordion.Control>Stream Settings</Accordion.Control>
                 <Accordion.Panel>

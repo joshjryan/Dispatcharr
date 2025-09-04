@@ -188,6 +188,12 @@ def refresh_epg_data(source_id):
             fetch_schedules_direct(source)
 
         source.save(update_fields=['updated_at'])
+        # After successful EPG refresh, evaluate DVR series rules to schedule new episodes
+        try:
+            from apps.channels.tasks import evaluate_series_rules
+            evaluate_series_rules.delay()
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Error in refresh_epg_data for source {source_id}: {e}", exc_info=True)
         try:
