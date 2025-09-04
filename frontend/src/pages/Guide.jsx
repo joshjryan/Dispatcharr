@@ -23,6 +23,7 @@ import {
   Transition,
   Modal,
   Stack,
+  useMantineTheme,
 } from '@mantine/core';
 import { Search, X, Clock, Video, Calendar, Play } from 'lucide-react';
 import './guide.css';
@@ -38,6 +39,7 @@ const MINUTE_INCREMENT = 15; // For positioning programs every 15 min
 const MINUTE_BLOCK_WIDTH = HOUR_WIDTH / (60 / MINUTE_INCREMENT);
 
 export default function TVChannelGuide({ startDate, endDate }) {
+  const theme = useMantineTheme();
   const channels = useChannelsStore((s) => s.channels);
   const recordings = useChannelsStore((s) => s.recordings);
   const channelGroups = useChannelsStore((s) => s.channelGroups);
@@ -294,7 +296,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
     setRecordChoiceOpen(true);
     try {
       const rules = await API.listSeriesRules();
-      const rule = (rules || []).find((r) => String(r.tvg_id) === String(program.tvg_id));
+      // Only treat as existing if the rule matches this specific show's title (or has no title constraint)
+      const rule = (rules || []).find(
+        (r) => String(r.tvg_id) === String(program.tvg_id) && (!r.title || r.title === program.title)
+      );
       setExistingRuleMode(rule ? rule.mode : null);
     } catch {}
     // Also detect if this program already has a scheduled recording
@@ -922,11 +927,17 @@ export default function TVChannelGuide({ startDate, endDate }) {
             </Button>
           )}
 
-          <Button variant="light" size="sm" onClick={openRules}>
+          <Button
+            variant="filled"
+            size="sm"
+            onClick={openRules}
+            style={{
+              backgroundColor: '#245043',
+              border: '1px solid #3BA882',
+              color: '#FFFFFF',
+            }}
+          >
             Series Rules
-          </Button>
-          <Button variant="light" color="red" size="sm" onClick={deleteAllUpcoming}>
-            Delete upcoming
           </Button>
 
           <Text size="sm" color="dimmed">
@@ -1366,7 +1377,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
           overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
           styles={{
             content: { backgroundColor: '#18181B', color: 'white' },
-            header: { backgroundColor: '#18181B', color: 'white', borderBottom: '1px solid #27272A' },
+            header: { backgroundColor: '#18181B', color: 'white' },
             title: { color: 'white' },
           }}
         >
@@ -1384,8 +1395,9 @@ export default function TVChannelGuide({ startDate, endDate }) {
                 <Button color="red" variant="light" onClick={async () => {
                   try {
                     await API.bulkRemoveSeriesRecordings({ tvg_id: recordChoiceProgram.tvg_id, title: recordChoiceProgram.title, scope: 'title' });
-                    await useChannelsStore.getState().fetchRecordings();
                   } catch {}
+                  try { await API.deleteSeriesRule(recordChoiceProgram.tvg_id); } catch {}
+                  try { await useChannelsStore.getState().fetchRecordings(); } catch {}
                   setRecordChoiceOpen(false);
                 }}>Remove this series (scheduled)</Button>
               </>
@@ -1409,7 +1421,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
           overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
           styles={{
             content: { backgroundColor: '#18181B', color: 'white' },
-            header: { backgroundColor: '#18181B', color: 'white', borderBottom: '1px solid #27272A' },
+            header: { backgroundColor: '#18181B', color: 'white' },
             title: { color: 'white' },
           }}
         >
@@ -1428,18 +1440,11 @@ export default function TVChannelGuide({ startDate, endDate }) {
                   }}>Evaluate Now</Button>
                   <Button size="xs" variant="light" color="orange" onClick={async () => {
                     await API.bulkRemoveSeriesRecordings({ tvg_id: r.tvg_id, title: r.title, scope: 'title' });
+                    try { await API.deleteSeriesRule(r.tvg_id); } catch {}
                     try { await useChannelsStore.getState().fetchRecordings(); } catch {}
-                  }}>Remove this series (scheduled)</Button>
-                  <Button size="xs" variant="light" color="red" onClick={async () => {
-                    await API.bulkRemoveSeriesRecordings({ tvg_id: r.tvg_id, scope: 'channel' });
-                    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
-                  }}>Remove all on channel</Button>
-                  <Button size="xs" color="red" variant="light" onClick={async () => {
-                    await API.deleteSeriesRule(r.tvg_id);
                     const updated = await API.listSeriesRules();
                     setRules(updated);
-                    notifications.show({ title: 'Rule removed' });
-                  }}>Remove</Button>
+                  }}>Remove this series (scheduled)</Button>
                 </Group>
               </Flex>
             ))}
