@@ -154,6 +154,9 @@ PROXY_SETTINGS_KEY = slugify("Proxy Settings")
 DVR_TV_TEMPLATE_KEY = slugify("DVR TV Template")
 DVR_MOVIE_TEMPLATE_KEY = slugify("DVR Movie Template")
 DVR_SERIES_RULES_KEY = slugify("DVR Series Rules")
+DVR_TV_FALLBACK_DIR_KEY = slugify("DVR TV Fallback Dir")
+DVR_TV_FALLBACK_TEMPLATE_KEY = slugify("DVR TV Fallback Template")
+DVR_MOVIE_FALLBACK_TEMPLATE_KEY = slugify("DVR Movie Fallback Template")
 
 
 class CoreSettings(models.Model):
@@ -231,6 +234,33 @@ class CoreSettings(models.Model):
             return cls.objects.get(key=DVR_MOVIE_TEMPLATE_KEY).value
         except cls.DoesNotExist:
             return "Movies/{title} ({year}).mkv"
+
+    @classmethod
+    def get_dvr_tv_fallback_dir(cls):
+        """Folder name to use when a TV episode has no season/episode information.
+        Defaults to 'TV_Show' to match existing behavior but can be overridden in settings.
+        """
+        try:
+            return cls.objects.get(key=DVR_TV_FALLBACK_DIR_KEY).value or "TV_Shows"
+        except cls.DoesNotExist:
+            return "TV_Shows"
+
+    @classmethod
+    def get_dvr_tv_fallback_template(cls):
+        """Full path template used when season/episode are missing for a TV airing."""
+        try:
+            return cls.objects.get(key=DVR_TV_FALLBACK_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            # default requested by user
+            return "Recordings/TV_Shows/{show}/{start}.mkv"
+
+    @classmethod
+    def get_dvr_movie_fallback_template(cls):
+        """Full path template used when movie metadata is incomplete."""
+        try:
+            return cls.objects.get(key=DVR_MOVIE_FALLBACK_TEMPLATE_KEY).value
+        except cls.DoesNotExist:
+            return "Recordings/Movies/{start}.mkv"
 
     @classmethod
     def get_dvr_series_rules(cls):

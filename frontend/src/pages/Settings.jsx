@@ -72,6 +72,10 @@ const SettingsPage = () => {
       'preferred-region': '',
       'auto-import-mapped-files': true,
       'm3u-hash-key': [],
+      'dvr-tv-template': '',
+      'dvr-movie-template': '',
+      'dvr-tv-fallback-template': '',
+      'dvr-movie-fallback-template': '',
     },
 
     validate: {
@@ -171,8 +175,13 @@ const SettingsPage = () => {
     let m3uHashKeyChanged = false;
 
     for (const settingKey in values) {
-      // If the user changed the setting's value from what's in the DB:
-      if (String(values[settingKey]) !== String(settings[settingKey].value)) {
+      // Only compare against existing value if the setting exists
+      const existing = settings[settingKey];
+      if (!existing) {
+        // Create new setting on save
+        changedSettings[settingKey] = `${values[settingKey]}`;
+      } else if (String(values[settingKey]) !== String(existing.value)) {
+        // If the user changed the setting's value from what's in the DB:
         changedSettings[settingKey] = `${values[settingKey]}`;
 
         // Check if M3U hash key was changed
@@ -189,12 +198,21 @@ const SettingsPage = () => {
       return;
     }
 
-    // Update each changed setting in the backend
+    // Update each changed setting in the backend (create if missing)
     for (const updatedKey in changedSettings) {
-      await API.updateSetting({
-        ...settings[updatedKey],
-        value: changedSettings[updatedKey],
-      });
+      const existing = settings[updatedKey];
+      if (existing && existing.id) {
+        await API.updateSetting({
+          ...existing,
+          value: changedSettings[updatedKey],
+        });
+      } else {
+        await API.createSetting({
+          key: updatedKey,
+          name: updatedKey.replace(/-/g, ' '),
+          value: changedSettings[updatedKey],
+        });
+      }
     }
   };
 
@@ -418,6 +436,15 @@ const SettingsPage = () => {
                         name={settings['dvr-tv-template']?.key || 'dvr-tv-template'}
                       />
                       <TextInput
+                        label="TV Fallback Template"
+                        description="Template used when an episode has no season/episode. Supports {show}, {start}, {end}, {channel}, {year}."
+                        placeholder="Recordings/TV_Shows/{show}/{start}.mkv"
+                        {...form.getInputProps('dvr-tv-fallback-template')}
+                        key={form.key('dvr-tv-fallback-template')}
+                        id={settings['dvr-tv-fallback-template']?.id || 'dvr-tv-fallback-template'}
+                        name={settings['dvr-tv-fallback-template']?.key || 'dvr-tv-fallback-template'}
+                      />
+                      <TextInput
                         label="Movie Path Template"
                         description="Supports {title}, {year}, {channel}, {start}, {end}. Relative paths are under your library dir."
                         placeholder="Recordings/Movies/{title} ({year}).mkv"
@@ -425,6 +452,15 @@ const SettingsPage = () => {
                         key={form.key('dvr-movie-template')}
                         id={settings['dvr-movie-template']?.id || 'dvr-movie-template'}
                         name={settings['dvr-movie-template']?.key || 'dvr-movie-template'}
+                      />
+                      <TextInput
+                        label="Movie Fallback Template"
+                        description="Template used when movie metadata is incomplete. Supports {start}, {end}, {channel}."
+                        placeholder="Recordings/Movies/{start}.mkv"
+                        {...form.getInputProps('dvr-movie-fallback-template')}
+                        key={form.key('dvr-movie-fallback-template')}
+                        id={settings['dvr-movie-fallback-template']?.id || 'dvr-movie-fallback-template'}
+                        name={settings['dvr-movie-fallback-template']?.key || 'dvr-movie-fallback-template'}
                       />
                       <Flex mih={50} gap="xs" justify="flex-end" align="flex-end">
                         <Button type="submit" variant="default">Save</Button>

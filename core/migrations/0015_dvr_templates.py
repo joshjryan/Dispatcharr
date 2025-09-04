@@ -8,8 +8,12 @@ def add_dvr_templates(apps, schema_editor):
     CoreSettings = apps.get_model("core", "CoreSettings")
 
     defaults = [
-        (slugify("DVR TV Template"), "DVR TV Template", "TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"),
-        (slugify("DVR Movie Template"), "DVR Movie Template", "Movies/{title} ({year}).mkv"),
+        (slugify("DVR TV Template"), "DVR TV Template", "Recordings/TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"),
+        (slugify("DVR Movie Template"), "DVR Movie Template", "Recordings/Movies/{title} ({year}).mkv"),
+        (slugify("DVR TV Fallback Template"), "DVR TV Fallback Template", "Recordings/TV_Shows/{show}/{start}.mkv"),
+        (slugify("DVR Movie Fallback Template"), "DVR Movie Fallback Template", "Recordings/Movies/{start}.mkv"),
+        # Legacy support (older builds looked up a fallback folder name)
+        (slugify("DVR TV Fallback Dir"), "DVR TV Fallback Dir", "TV_Shows"),
     ]
 
     for key, name, value in defaults:

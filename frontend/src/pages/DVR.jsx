@@ -66,6 +66,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
   const customProps = recording.custom_properties || {};
   const program = customProps.program || {};
   const recordingName = program.title || 'Custom Recording';
+  const subTitle = program.sub_title || '';
   const description = program.description || customProps.description || '';
   const start = dayjs(recording.start_time);
   const end = dayjs(recording.end_time);
@@ -181,7 +182,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
     <Modal
       opened={opened}
       onClose={onClose}
-      title={isSeriesGroup ? `Series: ${recordingName}` : recordingName}
+      title={isSeriesGroup ? `Series: ${recordingName}` : `${recordingName}${program.sub_title ? ` - ${program.sub_title}` : ''}`}
       size="lg"
       centered
       radius="md"
@@ -189,7 +190,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
       overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
       styles={{
         content: { backgroundColor: '#18181B', color: 'white' },
-        header: { backgroundColor: '#18181B', color: 'white', borderBottom: '1px solid #27272A' },
+        header: { backgroundColor: '#18181B', color: 'white' },
         title: { color: 'white' },
       }}
     >
@@ -285,6 +286,7 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
   const channels = useChannelsStore((s) => s.channels);
   const env_mode = useSettingsStore((s) => s.environment.env_mode);
   const showVideo = useVideoStore((s) => s.showVideo);
+  const fetchRecordings = useChannelsStore((s) => s.fetchRecordings);
 
   const channel = channels?.[recording.channel];
 
@@ -295,6 +297,7 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
   const customProps = recording.custom_properties || {};
   const program = customProps.program || {};
   const recordingName = program.title || 'Custom Recording';
+  const subTitle = program.sub_title || '';
   const description = program.description || customProps.description || '';
 
   // Poster or channel logo
@@ -341,6 +344,47 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
     showVideo(fileUrl, 'vod', { name: recordingName, logo: { url: posterUrl } });
   };
 
+  // Cancel handling for series groups
+  const [cancelOpen, setCancelOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const handleCancelClick = (e) => {
+    e.stopPropagation();
+    if (isSeriesGroup) setCancelOpen(true);
+    else deleteRecording(recording.id);
+  };
+
+  const seriesInfo = React.useMemo(() => {
+    const cp = customProps || {};
+    const pr = cp.program || {};
+    return { tvg_id: pr.tvg_id, title: pr.title };
+  }, [customProps]);
+
+  const removeUpcomingOnly = async () => {
+    try {
+      setBusy(true);
+      await API.deleteRecording(recording.id);
+    } finally {
+      setBusy(false);
+      setCancelOpen(false);
+      try { await fetchRecordings(); } catch {}
+    }
+  };
+
+  const removeSeriesAndRule = async () => {
+    try {
+      setBusy(true);
+      const { tvg_id, title } = seriesInfo;
+      if (tvg_id) {
+        try { await API.bulkRemoveSeriesRecordings({ tvg_id, title, scope: 'title' }); } catch {}
+        try { await API.deleteSeriesRule(tvg_id); } catch {}
+      }
+    } finally {
+      setBusy(false);
+      setCancelOpen(false);
+      try { await fetchRecordings(); } catch {}
+    }
+  };
+
   const MainCard = (
     <Card
       shadow="sm"
@@ -357,20 +401,24 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
       onClick={() => onOpenDetails?.(recording)}
     >
       <Flex justify="space-between" align="center" style={{ paddingBottom: 8 }}>
-        <Group gap={8}>
+        <Group gap={8} style={{ flex: 1, minWidth: 0 }}>
           <Badge color={isInterrupted ? 'red.7' : isInProgress ? 'red.6' : isUpcoming ? 'yellow.6' : 'gray.6'}>
             {isInterrupted ? 'Interrupted' : isInProgress ? 'Recording' : isUpcoming ? 'Scheduled' : 'Completed'}
           </Badge>
           {isInterrupted && <AlertTriangle size={16} color="#ffa94d" />}
-          <Text fw={600} lineClamp={1} title={recordingName}>
-            {recordingName}
-          </Text>
-          {isSeriesGroup && (
-            <Badge color="teal" variant="filled">Series</Badge>
-          )}
-          {seLabel && !isSeriesGroup && (
-            <Badge color="gray" variant="light">{seLabel}</Badge>
-          )}
+          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+            <Group gap={8} wrap="nowrap">
+              <Text fw={600} lineClamp={1} title={recordingName}>
+                {recordingName}
+              </Text>
+              {isSeriesGroup && (
+                <Badge color="teal" variant="filled">Series</Badge>
+              )}
+              {seLabel && !isSeriesGroup && (
+                <Badge color="gray" variant="light">{seLabel}</Badge>
+              )}
+            </Group>
+          </Stack>
         </Group>
 
         <Center>
@@ -378,7 +426,7 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
             <ActionIcon
               variant="transparent"
               color="red.9"
-              onClick={(e) => { e.stopPropagation(); deleteRecording(recording.id); }}
+              onClick={handleCancelClick}
             >
               <SquareX size="20" />
             </ActionIcon>
@@ -397,6 +445,12 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
           fallbackSrc="/logo.png"
         />
         <Stack gap={6} style={{ flex: 1 }}>
+          {!isSeriesGroup && subTitle && (
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">Episode</Text>
+              <Text size="sm" fw={700} title={subTitle}>{subTitle}</Text>
+            </Group>
+          )}
           <Group justify="space-between">
             <Text size="sm" c="dimmed">
               Channel
@@ -408,7 +462,7 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
 
           <Group justify="space-between">
             <Text size="sm" c="dimmed">
-              Time
+              {isSeriesGroup ? 'Next recording' : 'Time'}
             </Text>
             <Text size="sm">{start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}</Text>
           </Group>
@@ -456,6 +510,15 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
   // Stacked look for series groups: render two shadow layers behind the main card
   return (
     <Box style={{ position: 'relative' }}>
+      <Modal opened={cancelOpen} onClose={() => setCancelOpen(false)} title="Cancel Series" centered size="md" zIndex={9999}>
+        <Stack gap="sm">
+          <Text>This is a series rule. What would you like to cancel?</Text>
+          <Group justify="flex-end">
+            <Button variant="default" loading={busy} onClick={removeUpcomingOnly}>Only this upcoming</Button>
+            <Button color="red" loading={busy} onClick={removeSeriesAndRule}>Entire series + rule</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <Box
         style={{
           position: 'absolute',

@@ -500,18 +500,35 @@ def _build_output_paths(channel, program, start_time, end_time):
     }
 
     template = CoreSettings.get_dvr_movie_template() if is_movie else CoreSettings.get_dvr_tv_template()
-    # If TV and no season/episode info, use datetime fallback under TVShow/<show>/<start>.mkv
+    # Build relative path from templates with smart fallbacks
     rel_path = None
     if not is_movie and (season == 0 or episode == 0):
-        # User-requested fallback when S/E missing
-        rel_path = f"TVShow/{show}/{values['start']}.mkv"
+        # TV fallback template when S/E are missing
+        try:
+            tv_fb = CoreSettings.get_dvr_tv_fallback_template()
+            rel_path = tv_fb.format(**values)
+        except Exception:
+            # Older setting support
+            try:
+                fallback_root = CoreSettings.get_dvr_tv_fallback_dir()
+            except Exception:
+                fallback_root = "TV_Shows"
+            rel_path = f"{fallback_root}/{show}/{values['start']}.mkv"
     if not rel_path:
-        # Allow templates that omit extension; ensure .mkv
         try:
             rel_path = template.format(**values)
         except Exception:
-            # Fallback minimal
-            rel_path = f"Recordings/{show}/S{season:02d}E{episode:02d}.mkv"
+            rel_path = None
+    # Movie-specific fallback if formatting failed or title missing
+    if is_movie and not rel_path:
+        try:
+            m_fb = CoreSettings.get_dvr_movie_fallback_template()
+            rel_path = m_fb.format(**values)
+        except Exception:
+            rel_path = f"Movies/{values['start']}.mkv"
+    # As a last resort for TV
+    if not is_movie and not rel_path:
+        rel_path = f"TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
     # If template contains a leading "Recordings/" (legacy), drop it because we already root at recordings dir
     if rel_path.startswith(('Recordings/', 'recordings/')):
         rel_path = rel_path.split('/', 1)[1]

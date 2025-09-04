@@ -1251,6 +1251,19 @@ export default class API {
     }
   }
 
+  static async createSetting(values) {
+    try {
+      const response = await request(`${host}/api/core/settings/`, {
+        method: 'POST',
+        body: values,
+      });
+      useSettingsStore.getState().updateSetting(response);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to create setting', e);
+    }
+  }
+
   static async getChannelStats(uuid = null) {
     try {
       const response = await request(`${host}/proxy/ts/status`);
