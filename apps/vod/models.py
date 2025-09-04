@@ -191,6 +191,7 @@ class M3USeriesRelation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_episode_refresh = models.DateTimeField(blank=True, null=True, help_text="Last time episodes were refreshed")
+    last_seen = models.DateTimeField(default=timezone.now, help_text="Last time this relation was seen during VOD scan")
 
     class Meta:
         verbose_name = 'M3U Series Relation'
@@ -218,6 +219,7 @@ class M3UMovieRelation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_advanced_refresh = models.DateTimeField(blank=True, null=True, help_text="Last time advanced data was fetched from provider")
+    last_seen = models.DateTimeField(default=timezone.now, help_text="Last time this relation was seen during VOD scan")
 
     class Meta:
         verbose_name = 'M3U Movie Relation'
@@ -255,6 +257,7 @@ class M3UEpisodeRelation(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    last_seen = models.DateTimeField(default=timezone.now, help_text="Last time this relation was seen during VOD scan")
 
     class Meta:
         verbose_name = 'M3U Episode Relation'

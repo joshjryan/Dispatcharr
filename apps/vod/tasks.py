@@ -51,16 +51,21 @@ def refresh_vod_content(account_id):
                 .select_related("category", "m3u_account")
             }
 
-            # Refresh movies with batch processing
-            refresh_movies(client, account, movie_categories, relations)
+            # Refresh movies with batch processing (pass scan start time)
+            refresh_movies(client, account, movie_categories, relations, scan_start_time=start_time)
 
-            # Refresh series with batch processing
-            refresh_series(client, account, series_categories, relations)
+            # Refresh series with batch processing (pass scan start time)
+            refresh_series(client, account, series_categories, relations, scan_start_time=start_time)
 
         end_time = timezone.now()
         duration = (end_time - start_time).total_seconds()
 
         logger.info(f"Batch VOD refresh completed for account {account.name} in {duration:.2f} seconds")
+
+        # Cleanup orphaned VOD content after refresh
+        logger.info("Starting cleanup of orphaned VOD content")
+        cleanup_result = cleanup_orphaned_vod_content(scan_start_time=start_time)
+        logger.info(f"VOD cleanup completed: {cleanup_result}")
 
         # Send completion notification
         send_m3u_update(account_id, "vod_refresh", 100, status="success",
@@ -119,7 +124,7 @@ def refresh_categories(account_id, client=None):
 
     return movies_category_id_map, series_category_id_map
 
-def refresh_movies(client, account, categories_by_provider, relations):
+def refresh_movies(client, account, categories_by_provider, relations, scan_start_time=None):
     """Refresh movie content using single API call for all movies"""
     logger.info(f"Refreshing movies for account {account.name}")
 
@@ -137,12 +142,12 @@ def refresh_movies(client, account, categories_by_provider, relations):
         total_chunks = (total_movies + chunk_size - 1) // chunk_size
 
         logger.info(f"Processing movie chunk {chunk_num}/{total_chunks} ({len(chunk)} movies)")
-        process_movie_batch(account, chunk, categories_by_provider, relations)
+        process_movie_batch(account, chunk, categories_by_provider, relations, scan_start_time)
 
     logger.info(f"Completed processing all {total_movies} movies in {total_chunks} chunks")
 
 
-def refresh_series(client, account, categories_by_provider, relations):
+def refresh_series(client, account, categories_by_provider, relations, scan_start_time=None):
     """Refresh series content using single API call for all series"""
     logger.info(f"Refreshing series for account {account.name}")
 
@@ -160,7 +165,7 @@ def refresh_series(client, account, categories_by_provider, relations):
         total_chunks = (total_series + chunk_size - 1) // chunk_size
 
         logger.info(f"Processing series chunk {chunk_num}/{total_chunks} ({len(chunk)} series)")
-        process_series_batch(account, chunk, categories_by_provider, relations)
+        process_series_batch(account, chunk, categories_by_provider, relations, scan_start_time)
 
     logger.info(f"Completed processing all {total_series} series in {total_chunks} chunks")
 
@@ -237,7 +242,7 @@ def batch_create_categories(categories_data, category_type, account):
 
 
 @shared_task
-def process_movie_batch(account, batch, categories, relations):
+def process_movie_batch(account, batch, categories, relations, scan_start_time=None):
     """Process a batch of movies using simple bulk operations like M3U processing"""
     logger.info(f"Processing movie batch of {len(batch)} movies for account {account.name}")
 
@@ -455,6 +460,7 @@ def process_movie_batch(account, batch, categories, relations):
                 'basic_data': movie_data,
                 'detailed_fetched': False
             }
+            relation.last_seen = scan_start_time or timezone.now()  # Mark as seen during this scan
             relations_to_update.append(relation)
         else:
             # Create new relation
@@ -467,7 +473,8 @@ def process_movie_batch(account, batch, categories, relations):
                 custom_properties={
                     'basic_data': movie_data,
                     'detailed_fetched': False
-                }
+                },
+                last_seen=scan_start_time or timezone.now()  # Mark as seen during this scan
             )
             relations_to_create.append(relation)
 
@@ -518,7 +525,7 @@ def process_movie_batch(account, batch, categories, relations):
 
             if relations_to_update:
                 M3UMovieRelation.objects.bulk_update(relations_to_update, [
-                    'movie', 'category', 'container_extension', 'custom_properties'
+                    'movie', 'category', 'container_extension', 'custom_properties', 'last_seen'
                 ])
 
         logger.info("Movie batch processing completed successfully!")
@@ -530,7 +537,7 @@ def process_movie_batch(account, batch, categories, relations):
 
 
 @shared_task
-def process_series_batch(account, batch, categories, relations):
+def process_series_batch(account, batch, categories, relations, scan_start_time=None):
     """Process a batch of series using simple bulk operations like M3U processing"""
     logger.info(f"Processing series batch of {len(batch)} series for account {account.name}")
 
@@ -767,6 +774,7 @@ def process_series_batch(account, batch, categories, relations):
                 'detailed_fetched': False,
                 'episodes_fetched': False
             }
+            relation.last_seen = scan_start_time or timezone.now()  # Mark as seen during this scan
             relations_to_update.append(relation)
         else:
             # Create new relation
@@ -779,7 +787,8 @@ def process_series_batch(account, batch, categories, relations):
                     'basic_data': series_data,
                     'detailed_fetched': False,
                     'episodes_fetched': False
-                }
+                },
+                last_seen=scan_start_time or timezone.now()  # Mark as seen during this scan
             )
             relations_to_create.append(relation)
 
@@ -830,7 +839,7 @@ def process_series_batch(account, batch, categories, relations):
 
             if relations_to_update:
                 M3USeriesRelation.objects.bulk_update(relations_to_update, [
-                    'series', 'category', 'custom_properties'
+                    'series', 'category', 'custom_properties', 'last_seen'
                 ])
 
         logger.info("Series batch processing completed successfully!")
@@ -1043,7 +1052,7 @@ def refresh_series_episodes(account, series, external_series_id, episodes_data=N
         logger.error(f"Error refreshing episodes for series {series.name}: {str(e)}")
 
 
-def batch_process_episodes(account, series, episodes_data):
+def batch_process_episodes(account, series, episodes_data, scan_start_time=None):
     """Process episodes in batches for better performance"""
     if not episodes_data:
         return
@@ -1179,6 +1188,7 @@ def batch_process_episodes(account, series, episodes_data):
                     'info': episode_data,
                     'season_number': season_number
                 }
+                relation.last_seen = scan_start_time or timezone.now()  # Mark as seen during this scan
                 relations_to_update.append(relation)
             else:
                 # Create new relation
@@ -1190,7 +1200,8 @@ def batch_process_episodes(account, series, episodes_data):
                     custom_properties={
                         'info': episode_data,
                         'season_number': season_number
-                    }
+                    },
+                    last_seen=scan_start_time or timezone.now()  # Mark as seen during this scan
                 )
                 relations_to_create.append(relation)
 
@@ -1217,7 +1228,7 @@ def batch_process_episodes(account, series, episodes_data):
         # Update existing episode relations
         if relations_to_update:
             M3UEpisodeRelation.objects.bulk_update(relations_to_update, [
-                'episode', 'container_extension', 'custom_properties'
+                'episode', 'container_extension', 'custom_properties', 'last_seen'
             ])
 
     logger.info(f"Batch processed episodes: {len(episodes_to_create)} new, {len(episodes_to_update)} updated, "
@@ -1281,22 +1292,51 @@ def batch_refresh_series_episodes(account_id, series_ids=None):
 
 
 @shared_task
-def cleanup_orphaned_vod_content():
-    """Clean up VOD content that has no M3U relations"""
-    # Clean up movies with no relations
+def cleanup_orphaned_vod_content(stale_days=0, scan_start_time=None):
+    """Clean up VOD content that has no M3U relations or has stale relations"""
+    from datetime import timedelta
+
+    # Use scan start time as reference, or current time if not provided
+    reference_time = scan_start_time or timezone.now()
+
+    # Calculate cutoff date for stale relations
+    cutoff_date = reference_time - timedelta(days=stale_days)
+
+    # Clean up stale movie relations (haven't been seen in the specified days)
+    stale_movie_relations = M3UMovieRelation.objects.filter(last_seen__lt=cutoff_date)
+    stale_movie_count = stale_movie_relations.count()
+    stale_movie_relations.delete()
+
+    # Clean up stale series relations
+    stale_series_relations = M3USeriesRelation.objects.filter(last_seen__lt=cutoff_date)
+    stale_series_count = stale_series_relations.count()
+    stale_series_relations.delete()
+
+    # Clean up stale episode relations
+    stale_episode_relations = M3UEpisodeRelation.objects.filter(last_seen__lt=cutoff_date)
+    stale_episode_count = stale_episode_relations.count()
+    stale_episode_relations.delete()
+
+    # Clean up movies with no relations (orphaned)
     orphaned_movies = Movie.objects.filter(m3u_relations__isnull=True)
-    movie_count = orphaned_movies.count()
+    orphaned_movie_count = orphaned_movies.count()
     orphaned_movies.delete()
 
-    # Clean up series with no relations
+    # Clean up series with no relations (orphaned)
     orphaned_series = Series.objects.filter(m3u_relations__isnull=True)
-    series_count = orphaned_series.count()
+    orphaned_series_count = orphaned_series.count()
     orphaned_series.delete()
 
     # Episodes will be cleaned up via CASCADE when series are deleted
 
-    logger.info(f"Cleaned up {movie_count} orphaned movies and {series_count} orphaned series")
-    return f"Cleaned up {movie_count} movies and {series_count} series"
+    result = (f"Cleaned up {stale_movie_count} stale movie relations, "
+              f"{stale_series_count} stale series relations, "
+              f"{stale_episode_count} stale episode relations, "
+              f"{orphaned_movie_count} orphaned movies, and "
+              f"{orphaned_series_count} orphaned series")
+
+    logger.info(result)
+    return result
 
 
 def handle_movie_id_conflicts(current_movie, relation, tmdb_id_to_set, imdb_id_to_set):
