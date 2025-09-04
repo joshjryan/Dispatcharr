@@ -298,7 +298,13 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
   const channel = channels?.[recording.channel];
 
   const deleteRecording = (id) => {
-    API.deleteRecording(id);
+    // Optimistically remove immediately from UI
+    try { useChannelsStore.getState().removeRecording(id); } catch {}
+    // Fire-and-forget server delete; websocket will keep others in sync
+    API.deleteRecording(id).catch(() => {
+      // On failure, fallback to refetch to restore state
+      try { useChannelsStore.getState().fetchRecordings(); } catch {}
+    });
   };
 
   const customProps = recording.custom_properties || {};
@@ -364,8 +370,11 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
   const [busy, setBusy] = React.useState(false);
   const handleCancelClick = (e) => {
     e.stopPropagation();
-    if (isSeriesGroup) setCancelOpen(true);
-    else deleteRecording(recording.id);
+    if (isSeriesGroup) {
+      setCancelOpen(true);
+    } else {
+      deleteRecording(recording.id);
+    }
   };
 
   const seriesInfo = React.useMemo(() => {
@@ -441,6 +450,7 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
             <ActionIcon
               variant="transparent"
               color="red.9"
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={handleCancelClick}
             >
               <SquareX size="20" />

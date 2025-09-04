@@ -1765,21 +1765,87 @@ class RecordingViewSet(viewsets.ModelViewSet):
         return response
 
     def destroy(self, request, *args, **kwargs):
-        """Delete the Recording and remove the associated file from disk if present."""
+        """Delete the Recording and ensure any active DVR client connection is closed.
+
+        Also removes the associated file(s) from disk if present.
+        """
         instance = self.get_object()
+
+        # Attempt to close the DVR client connection for this channel if active
+        try:
+            channel_uuid = str(instance.channel.uuid)
+            # Lazy imports to avoid module overhead if proxy isn't used
+            from core.utils import RedisClient
+            from apps.proxy.ts_proxy.redis_keys import RedisKeys
+            from apps.proxy.ts_proxy.services.channel_service import ChannelService
+
+            r = RedisClient.get_client()
+            if r:
+                client_set_key = RedisKeys.clients(channel_uuid)
+                client_ids = r.smembers(client_set_key) or []
+                stopped = 0
+                for raw_id in client_ids:
+                    try:
+                        cid = raw_id.decode("utf-8") if isinstance(raw_id, (bytes, bytearray)) else str(raw_id)
+                        meta_key = RedisKeys.client_metadata(channel_uuid, cid)
+                        ua = r.hget(meta_key, "user_agent")
+                        ua_s = ua.decode("utf-8") if isinstance(ua, (bytes, bytearray)) else (ua or "")
+                        # Identify DVR recording client by its user agent
+                        if ua_s and "Dispatcharr-DVR" in ua_s:
+                            try:
+                                ChannelService.stop_client(channel_uuid, cid)
+                                stopped += 1
+                            except Exception as inner_e:
+                                logger.debug(f"Failed to stop DVR client {cid} for channel {channel_uuid}: {inner_e}")
+                    except Exception as inner:
+                        logger.debug(f"Error while checking client metadata: {inner}")
+                if stopped:
+                    logger.info(f"Stopped {stopped} DVR client(s) for channel {channel_uuid} due to recording cancellation")
+                # If no clients remain after stopping DVR clients, proactively stop the channel
+                try:
+                    remaining = r.scard(client_set_key) or 0
+                except Exception:
+                    remaining = 0
+                if remaining == 0:
+                    try:
+                        ChannelService.stop_channel(channel_uuid)
+                        logger.info(f"Stopped channel {channel_uuid} (no clients remain)")
+                    except Exception as sc_e:
+                        logger.debug(f"Unable to stop channel {channel_uuid}: {sc_e}")
+        except Exception as e:
+            logger.debug(f"Unable to stop DVR clients for cancelled recording: {e}")
+
+        # Capture paths before deletion
         cp = instance.custom_properties or {}
         file_path = cp.get("file_path")
-        # Perform DB delete first, then try to remove file
+        temp_ts_path = cp.get("_temp_file_path")
+
+        # Perform DB delete first, then try to remove files
         response = super().destroy(request, *args, **kwargs)
+
+        # Notify frontends to refresh recordings
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed"})
+        except Exception:
+            pass
+
         library_dir = '/app/data'
         allowed_roots = ['/data/', library_dir.rstrip('/') + '/']
-        if file_path and isinstance(file_path, str) and any(file_path.startswith(root) for root in allowed_roots):
+
+        def _safe_remove(path: str):
+            if not path or not isinstance(path, str):
+                return
             try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                    logger.info(f"Deleted recording file: {file_path}")
-            except Exception as e:
-                logger.warning(f"Failed to delete recording file {file_path}: {e}")
+                if any(path.startswith(root) for root in allowed_roots) and os.path.exists(path):
+                    os.remove(path)
+                    logger.info(f"Deleted recording artifact: {path}")
+            except Exception as ex:
+                logger.warning(f"Failed to delete recording artifact {path}: {ex}")
+
+        _safe_remove(file_path)
+        _safe_remove(temp_ts_path)
+
         return response
 
 

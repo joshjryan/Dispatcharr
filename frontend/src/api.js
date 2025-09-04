@@ -1658,11 +1658,9 @@ export default class API {
 
   static async deleteRecording(id) {
     try {
-      await request(`${host}/api/channels/recordings/${id}/`, {
-        method: 'DELETE',
-      });
-
-      useChannelsStore.getState().fetchRecordings();
+      await request(`${host}/api/channels/recordings/${id}/`, { method: 'DELETE' });
+      // Optimistically remove locally for instant UI update
+      try { useChannelsStore.getState().removeRecording(id); } catch {}
     } catch (e) {
       errorNotification(`Failed to delete recording ${id}`, e);
     }
