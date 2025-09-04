@@ -170,6 +170,54 @@ export const WebsocketProvider = ({ children }) => {
 
           // Handle standard message format for other event types
           switch (parsedEvent.data?.type) {
+            case 'comskip_status': {
+              const rid = parsedEvent.data.recording_id;
+              const id = `comskip-${rid}`;
+              const status = parsedEvent.data.status;
+              const title = parsedEvent.data.title || 'Recording';
+              if (status === 'started') {
+                notifications.show({
+                  id,
+                  title: 'Removing commercials',
+                  message: `Processing ${title}...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Commercials removed',
+                  message: `${title} — kept ${parsedEvent.data.segments_kept} segments`,
+                  color: 'green.5',
+                  loading: false,
+                  autoClose: 4000,
+                });
+                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+              } else if (status === 'skipped') {
+                notifications.update({
+                  id,
+                  title: 'No commercials to remove',
+                  message: parsedEvent.data.reason || '',
+                  color: 'teal',
+                  loading: false,
+                  autoClose: 3000,
+                });
+                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+              } else if (status === 'error') {
+                notifications.update({
+                  id,
+                  title: 'Comskip failed',
+                  message: parsedEvent.data.reason || 'Unknown error',
+                  color: 'red',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+              }
+              break;
+            }
             case 'epg_file':
               fetchEPGs();
               notifications.show({

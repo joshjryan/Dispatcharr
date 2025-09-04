@@ -1683,6 +1683,17 @@ class RecordingViewSet(viewsets.ModelViewSet):
         except KeyError:
             return [Authenticated()]
 
+    @action(detail=True, methods=["post"], url_path="comskip")
+    def comskip(self, request, pk=None):
+        """Trigger comskip processing for this recording."""
+        from .tasks import comskip_process_recording
+        rec = get_object_or_404(Recording, pk=pk)
+        try:
+            comskip_process_recording.delay(rec.id)
+            return Response({"success": True, "queued": True})
+        except Exception as e:
+            return Response({"success": False, "error": str(e)}, status=400)
+
     @action(detail=True, methods=["get"], url_path="file")
     def file(self, request, pk=None):
         """Stream a recorded file with HTTP Range support for seeking."""
@@ -1760,7 +1771,7 @@ class RecordingViewSet(viewsets.ModelViewSet):
         file_path = cp.get("file_path")
         # Perform DB delete first, then try to remove file
         response = super().destroy(request, *args, **kwargs)
-        library_dir = os.environ.get('DISPATCHARR_LIBRARY_DIR', '/library')
+        library_dir = '/app/data'
         allowed_roots = ['/data/', library_dir.rstrip('/') + '/']
         if file_path and isinstance(file_path, str) and any(file_path.startswith(root) for root in allowed_roots):
             try:

@@ -1668,6 +1668,20 @@ export default class API {
     }
   }
 
+  static async runComskip(recordingId) {
+    try {
+      const resp = await request(`${host}/api/channels/recordings/${recordingId}/comskip/`, {
+        method: 'POST',
+      });
+      // Refresh recordings list to reflect comskip status when done later
+      // This endpoint just queues the task; the websocket/refresh will update eventually
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to run comskip', e);
+      throw e;
+    }
+  }
+
   // DVR Series Rules
   static async listSeriesRules() {
     try {

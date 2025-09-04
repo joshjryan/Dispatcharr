@@ -36,6 +36,7 @@ import useChannelsStore from '../store/channels';
 import useSettingsStore from '../store/settings';
 import useVideoStore from '../store/useVideoStore';
 import RecordingForm from '../components/forms/Recording';
+import { notifications } from '@mantine/notifications';
 import API from '../api';
 
 dayjs.extend(duration);
@@ -253,6 +254,12 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
               {onWatchRecording && (
                 <Button size="xs" variant="default" onClick={(e) => { e.stopPropagation?.(); onWatchRecording(); }} disabled={!canWatchRecording}>Watch</Button>
               )}
+              {customProps.status === 'completed' && (!customProps?.comskip || customProps?.comskip?.status !== 'completed') && (
+                <Button size="xs" variant="light" color="teal" onClick={async (e) => {
+                  e.stopPropagation?.();
+                  try { await API.runComskip(recording.id); notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 }); } catch {}
+                }}>Remove commercials</Button>
+              )}
             </Group>
           </Group>
           <Text size="sm">{start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}</Text>
@@ -342,6 +349,14 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
       fileUrl = `${window.location.protocol}//${window.location.hostname}:5656${fileUrl}`;
     }
     showVideo(fileUrl, 'vod', { name: recordingName, logo: { url: posterUrl } });
+  };
+
+  const handleRunComskip = async (e) => {
+    e?.stopPropagation?.();
+    try {
+      await API.runComskip(recording.id);
+      notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 });
+    } catch {}
   };
 
   // Cancel handling for series groups
@@ -493,6 +508,11 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
                   Watch
                 </Button>
               </Tooltip>
+            )}
+            {!isUpcoming && customProps?.status === 'completed' && (!customProps?.comskip || customProps?.comskip?.status !== 'completed') && (
+              <Button size="xs" variant="light" color="teal" onClick={handleRunComskip}>
+                Remove commercials
+              </Button>
             )}
           </Group>
         </Stack>

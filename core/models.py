@@ -157,6 +157,7 @@ DVR_SERIES_RULES_KEY = slugify("DVR Series Rules")
 DVR_TV_FALLBACK_DIR_KEY = slugify("DVR TV Fallback Dir")
 DVR_TV_FALLBACK_TEMPLATE_KEY = slugify("DVR TV Fallback Template")
 DVR_MOVIE_FALLBACK_TEMPLATE_KEY = slugify("DVR Movie Fallback Template")
+DVR_COMSKIP_ENABLED_KEY = slugify("DVR Comskip Enabled")
 
 
 class CoreSettings(models.Model):
@@ -261,6 +262,15 @@ class CoreSettings(models.Model):
             return cls.objects.get(key=DVR_MOVIE_FALLBACK_TEMPLATE_KEY).value
         except cls.DoesNotExist:
             return "Recordings/Movies/{start}.mkv"
+
+    @classmethod
+    def get_dvr_comskip_enabled(cls):
+        """Return boolean-like string value ('true'/'false') for comskip enablement."""
+        try:
+            val = cls.objects.get(key=DVR_COMSKIP_ENABLED_KEY).value
+            return str(val).lower() in ("1", "true", "yes", "on")
+        except cls.DoesNotExist:
+            return False
 
     @classmethod
     def get_dvr_series_rules(cls):

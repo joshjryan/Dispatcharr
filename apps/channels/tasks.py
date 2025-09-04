@@ -476,8 +476,8 @@ def _build_output_paths(channel, program, start_time, end_time):
     Build (final_path, temp_ts_path, final_filename) using DVR templates.
     """
     from core.models import CoreSettings
-    # Root for DVR recordings: prefer DISPATCHARR_RECORDINGS_DIR, fallback to /data/recordings
-    library_root = os.environ.get('DISPATCHARR_RECORDINGS_DIR', '/data/recordings')
+    # Root for DVR recordings: fixed to /app/data inside the container
+    library_root = '/app/data'
 
     is_movie, season, episode, year, sub_title = _parse_epg_tv_movie_info(program)
     show = _safe_name(program.get('title') if isinstance(program, dict) else channel.name)
@@ -529,9 +529,8 @@ def _build_output_paths(channel, program, start_time, end_time):
     # As a last resort for TV
     if not is_movie and not rel_path:
         rel_path = f"TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
-    # If template contains a leading "Recordings/" (legacy), drop it because we already root at recordings dir
-    if rel_path.startswith(('Recordings/', 'recordings/')):
-        rel_path = rel_path.split('/', 1)[1]
+    # Keep any leading folder like 'Recordings/' from the template so users can
+    # structure their library under /app/data as desired.
     if not rel_path.lower().endswith('.mkv'):
         rel_path = f"{rel_path}.mkv"
 
@@ -1075,6 +1074,14 @@ def run_recording(recording_id, channel_id, start_time_str, end_time_str):
     except Exception as e:
         logger.debug(f"Unable to finalize Recording metadata: {e}")
 
+    # Optionally run comskip post-process
+    try:
+        from core.models import CoreSettings
+        if CoreSettings.get_dvr_comskip_enabled():
+            comskip_process_recording.delay(recording_id)
+    except Exception:
+        pass
+
 
 @shared_task
 def recover_recordings_on_startup():
@@ -1133,6 +1140,181 @@ def recover_recordings_on_startup():
     except Exception as e:
         logger.error(f"Error during DVR recovery: {e}")
         return f"Error: {e}"
+
+@shared_task
+def comskip_process_recording(recording_id: int):
+    """Run comskip on the MKV to remove commercials and replace the file in place.
+    Safe to call even if comskip is not installed; stores status in custom_properties.comskip.
+    """
+    import shutil
+    from .models import Recording
+    # Helper to broadcast status over websocket
+    def _ws(status: str, extra: dict | None = None):
+        try:
+            from core.utils import send_websocket_update
+            payload = {"success": True, "type": "comskip_status", "status": status, "recording_id": recording_id}
+            if extra:
+                payload.update(extra)
+            send_websocket_update('updates', 'update', payload)
+        except Exception:
+            pass
+
+    try:
+        rec = Recording.objects.get(id=recording_id)
+    except Recording.DoesNotExist:
+        return "not_found"
+
+    cp = rec.custom_properties or {}
+    file_path = (cp or {}).get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        return "no_file"
+
+    if isinstance(cp.get("comskip"), dict) and cp["comskip"].get("status") == "completed":
+        return "already_processed"
+
+    comskip_bin = shutil.which("comskip")
+    if not comskip_bin:
+        cp["comskip"] = {"status": "skipped", "reason": "comskip_not_installed"}
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('skipped', {"reason": "comskip_not_installed"})
+        return "comskip_missing"
+
+    base, _ = os.path.splitext(file_path)
+    edl_path = f"{base}.edl"
+
+    # Notify start
+    _ws('started', {"title": (cp.get('program') or {}).get('title') or os.path.basename(file_path)})
+
+    try:
+        cmd = [comskip_bin, "--output", os.path.dirname(file_path)]
+        # Prefer system ini if present to squelch warning and get sane defaults
+        for ini_path in ("/etc/comskip/comskip.ini", "/app/docker/comskip.ini"):
+            if os.path.exists(ini_path):
+                cmd.extend([f"--ini={ini_path}"])
+                break
+        cmd.append(file_path)
+        subprocess.run(cmd, check=True)
+    except Exception as e:
+        cp["comskip"] = {"status": "error", "reason": f"comskip_failed: {e}"}
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('error', {"reason": str(e)})
+        return "comskip_failed"
+
+    if not os.path.exists(edl_path):
+        cp["comskip"] = {"status": "error", "reason": "edl_not_found"}
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('error', {"reason": "edl_not_found"})
+        return "no_edl"
+
+    # Duration via ffprobe
+    def _ffprobe_duration(path):
+        try:
+            p = subprocess.run([
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", path
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            return float(p.stdout.strip())
+        except Exception:
+            return None
+
+    duration = _ffprobe_duration(file_path)
+    if duration is None:
+        cp["comskip"] = {"status": "error", "reason": "duration_unknown"}
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('error', {"reason": "duration_unknown"})
+        return "no_duration"
+
+    commercials = []
+    try:
+        with open(edl_path, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    try:
+                        s = float(parts[0]); e = float(parts[1])
+                        commercials.append((max(0.0, s), min(duration, e)))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    commercials.sort()
+    keep = []
+    cur = 0.0
+    for s, e in commercials:
+        if s > cur:
+            keep.append((cur, max(cur, s)))
+        cur = max(cur, e)
+    if cur < duration:
+        keep.append((cur, duration))
+
+    if not commercials or sum((e - s) for s, e in commercials) <= 0.5:
+        cp["comskip"] = {"status": "completed", "skipped": True, "edl": os.path.basename(edl_path)}
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('skipped', {"reason": "no_commercials", "commercials": 0})
+        return "no_commercials"
+
+    workdir = os.path.dirname(file_path)
+    parts = []
+    try:
+        for idx, (s, e) in enumerate(keep):
+            seg = os.path.join(workdir, f"segment_{idx:03d}.mkv")
+            dur = max(0.0, e - s)
+            if dur <= 0.01:
+                continue
+            subprocess.run([
+                "ffmpeg", "-y", "-ss", f"{s:.3f}", "-i", file_path, "-t", f"{dur:.3f}",
+                "-c", "copy", "-avoid_negative_ts", "1", seg
+            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            parts.append(seg)
+
+        if not parts:
+            raise RuntimeError("no_parts")
+
+        list_path = os.path.join(workdir, "concat_list.txt")
+        with open(list_path, "w") as lf:
+            for pth in parts:
+                lf.write(f"file '{pth}'\n")
+
+        output_path = os.path.join(workdir, f"{os.path.splitext(os.path.basename(file_path))[0]}.cut.mkv")
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", output_path
+        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        try:
+            os.replace(output_path, file_path)
+        except Exception:
+            shutil.copy(output_path, file_path)
+
+        try:
+            os.remove(list_path)
+        except Exception:
+            pass
+        for pth in parts:
+            try: os.remove(pth)
+            except Exception: pass
+
+        cp["comskip"] = {
+            "status": "completed",
+            "edl": os.path.basename(edl_path),
+            "segments_kept": len(parts),
+            "commercials": len(commercials),
+        }
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('completed', {"commercials": len(commercials), "segments_kept": len(parts)})
+        return "ok"
+    except Exception as e:
+        cp["comskip"] = {"status": "error", "reason": str(e)}
+        rec.custom_properties = cp
+        rec.save(update_fields=["custom_properties"])
+        _ws('error', {"reason": str(e)})
+        return f"error:{e}"
 def _resolve_poster_for_program(channel_name, program):
     """Internal helper that attempts to resolve a poster URL and/or Logo id.
     Returns (poster_logo_id, poster_url) where either may be None.

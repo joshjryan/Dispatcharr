@@ -76,6 +76,7 @@ const SettingsPage = () => {
       'dvr-movie-template': '',
       'dvr-tv-fallback-template': '',
       'dvr-movie-fallback-template': '',
+      'dvr-comskip-enabled': false,
     },
 
     validate: {
@@ -422,10 +423,17 @@ const SettingsPage = () => {
           {authUser.user_level == USER_LEVELS.ADMIN && (
             <>
               <Accordion.Item value="dvr-settings">
-                <Accordion.Control>DVR Recording Paths</Accordion.Control>
+                <Accordion.Control>DVR</Accordion.Control>
                 <Accordion.Panel>
                   <form onSubmit={form.onSubmit(onSubmit)}>
                     <Stack gap="sm">
+                      <Switch
+                        label="Enable Comskip (remove commercials after recording)"
+                        {...form.getInputProps('dvr-comskip-enabled', { type: 'checkbox' })}
+                        key={form.key('dvr-comskip-enabled')}
+                        id={settings['dvr-comskip-enabled']?.id || 'dvr-comskip-enabled'}
+                        name={settings['dvr-comskip-enabled']?.key || 'dvr-comskip-enabled'}
+                      />
                       <TextInput
                         label="TV Path Template"
                         description="Supports {show}, {season}, {episode}, {sub_title}, {channel}, {year}, {start}, {end}. Use format specifiers like {season:02d}. Relative paths are under your library dir."
