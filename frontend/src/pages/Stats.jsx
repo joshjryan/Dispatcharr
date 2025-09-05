@@ -964,21 +964,25 @@ const ChannelsPage = () => {
     <Box style={{ overflowX: 'auto' }}>
       <Box style={{ padding: '10px', borderBottom: '1px solid #444' }}>
         <Group justify="space-between" align="center">
-          <Title order={3}>Active Channels</Title>
+          <Title order={3}>Active Streams</Title>
           <Group align="center">
-            <NumberInput
-              label="Refresh Interval (seconds)"
-              value={refreshIntervalSeconds}
-              onChange={(value) => setRefreshIntervalSeconds(value || 0)}
-              min={0}
-              max={300}
-              step={1}
-              size="xs"
-              style={{ width: 120 }}
-              description={
-                refreshIntervalSeconds === 0 ? 'Disabled' : 'Auto-refresh'
-              }
-            />
+            <Group align="center" gap="xs">
+              <Text size="sm">Automatic Refresh Interval (seconds):</Text>
+              <NumberInput
+                value={refreshIntervalSeconds}
+                onChange={(value) => setRefreshIntervalSeconds(value || 0)}
+                min={0}
+                max={300}
+                step={1}
+                size="xs"
+                style={{ width: 120 }}
+              />
+              {refreshIntervalSeconds === 0 && (
+                <Text size="sm" c="dimmed">
+                  Refreshing disabled
+                </Text>
+              )}
+            </Group>
             {isPollingActive && refreshInterval > 0 && (
               <Text size="sm" c="dimmed">
                 Refreshing every {refreshIntervalSeconds}s
