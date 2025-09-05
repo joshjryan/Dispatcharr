@@ -198,8 +198,14 @@ CELERY_TASK_SERIALIZER = "json"
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers.DatabaseScheduler"
 CELERY_BEAT_SCHEDULE = {
-    # Remove the frequent fetch-channel-statuses task
-    # Stats are now fetched via API calls from the frontend
+    # Explicitly disable the old fetch-channel-statuses task
+    # This ensures it gets disabled when DatabaseScheduler syncs
+    "fetch-channel-statuses": {
+        "task": "apps.proxy.tasks.fetch_channel_stats",
+        "schedule": 2.0,  # Original schedule (doesn't matter since disabled)
+        "enabled": False,  # Explicitly disabled
+    },
+    # Keep the file scanning task
     "scan-files": {
         "task": "core.tasks.scan_and_process_files",  # Direct task call
         "schedule": 20.0,  # Every 20 seconds
