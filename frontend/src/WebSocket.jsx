@@ -454,6 +454,15 @@ export const WebsocketProvider = ({ children }) => {
               }
               break;
 
+            case 'epg_sources_changed':
+              // A plugin or backend process signaled that the EPG sources changed
+              try {
+                await fetchEPGs();
+              } catch (e) {
+                console.warn('Failed to refresh EPG sources after change notification:', e);
+              }
+              break;
+
             case 'stream_rehash':
               // Handle stream rehash progress updates
               if (parsedEvent.data.action === 'starting') {

@@ -1219,6 +1219,66 @@ export default class API {
     }
   }
 
+  // Plugins API
+  static async getPlugins() {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/`);
+      return response.plugins || [];
+    } catch (e) {
+      errorNotification('Failed to retrieve plugins', e);
+    }
+  }
+
+  static async reloadPlugins() {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/reload/`, {
+        method: 'POST',
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to reload plugins', e);
+    }
+  }
+
+  static async updatePluginSettings(key, settings) {
+    try {
+      const response = await request(
+        `${host}/api/plugins/plugins/${key}/settings/`,
+        {
+          method: 'POST',
+          body: { settings },
+        }
+      );
+      return response?.settings || {};
+    } catch (e) {
+      errorNotification('Failed to update plugin settings', e);
+    }
+  }
+
+  static async runPluginAction(key, action, params = {}) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/run/`, {
+        method: 'POST',
+        body: { action, params },
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to run plugin action', e);
+    }
+  }
+
+  static async setPluginEnabled(key, enabled) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/enabled/`, {
+        method: 'POST',
+        body: { enabled },
+      });
+      return response?.enabled;
+    } catch (e) {
+      errorNotification('Failed to update plugin enabled state', e);
+    }
+  }
+
   static async checkSetting(values) {
     const { id, ...payload } = values;
 
