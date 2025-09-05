@@ -831,9 +831,16 @@ const ChannelsPage = () => {
       const response = await API.fetchActiveChannelStats();
       if (response) {
         setChannelStats(response);
+      } else {
+        console.log('API response was empty or null');
       }
     } catch (error) {
       console.error('Error fetching channel stats:', error);
+      console.error('Error details:', {
+        message: error.message,
+        status: error.status,
+        body: error.body,
+      });
     }
   }, [setChannelStats]);
 
@@ -868,6 +875,7 @@ const ChannelsPage = () => {
   }, [fetchChannelStats]);
 
   useEffect(() => {
+    console.log('Processing channel stats:', channelStats);
     if (
       !channelStats ||
       !channelStats.channels ||
@@ -934,7 +942,7 @@ const ChannelsPage = () => {
       });
 
       console.log('Processed active channels:', stats);
-      
+
       // Update clients based on new stats
       const clientStats = Object.values(stats).reduce((acc, ch) => {
         if (ch.clients && Array.isArray(ch.clients)) {
@@ -948,7 +956,7 @@ const ChannelsPage = () => {
         return acc;
       }, []);
       setClients(clientStats);
-      
+
       return stats;
     });
   }, [channelStats, channels, channelsByUUID, streamProfiles]);

@@ -1319,7 +1319,7 @@ export default class API {
 
   static async fetchActiveChannelStats() {
     try {
-      const response = await request(`${host}/proxy/ts/status/`);
+      const response = await request(`${host}/proxy/ts/status`);
       return response;
     } catch (e) {
       errorNotification('Failed to fetch active channel stats', e);
