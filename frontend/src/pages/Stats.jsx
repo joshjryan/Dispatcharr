@@ -1,7 +1,8 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ActionIcon,
   Box,
+  Button,
   Card,
   Center,
   Container,
@@ -12,9 +13,9 @@ import {
   Text,
   Title,
   Tooltip,
-  useMantineTheme,
   Select,
   Badge,
+  NumberInput,
 } from '@mantine/core';
 import { TableHelper } from '../helpers';
 import API from '../api';
@@ -197,7 +198,7 @@ const ChannelCard = ({
           ...client,
         }))
     );
-  }, [clients]);
+  }, [clients, channel.channel_id]);
 
   const renderHeaderCell = (header) => {
     switch (header.id) {
@@ -718,17 +719,23 @@ const ChannelCard = ({
 };
 
 const ChannelsPage = () => {
-  const theme = useMantineTheme();
-
   const channels = useChannelsStore((s) => s.channels);
   const channelsByUUID = useChannelsStore((s) => s.channelsByUUID);
   const channelStats = useChannelsStore((s) => s.stats);
-  const logos = useLogosStore((s) => s.logos); // Add logos from the store
+  const setChannelStats = useChannelsStore((s) => s.setChannelStats);
+  const logos = useLogosStore((s) => s.logos);
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
-  const fetchSettings = useSettingsStore((s) => s.fetchSettings);
 
   const [activeChannels, setActiveChannels] = useState({});
   const [clients, setClients] = useState([]);
+  const [isPollingActive, setIsPollingActive] = useState(false);
+
+  // Use localStorage for stats refresh interval (in seconds)
+  const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useLocalStorage(
+    'stats-refresh-interval',
+    5
+  );
+  const refreshInterval = refreshIntervalSeconds * 1000; // Convert to milliseconds
 
   const channelsColumns = useMemo(
     () => [
@@ -818,12 +825,47 @@ const ChannelsPage = () => {
     await API.stopClient(channelId, clientId);
   };
 
-  // The main clientsTable is no longer needed since each channel card has its own table
+  // Function to fetch channel stats from API
+  const fetchChannelStats = useCallback(async () => {
+    try {
+      const response = await API.fetchActiveChannelStats();
+      if (response) {
+        setChannelStats(response);
+      }
+    } catch (error) {
+      console.error('Error fetching channel stats:', error);
+    }
+  }, [setChannelStats]);
 
-  // Fetch settings on component mount
+  // Set up polling for stats when on stats page
   useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
+    const location = window.location;
+    const isOnStatsPage = location.pathname === '/stats';
+
+    if (isOnStatsPage && refreshInterval > 0) {
+      setIsPollingActive(true);
+
+      // Initial fetch
+      fetchChannelStats();
+
+      // Set up interval
+      const interval = setInterval(() => {
+        fetchChannelStats();
+      }, refreshInterval);
+
+      return () => {
+        clearInterval(interval);
+        setIsPollingActive(false);
+      };
+    } else {
+      setIsPollingActive(false);
+    }
+  }, [refreshInterval, fetchChannelStats]);
+
+  // Fetch initial stats on component mount (for immediate data when navigating to page)
+  useEffect(() => {
+    fetchChannelStats();
+  }, [fetchChannelStats]);
 
   useEffect(() => {
     if (
@@ -834,81 +876,117 @@ const ChannelsPage = () => {
     ) {
       console.log('No channel stats available:', channelStats);
       // Clear active channels when there are no stats
-      if (Object.keys(activeChannels).length > 0) {
-        setActiveChannels({});
-        setClients([]);
-      }
+      setActiveChannels((prevActiveChannels) => {
+        if (Object.keys(prevActiveChannels).length > 0) {
+          setClients([]);
+          return {};
+        }
+        return prevActiveChannels;
+      });
       return;
     }
 
-    // Create a completely new object based only on current channel stats
-    const stats = {};
+    // Use functional update to access previous state without dependency
+    setActiveChannels((prevActiveChannels) => {
+      // Create a completely new object based only on current channel stats
+      const stats = {};
 
-    // Track which channels are currently active according to channelStats
-    const currentActiveChannelIds = new Set(
-      channelStats.channels.map((ch) => ch.channel_id).filter(Boolean)
-    );
-
-    channelStats.channels.forEach((ch) => {
-      // Make sure we have a valid channel_id
-      if (!ch.channel_id) {
-        console.warn('Found channel without channel_id:', ch);
-        return;
-      }
-
-      let bitrates = [];
-      if (activeChannels[ch.channel_id]) {
-        bitrates = [...(activeChannels[ch.channel_id].bitrates || [])];
-        const bitrate =
-          ch.total_bytes - activeChannels[ch.channel_id].total_bytes;
-        if (bitrate > 0) {
-          bitrates.push(bitrate);
+      channelStats.channels.forEach((ch) => {
+        // Make sure we have a valid channel_id
+        if (!ch.channel_id) {
+          console.warn('Found channel without channel_id:', ch);
+          return;
         }
 
-        if (bitrates.length > 15) {
-          bitrates = bitrates.slice(1);
+        let bitrates = [];
+        if (prevActiveChannels[ch.channel_id]) {
+          bitrates = [...(prevActiveChannels[ch.channel_id].bitrates || [])];
+          const bitrate =
+            ch.total_bytes - prevActiveChannels[ch.channel_id].total_bytes;
+          if (bitrate > 0) {
+            bitrates.push(bitrate);
+          }
+
+          if (bitrates.length > 15) {
+            bitrates = bitrates.slice(1);
+          }
         }
-      }
 
-      // Find corresponding channel data
-      const channelData =
-        channelsByUUID && ch.channel_id
-          ? channels[channelsByUUID[ch.channel_id]]
-          : null;
+        // Find corresponding channel data
+        const channelData =
+          channelsByUUID && ch.channel_id
+            ? channels[channelsByUUID[ch.channel_id]]
+            : null;
 
-      // Find stream profile
-      const streamProfile = streamProfiles.find(
-        (profile) => profile.id == parseInt(ch.stream_profile)
-      );
-
-      stats[ch.channel_id] = {
-        ...ch,
-        ...(channelData || {}), // Safely merge channel data if available
-        bitrates,
-        stream_profile: streamProfile || { name: 'Unknown' },
-        // Make sure stream_id is set from the active stream info
-        stream_id: ch.stream_id || null,
-      };
-    });
-
-    console.log('Processed active channels:', stats);
-    setActiveChannels(stats);
-
-    const clientStats = Object.values(stats).reduce((acc, ch) => {
-      if (ch.clients && Array.isArray(ch.clients)) {
-        return acc.concat(
-          ch.clients.map((client) => ({
-            ...client,
-            channel: ch,
-          }))
+        // Find stream profile
+        const streamProfile = streamProfiles.find(
+          (profile) => profile.id == parseInt(ch.stream_profile)
         );
-      }
-      return acc;
-    }, []);
-    setClients(clientStats);
+
+        stats[ch.channel_id] = {
+          ...ch,
+          ...(channelData || {}), // Safely merge channel data if available
+          bitrates,
+          stream_profile: streamProfile || { name: 'Unknown' },
+          // Make sure stream_id is set from the active stream info
+          stream_id: ch.stream_id || null,
+        };
+      });
+
+      console.log('Processed active channels:', stats);
+      
+      // Update clients based on new stats
+      const clientStats = Object.values(stats).reduce((acc, ch) => {
+        if (ch.clients && Array.isArray(ch.clients)) {
+          return acc.concat(
+            ch.clients.map((client) => ({
+              ...client,
+              channel: ch,
+            }))
+          );
+        }
+        return acc;
+      }, []);
+      setClients(clientStats);
+      
+      return stats;
+    });
   }, [channelStats, channels, channelsByUUID, streamProfiles]);
   return (
     <Box style={{ overflowX: 'auto' }}>
+      <Box style={{ padding: '10px', borderBottom: '1px solid #444' }}>
+        <Group justify="space-between" align="center">
+          <Title order={3}>Active Channels</Title>
+          <Group align="center">
+            <NumberInput
+              label="Refresh Interval (seconds)"
+              value={refreshIntervalSeconds}
+              onChange={(value) => setRefreshIntervalSeconds(value || 0)}
+              min={0}
+              max={300}
+              step={1}
+              size="xs"
+              style={{ width: 120 }}
+              description={
+                refreshIntervalSeconds === 0 ? 'Disabled' : 'Auto-refresh'
+              }
+            />
+            {isPollingActive && refreshInterval > 0 && (
+              <Text size="sm" c="dimmed">
+                Refreshing every {refreshIntervalSeconds}s
+              </Text>
+            )}
+            <Button
+              size="xs"
+              variant="subtle"
+              onClick={fetchChannelStats}
+              loading={false}
+            >
+              Refresh Now
+            </Button>
+          </Group>
+        </Group>
+      </Box>
       <div
         style={{
           display: 'grid',
