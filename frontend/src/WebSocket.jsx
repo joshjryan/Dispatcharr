@@ -194,7 +194,9 @@ export const WebsocketProvider = ({ children }) => {
                   loading: false,
                   autoClose: 4000,
                 });
-                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                try {
+                  await useChannelsStore.getState().fetchRecordings();
+                } catch {}
               } else if (status === 'skipped') {
                 notifications.update({
                   id,
@@ -204,7 +206,9 @@ export const WebsocketProvider = ({ children }) => {
                   loading: false,
                   autoClose: 3000,
                 });
-                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                try {
+                  await useChannelsStore.getState().fetchRecordings();
+                } catch {}
               } else if (status === 'error') {
                 notifications.update({
                   id,
@@ -214,7 +218,9 @@ export const WebsocketProvider = ({ children }) => {
                   loading: false,
                   autoClose: 6000,
                 });
-                try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                try {
+                  await useChannelsStore.getState().fetchRecordings();
+                } catch {}
               }
               break;
             }
