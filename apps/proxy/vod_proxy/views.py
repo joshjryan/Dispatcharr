@@ -692,8 +692,8 @@ class VODStatsView(View):
                                 v_str = v.decode('utf-8') if isinstance(v, bytes) else v
                                 combined_data[k_str] = v_str
 
-                            # Get content info from the connection data (not the key)
-                            content_type = combined_data.get('content_type', 'unknown')
+                            # Get content info from the connection data (using correct field names)
+                            content_type = combined_data.get('content_obj_type', 'unknown')
                             content_uuid = combined_data.get('content_uuid', 'unknown')
                             client_id = session_id
 
@@ -737,8 +737,7 @@ class VODStatsView(View):
 
                             # Get M3U profile information
                             m3u_profile_info = {}
-                            # Use m3u_profile_id for consistency (rename profile_id)
-                            m3u_profile_id = combined_data.get('profile_id') or combined_data.get('m3u_profile_id')
+                            m3u_profile_id = combined_data.get('m3u_profile_id')
                             if m3u_profile_id:
                                 try:
                                     from apps.m3u.models import M3UAccountProfile
@@ -754,59 +753,59 @@ class VODStatsView(View):
                                     logger.warning(f"Could not fetch M3U profile {m3u_profile_id}: {e}")
 
                             # Also try to get profile info from stored data if database lookup fails
-                            if not m3u_profile_info and (combined_data.get('m3u_profile_name') or combined_data.get('m3u_profile_id')):
+                            if not m3u_profile_info and combined_data.get('m3u_profile_name'):
                                 m3u_profile_info = {
-                                        'profile_name': combined_data.get('m3u_profile_name', 'Unknown Profile'),
-                                        'm3u_profile_id': combined_data.get('m3u_profile_id'),
-                                        'account_name': 'Unknown Account'  # We don't store account name directly
-                                    }
-
-                                connection_info = {
-                                    'content_type': content_type,
-                                    'content_uuid': content_uuid,
-                                    'content_name': content_name,
-                                    'content_metadata': content_metadata,
-                                    'm3u_profile': m3u_profile_info,
-                                    'client_id': client_id,
-                                    'client_ip': combined_data.get('client_ip', 'Unknown'),
-                                    'user_agent': combined_data.get('user_agent', 'Unknown'),
-                                    'connected_at': combined_data.get('connected_at'),
-                                    'last_activity': combined_data.get('last_activity'),
-                                    'm3u_profile_id': m3u_profile_id  # Use m3u_profile_id instead of profile_id
+                                    'profile_name': combined_data.get('m3u_profile_name', 'Unknown Profile'),
+                                    'm3u_profile_id': combined_data.get('m3u_profile_id'),
+                                    'account_name': 'Unknown Account'  # We don't store account name directly
                                 }
 
-                                # Calculate connection duration
-                                duration_calculated = False
-                                if connection_info['connected_at']:
-                                    try:
-                                        connected_time = float(connection_info['connected_at'])
-                                        duration = current_time - connected_time
-                                        connection_info['duration'] = int(duration)
-                                        duration_calculated = True
-                                    except:
-                                        pass
+                            connection_info = {
+                                'content_type': content_type,
+                                'content_uuid': content_uuid,
+                                'content_name': content_name,
+                                'content_metadata': content_metadata,
+                                'm3u_profile': m3u_profile_info,
+                                'client_id': client_id,
+                                'client_ip': combined_data.get('client_ip', 'Unknown'),
+                                'user_agent': combined_data.get('client_user_agent', 'Unknown'),
+                                'connected_at': combined_data.get('created_at'),
+                                'last_activity': combined_data.get('last_activity'),
+                                'm3u_profile_id': m3u_profile_id
+                            }
 
-                                # Fallback: use last_activity if connected_at is not available
-                                if not duration_calculated and connection_info['last_activity']:
-                                    try:
-                                        last_activity_time = float(connection_info['last_activity'])
-                                        # Estimate connection duration using client_id timestamp if available
-                                        if connection_info['client_id'].startswith('vod_'):
-                                            # Extract timestamp from client_id (format: vod_timestamp_random)
-                                            parts = connection_info['client_id'].split('_')
-                                            if len(parts) >= 2:
-                                                client_start_time = float(parts[1]) / 1000.0  # Convert ms to seconds
-                                                duration = current_time - client_start_time
-                                                connection_info['duration'] = int(duration)
-                                                duration_calculated = True
-                                    except:
-                                        pass
+                            # Calculate connection duration
+                            duration_calculated = False
+                            if connection_info['connected_at']:
+                                try:
+                                    connected_time = float(connection_info['connected_at'])
+                                    duration = current_time - connected_time
+                                    connection_info['duration'] = int(duration)
+                                    duration_calculated = True
+                                except:
+                                    pass
 
-                                # Final fallback
-                                if not duration_calculated:
-                                    connection_info['duration'] = 0
+                            # Fallback: use last_activity if connected_at is not available
+                            if not duration_calculated and connection_info['last_activity']:
+                                try:
+                                    last_activity_time = float(connection_info['last_activity'])
+                                    # Estimate connection duration using client_id timestamp if available
+                                    if connection_info['client_id'].startswith('vod_'):
+                                        # Extract timestamp from client_id (format: vod_timestamp_random)
+                                        parts = connection_info['client_id'].split('_')
+                                        if len(parts) >= 2:
+                                            client_start_time = float(parts[1]) / 1000.0  # Convert ms to seconds
+                                            duration = current_time - client_start_time
+                                            connection_info['duration'] = int(duration)
+                                            duration_calculated = True
+                                except:
+                                    pass
 
-                                connections.append(connection_info)
+                            # Final fallback
+                            if not duration_calculated:
+                                connection_info['duration'] = 0
+
+                            connections.append(connection_info)
 
                     except Exception as e:
                         logger.error(f"Error processing connection key {key}: {e}")
