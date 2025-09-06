@@ -1231,8 +1231,9 @@ const ChannelsPage = () => {
       channelStats.channels.length === 0
     ) {
       console.log('No channel stats available:', channelStats);
-      // Clear clients when there are no stats
+      // Clear clients and channel history when there are no stats
       setClients([]);
+      setChannelHistory({});
       return;
     }
 
@@ -1240,7 +1241,7 @@ const ChannelsPage = () => {
     setChannelHistory((prevChannelHistory) => {
       // Create a completely new object based only on current channel stats
       const stats = {};
-      const newChannelHistory = { ...prevChannelHistory };
+      const newChannelHistory = {}; // Start fresh instead of preserving old channels
 
       channelStats.channels.forEach((ch) => {
         // Make sure we have a valid channel_id
@@ -1284,7 +1285,7 @@ const ChannelsPage = () => {
         };
 
         stats[ch.channel_id] = channelWithMetadata;
-        newChannelHistory[ch.channel_id] = channelWithMetadata;
+        newChannelHistory[ch.channel_id] = channelWithMetadata; // Only add currently active channels
       });
 
       console.log('Processed active channels:', stats);
@@ -1303,7 +1304,7 @@ const ChannelsPage = () => {
       }, []);
       setClients(clientStats);
 
-      return newChannelHistory;
+      return newChannelHistory; // Return only currently active channels
     });
   }, [channelStats, channels, channelsByUUID, streamProfiles]);
 
