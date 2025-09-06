@@ -1274,6 +1274,16 @@ export default class API {
     }
   }
 
+  static async getVODStats() {
+    try {
+      const response = await request(`${host}/proxy/vod/stats/`);
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve VOD stats', e);
+    }
+  }
+
   static async stopChannel(id) {
     try {
       const response = await request(`${host}/proxy/ts/stop/${id}`, {

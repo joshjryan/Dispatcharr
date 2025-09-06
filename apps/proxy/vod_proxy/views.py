@@ -41,7 +41,7 @@ class VODStreamView(View):
         logger.info(f"[VOD-REQUEST] Request headers: {dict(request.headers)}")
 
         try:
-            client_ip, user_agent = get_client_info(request)
+            client_ip, client_user_agent = get_client_info(request)
 
             # Extract timeshift parameters from query string
             # Support multiple timeshift parameter formats
@@ -108,7 +108,7 @@ class VODStreamView(View):
             else:
                 logger.info(f"[VOD-RANGE] No Range header - full content request")
 
-            logger.info(f"[VOD-CLIENT] Client info - IP: {client_ip}, User-Agent: {user_agent[:50]}...")
+            logger.info(f"[VOD-CLIENT] Client info - IP: {client_ip}, User-Agent: {client_user_agent[:50]}...")
 
             # If no session ID, create one and redirect to path-based URL
             if not session_id:
@@ -177,7 +177,7 @@ class VODStreamView(View):
                 return HttpResponse("No stream URL available", status=503)
 
             # Get M3U profile
-            m3u_profile = self._get_m3u_profile(m3u_account, profile_id, user_agent)
+            m3u_profile = self._get_m3u_profile(m3u_account, profile_id)
 
             if not m3u_profile:
                 logger.error(f"[VOD-ERROR] No suitable M3U profile found for {content_type} {content_id}")
@@ -207,7 +207,7 @@ class VODStreamView(View):
                 stream_url=final_stream_url,
                 m3u_profile=m3u_profile,
                 client_ip=client_ip,
-                user_agent=user_agent,
+                client_user_agent=client_user_agent,
                 request=request,
                 utc_start=utc_start,
                 utc_end=utc_end,
@@ -232,8 +232,8 @@ class VODStreamView(View):
 
         try:
             # Get client info for M3U profile selection
-            client_ip, user_agent = get_client_info(request)
-            logger.info(f"[VOD-HEAD] Client info - IP: {client_ip}, User-Agent: {user_agent[:50] if user_agent else 'None'}...")
+            client_ip, client_user_agent = get_client_info(request)
+            logger.info(f"[VOD-HEAD] Client info - IP: {client_ip}, User-Agent: {client_user_agent[:50] if client_user_agent else 'None'}...")
 
             # If no session ID, create one (same logic as GET)
             if not session_id:
@@ -281,7 +281,7 @@ class VODStreamView(View):
                 return HttpResponse("No stream URL available", status=503)
 
             # Get M3U profile
-            m3u_profile = self._get_m3u_profile(m3u_account, profile_id, user_agent)
+            m3u_profile = self._get_m3u_profile(m3u_account, profile_id)
             if not m3u_profile:
                 logger.error(f"[VOD-HEAD] No M3U profile found")
                 return HttpResponse("Profile not found", status=404)
@@ -292,7 +292,7 @@ class VODStreamView(View):
             # Make a small range GET request to get content length since providers don't support HEAD
             # We'll use a tiny range to minimize data transfer but get the headers we need
             headers = {
-                'User-Agent': user_agent or 'Dispatcharr/1.0',
+                'User-Agent': client_user_agent or 'Dispatcharr/1.0',
                 'Accept': '*/*',
                 'Range': 'bytes=0-1'  # Request only first 2 bytes
             }
@@ -503,7 +503,7 @@ class VODStreamView(View):
             logger.error(f"[VOD-URL] Error getting stream URL from relation: {e}", exc_info=True)
             return None
 
-    def _get_m3u_profile(self, m3u_account, profile_id, user_agent):
+    def _get_m3u_profile(self, m3u_account, profile_id):
         """Get appropriate M3U profile for streaming"""
         try:
             # If specific profile requested, try to use it
@@ -519,35 +519,23 @@ class VODStreamView(View):
                 except M3UAccountProfile.DoesNotExist:
                     pass
 
-            # Find available profile based on user agent matching
+            # Find available profile ordered by current usage (least loaded first)
             profiles = M3UAccountProfile.objects.filter(
                 m3u_account=m3u_account,
                 is_active=True
             ).order_by('current_viewers')
 
             for profile in profiles:
-                # Check if profile matches user agent pattern
-                if self._matches_user_agent_pattern(profile, user_agent):
-                    if profile.current_viewers < profile.max_streams or profile.max_streams == 0:
-                        return profile
+                # Check if profile has available connection slots
+                if profile.current_viewers < profile.max_streams or profile.max_streams == 0:
+                    return profile
 
-            # Fallback to default profile
+            # Fallback to default profile even if over limit
             return profiles.filter(is_default=True).first()
 
         except Exception as e:
             logger.error(f"Error getting M3U profile: {e}")
             return None
-
-    def _matches_user_agent_pattern(self, profile, user_agent):
-        """Check if user agent matches profile pattern"""
-        try:
-            import re
-            pattern = profile.search_pattern
-            if pattern and user_agent:
-                return bool(re.search(pattern, user_agent, re.IGNORECASE))
-            return True  # If no pattern, match all
-        except Exception:
-            return True
 
     def _transform_url(self, original_url, m3u_profile):
         """Transform URL based on M3U profile settings"""
@@ -663,4 +651,190 @@ class VODPositionView(View):
 
         except Exception as e:
             logger.error(f"Error updating VOD position: {e}")
+            return JsonResponse({'error': str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class VODStatsView(View):
+    """Get VOD connection statistics"""
+
+    def get(self, request):
+        """Get current VOD connection statistics"""
+        try:
+            connection_manager = MultiWorkerVODConnectionManager.get_instance()
+            redis_client = connection_manager.redis_client
+
+            if not redis_client:
+                return JsonResponse({'error': 'Redis not available'}, status=500)
+
+            # Get all VOD persistent connections (consolidated data)
+            pattern = "vod_persistent_connection:*"
+            cursor = 0
+            connections = []
+            current_time = time.time()
+
+            while True:
+                cursor, keys = redis_client.scan(cursor, match=pattern, count=100)
+
+                for key in keys:
+                    try:
+                        key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                        connection_data = redis_client.hgetall(key)
+
+                        if connection_data:
+                            # Extract session ID from key
+                            session_id = key_str.replace('vod_persistent_connection:', '')
+
+                            # Decode Redis hash data
+                            combined_data = {}
+                            for k, v in connection_data.items():
+                                k_str = k.decode('utf-8') if isinstance(k, bytes) else k
+                                v_str = v.decode('utf-8') if isinstance(v, bytes) else v
+                                combined_data[k_str] = v_str
+
+                            # Get content info from the connection data (using correct field names)
+                            content_type = combined_data.get('content_obj_type', 'unknown')
+                            content_uuid = combined_data.get('content_uuid', 'unknown')
+                            client_id = session_id
+
+                            # Get content info with enhanced metadata
+                            content_name = "Unknown"
+                            content_metadata = {}
+                            try:
+                                if content_type == 'movie':
+                                    content_obj = Movie.objects.select_related('logo').get(uuid=content_uuid)
+                                    content_name = content_obj.name
+                                    content_metadata = {
+                                        'year': content_obj.year,
+                                        'rating': content_obj.rating,
+                                        'genre': content_obj.genre,
+                                        'duration_secs': content_obj.duration_secs,
+                                        'description': content_obj.description,
+                                        'logo_url': content_obj.logo.url if content_obj.logo else None,
+                                        'tmdb_id': content_obj.tmdb_id,
+                                        'imdb_id': content_obj.imdb_id
+                                    }
+                                elif content_type == 'episode':
+                                    content_obj = Episode.objects.select_related('series', 'series__logo').get(uuid=content_uuid)
+                                    content_name = f"{content_obj.series.name} - {content_obj.name}"
+                                    content_metadata = {
+                                        'series_name': content_obj.series.name,
+                                        'episode_name': content_obj.name,
+                                        'season_number': content_obj.season_number,
+                                        'episode_number': content_obj.episode_number,
+                                        'air_date': content_obj.air_date.isoformat() if content_obj.air_date else None,
+                                        'rating': content_obj.rating,
+                                        'duration_secs': content_obj.duration_secs,
+                                        'description': content_obj.description,
+                                        'logo_url': content_obj.series.logo.url if content_obj.series.logo else None,
+                                        'series_year': content_obj.series.year,
+                                        'series_genre': content_obj.series.genre,
+                                        'tmdb_id': content_obj.tmdb_id,
+                                        'imdb_id': content_obj.imdb_id
+                                    }
+                            except:
+                                pass
+
+                            # Get M3U profile information
+                            m3u_profile_info = {}
+                            m3u_profile_id = combined_data.get('m3u_profile_id')
+                            if m3u_profile_id:
+                                try:
+                                    from apps.m3u.models import M3UAccountProfile
+                                    profile = M3UAccountProfile.objects.select_related('m3u_account').get(id=m3u_profile_id)
+                                    m3u_profile_info = {
+                                        'profile_name': profile.name,
+                                        'account_name': profile.m3u_account.name,
+                                        'account_id': profile.m3u_account.id,
+                                        'max_streams': profile.m3u_account.max_streams,
+                                        'm3u_profile_id': int(m3u_profile_id)
+                                    }
+                                except Exception as e:
+                                    logger.warning(f"Could not fetch M3U profile {m3u_profile_id}: {e}")
+
+                            # Also try to get profile info from stored data if database lookup fails
+                            if not m3u_profile_info and combined_data.get('m3u_profile_name'):
+                                m3u_profile_info = {
+                                    'profile_name': combined_data.get('m3u_profile_name', 'Unknown Profile'),
+                                    'm3u_profile_id': combined_data.get('m3u_profile_id'),
+                                    'account_name': 'Unknown Account'  # We don't store account name directly
+                                }
+
+                            connection_info = {
+                                'content_type': content_type,
+                                'content_uuid': content_uuid,
+                                'content_name': content_name,
+                                'content_metadata': content_metadata,
+                                'm3u_profile': m3u_profile_info,
+                                'client_id': client_id,
+                                'client_ip': combined_data.get('client_ip', 'Unknown'),
+                                'user_agent': combined_data.get('client_user_agent', 'Unknown'),
+                                'connected_at': combined_data.get('created_at'),
+                                'last_activity': combined_data.get('last_activity'),
+                                'm3u_profile_id': m3u_profile_id
+                            }
+
+                            # Calculate connection duration
+                            duration_calculated = False
+                            if connection_info['connected_at']:
+                                try:
+                                    connected_time = float(connection_info['connected_at'])
+                                    duration = current_time - connected_time
+                                    connection_info['duration'] = int(duration)
+                                    duration_calculated = True
+                                except:
+                                    pass
+
+                            # Fallback: use last_activity if connected_at is not available
+                            if not duration_calculated and connection_info['last_activity']:
+                                try:
+                                    last_activity_time = float(connection_info['last_activity'])
+                                    # Estimate connection duration using client_id timestamp if available
+                                    if connection_info['client_id'].startswith('vod_'):
+                                        # Extract timestamp from client_id (format: vod_timestamp_random)
+                                        parts = connection_info['client_id'].split('_')
+                                        if len(parts) >= 2:
+                                            client_start_time = float(parts[1]) / 1000.0  # Convert ms to seconds
+                                            duration = current_time - client_start_time
+                                            connection_info['duration'] = int(duration)
+                                            duration_calculated = True
+                                except:
+                                    pass
+
+                            # Final fallback
+                            if not duration_calculated:
+                                connection_info['duration'] = 0
+
+                            connections.append(connection_info)
+
+                    except Exception as e:
+                        logger.error(f"Error processing connection key {key}: {e}")
+
+                if cursor == 0:
+                    break
+
+            # Group connections by content
+            content_stats = {}
+            for conn in connections:
+                content_key = f"{conn['content_type']}:{conn['content_uuid']}"
+                if content_key not in content_stats:
+                    content_stats[content_key] = {
+                        'content_type': conn['content_type'],
+                        'content_name': conn['content_name'],
+                        'content_uuid': conn['content_uuid'],
+                        'content_metadata': conn['content_metadata'],
+                        'connection_count': 0,
+                        'connections': []
+                    }
+                content_stats[content_key]['connection_count'] += 1
+                content_stats[content_key]['connections'].append(conn)
+
+            return JsonResponse({
+                'vod_connections': list(content_stats.values()),
+                'total_connections': len(connections),
+                'timestamp': current_time
+            })
+
+        except Exception as e:
+            logger.error(f"Error getting VOD stats: {e}")
             return JsonResponse({'error': str(e)}, status=500)
