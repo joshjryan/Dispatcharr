@@ -23,6 +23,7 @@ import useChannelsStore from '../store/channels';
 import useLogosStore from '../store/logos';
 import logo from '../images/logo.png';
 import {
+  ChevronDown,
   Gauge,
   HardDriveDownload,
   HardDriveUpload,
@@ -86,6 +87,7 @@ const getStartDate = (uptime) => {
 const VODCard = ({ vodContent }) => {
   const [dateFormatSetting] = useLocalStorage('date-format', 'mdy');
   const dateFormat = dateFormatSetting === 'mdy' ? 'MM/DD' : 'DD/MM';
+  const [isClientExpanded, setIsClientExpanded] = useState(false);
 
   // Get metadata from the VOD content
   const metadata = vodContent.content_metadata || {};
@@ -101,7 +103,7 @@ const VODCard = ({ vodContent }) => {
   // Get poster/logo URL
   const posterUrl = metadata.logo_url || logo;
 
-  // Format duration
+  // Format duration for content length
   const formatDuration = (seconds) => {
     if (!seconds) return 'Unknown';
     const hours = Math.floor(seconds / 3600);
@@ -112,9 +114,7 @@ const VODCard = ({ vodContent }) => {
   // Get display title
   const getDisplayTitle = () => {
     if (isMovie) {
-      return metadata.year
-        ? `${vodContent.content_name} (${metadata.year})`
-        : vodContent.content_name;
+      return vodContent.content_name;
     } else if (isEpisode) {
       const season = metadata.season_number
         ? `S${metadata.season_number.toString().padStart(2, '0')}`
@@ -132,12 +132,24 @@ const VODCard = ({ vodContent }) => {
     if (isMovie) {
       const parts = [];
       if (metadata.genre) parts.push(metadata.genre);
-      if (metadata.rating) parts.push(`Rated ${metadata.rating}`);
-      return parts.join(' • ');
+      // We'll handle rating separately as a badge now
+      return parts;
     } else if (isEpisode) {
-      return metadata.episode_name || 'Episode';
+      return [metadata.episode_name || 'Episode'];
     }
-    return '';
+    return [];
+  };
+
+  // Render subtitle
+  const renderSubtitle = () => {
+    const subtitleParts = getSubtitle();
+    if (subtitleParts.length === 0) return null;
+
+    return (
+      <Text size="sm" c="dimmed">
+        {subtitleParts.join(' • ')}
+      </Text>
+    );
   };
 
   // Calculate duration for connection
@@ -229,12 +241,16 @@ const VODCard = ({ vodContent }) => {
           </Box>
 
           <Group>
-            <Tooltip label="Content Duration">
-              <Center>
-                <Timer style={{ paddingRight: 5 }} />
-                {formatDuration(metadata.duration_secs)}
-              </Center>
-            </Tooltip>
+            {connection && (
+              <Tooltip
+                label={`Connected at ${getConnectionStartTime(connection)}`}
+              >
+                <Center>
+                  <Timer style={{ paddingRight: 5 }} />
+                  {calculateConnectionDuration(connection)}
+                </Center>
+              </Tooltip>
+            )}
           </Group>
         </Group>
 
@@ -277,22 +293,14 @@ const VODCard = ({ vodContent }) => {
           )}
 
         {/* Subtitle/episode info */}
-        {getSubtitle() && (
+        {getSubtitle().length > 0 && (
           <Flex justify="flex-start" align="center" mt={-12}>
-            <Text size="sm" c="dimmed">
-              {getSubtitle()}
-            </Text>
+            {renderSubtitle()}
           </Flex>
         )}
 
-        {/* Content information badges */}
+        {/* Content information badges - streamlined to avoid duplication */}
         <Group gap="xs" mt={-4}>
-          <Tooltip label="Content Type">
-            <Badge size="sm" variant="light" color={isMovie ? 'blue' : 'green'}>
-              {contentType.toUpperCase()}
-            </Badge>
-          </Tooltip>
-
           {metadata.year && (
             <Tooltip label="Release Year">
               <Badge size="sm" variant="light" color="orange">
@@ -301,99 +309,143 @@ const VODCard = ({ vodContent }) => {
             </Tooltip>
           )}
 
+          {metadata.duration_secs && (
+            <Tooltip label="Content Duration">
+              <Badge size="sm" variant="light" color="blue">
+                {formatDuration(metadata.duration_secs)}
+              </Badge>
+            </Tooltip>
+          )}
+
           {metadata.rating && (
-            <Tooltip label="Content Rating">
+            <Tooltip label="Critic Rating (out of 10)">
               <Badge size="sm" variant="light" color="yellow">
-                {metadata.rating}
-              </Badge>
-            </Tooltip>
-          )}
-
-          {metadata.genre && (
-            <Tooltip label="Genre">
-              <Badge size="sm" variant="light" color="pink">
-                {metadata.genre}
-              </Badge>
-            </Tooltip>
-          )}
-
-          {isEpisode && metadata.season_number && (
-            <Tooltip label="Season Number">
-              <Badge size="sm" variant="light" color="cyan">
-                Season {metadata.season_number}
+                {parseFloat(metadata.rating).toFixed(1)}/10
               </Badge>
             </Tooltip>
           )}
         </Group>
 
-        {/* Individual client information */}
+        {/* Client information section - collapsible like channel cards */}
         {connection && (
-          <Group justify="space-between" mt="xs">
-            <Group gap={8}>
-              <Text size="xs" fw={500} color="dimmed">
-                Client IP:
-              </Text>
-              <Text size="xs" style={{ fontFamily: 'monospace' }}>
-                {connection.client_ip || 'Unknown'}
-              </Text>
-            </Group>
-
-            <Group gap={8}>
-              <Text size="xs" fw={500} color="dimmed">
-                Duration:
-              </Text>
-              <Text size="xs">{calculateConnectionDuration(connection)}</Text>
-            </Group>
-          </Group>
-        )}
-
-        {/* Additional client details */}
-        {connection && (
-          <Stack gap="xs" mt="sm">
-            {connection.user_agent && connection.user_agent !== 'Unknown' && (
-              <Group gap={8} align="flex-start">
-                <Text
-                  size="xs"
-                  fw={500}
-                  color="dimmed"
-                  style={{ minWidth: '80px' }}
-                >
-                  User Agent:
-                </Text>
-                <Text size="xs" style={{ fontFamily: 'monospace', flex: 1 }}>
-                  {connection.user_agent.length > 80
-                    ? `${connection.user_agent.substring(0, 80)}...`
-                    : connection.user_agent}
-                </Text>
-              </Group>
-            )}
-
-            <Group gap={8}>
-              <Text
-                size="xs"
-                fw={500}
-                color="dimmed"
-                style={{ minWidth: '80px' }}
-              >
-                Client ID:
-              </Text>
-              <Text size="xs" style={{ fontFamily: 'monospace' }}>
-                {connection.client_id || 'Unknown'}
-              </Text>
-            </Group>
-
-            {connection.connected_at && (
+          <Stack gap="xs" mt="xs">
+            {/* Client summary header - always visible */}
+            <Group
+              justify="space-between"
+              align="center"
+              style={{
+                cursor: 'pointer',
+                padding: '8px 12px',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+              }}
+              onClick={() => setIsClientExpanded(!isClientExpanded)}
+            >
               <Group gap={8}>
-                <Text
-                  size="xs"
-                  fw={500}
-                  color="dimmed"
-                  style={{ minWidth: '80px' }}
-                >
-                  Connected:
+                <Text size="sm" fw={500} color="dimmed">
+                  Client:
                 </Text>
-                <Text size="xs">{getConnectionStartTime(connection)}</Text>
+                <Text size="sm" style={{ fontFamily: 'monospace' }}>
+                  {connection.client_ip || 'Unknown IP'}
+                </Text>
               </Group>
+
+              <Group gap={8}>
+                <Text size="xs" color="dimmed">
+                  {isClientExpanded ? 'Hide Details' : 'Show Details'}
+                </Text>
+                <ChevronDown
+                  size={16}
+                  style={{
+                    transform: isClientExpanded
+                      ? 'rotate(180deg)'
+                      : 'rotate(0deg)',
+                    transition: 'transform 0.2s',
+                  }}
+                />
+              </Group>
+            </Group>
+
+            {/* Expanded client details */}
+            {isClientExpanded && (
+              <Stack
+                gap="xs"
+                style={{
+                  padding: '12px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                {connection.user_agent &&
+                  connection.user_agent !== 'Unknown' && (
+                    <Group gap={8} align="flex-start">
+                      <Text
+                        size="xs"
+                        fw={500}
+                        color="dimmed"
+                        style={{ minWidth: '80px' }}
+                      >
+                        User Agent:
+                      </Text>
+                      <Text
+                        size="xs"
+                        style={{ fontFamily: 'monospace', flex: 1 }}
+                      >
+                        {connection.user_agent.length > 100
+                          ? `${connection.user_agent.substring(0, 100)}...`
+                          : connection.user_agent}
+                      </Text>
+                    </Group>
+                  )}
+
+                <Group gap={8}>
+                  <Text
+                    size="xs"
+                    fw={500}
+                    color="dimmed"
+                    style={{ minWidth: '80px' }}
+                  >
+                    Client ID:
+                  </Text>
+                  <Text size="xs" style={{ fontFamily: 'monospace' }}>
+                    {connection.client_id || 'Unknown'}
+                  </Text>
+                </Group>
+
+                {connection.connected_at && (
+                  <Group gap={8}>
+                    <Text
+                      size="xs"
+                      fw={500}
+                      color="dimmed"
+                      style={{ minWidth: '80px' }}
+                    >
+                      Connected:
+                    </Text>
+                    <Text size="xs">{getConnectionStartTime(connection)}</Text>
+                  </Group>
+                )}
+
+                {connection.duration && connection.duration > 0 && (
+                  <Group gap={8}>
+                    <Text
+                      size="xs"
+                      fw={500}
+                      color="dimmed"
+                      style={{ minWidth: '80px' }}
+                    >
+                      Watch Duration:
+                    </Text>
+                    <Text size="xs">
+                      {dayjs
+                        .duration(connection.duration, 'seconds')
+                        .humanize()}
+                    </Text>
+                  </Group>
+                )}
+              </Stack>
             )}
           </Stack>
         )}
