@@ -29,7 +29,7 @@ class SerializableConnectionState:
                  # Session metadata fields (previously stored in vod_session key)
                  content_obj_type: str = None, content_uuid: str = None,
                  content_name: str = None, client_ip: str = None,
-                 user_agent: str = None, utc_start: str = None,
+                 client_user_agent: str = None, utc_start: str = None,
                  utc_end: str = None, offset: str = None,
                  worker_id: str = None, connection_type: str = "redis_backed"):
         self.session_id = session_id
@@ -48,7 +48,7 @@ class SerializableConnectionState:
         self.content_uuid = content_uuid
         self.content_name = content_name
         self.client_ip = client_ip
-        self.user_agent = user_agent
+        self.client_user_agent = client_user_agent
         self.utc_start = utc_start or ""
         self.utc_end = utc_end or ""
         self.offset = offset or ""
@@ -78,7 +78,7 @@ class SerializableConnectionState:
             'content_uuid': self.content_uuid or '',
             'content_name': self.content_name or '',
             'client_ip': self.client_ip or '',
-            'user_agent': self.user_agent or '',
+            'client_user_agent': self.client_user_agent or '',
             'utc_start': self.utc_start or '',
             'utc_end': self.utc_end or '',
             'offset': self.offset or '',
@@ -106,7 +106,7 @@ class SerializableConnectionState:
             content_uuid=data.get('content_uuid') or None,
             content_name=data.get('content_name') or None,
             client_ip=data.get('client_ip') or None,
-            user_agent=data.get('user_agent') or None,
+            client_user_agent=data.get('client_user_agent') or data.get('user_agent') or None,
             utc_start=data.get('utc_start') or '',
             utc_end=data.get('utc_end') or '',
             offset=data.get('offset') or '',
@@ -201,7 +201,7 @@ class RedisBackedVODConnection:
                          # Session metadata (consolidated from vod_session key)
                          content_obj_type: str = None, content_uuid: str = None,
                          content_name: str = None, client_ip: str = None,
-                         user_agent: str = None, utc_start: str = None,
+                         client_user_agent: str = None, utc_start: str = None,
                          utc_end: str = None, offset: str = None,
                          worker_id: str = None) -> bool:
         """Create a new connection state in Redis with consolidated session metadata"""
@@ -227,7 +227,7 @@ class RedisBackedVODConnection:
                 content_uuid=content_uuid,
                 content_name=content_name,
                 client_ip=client_ip,
-                user_agent=user_agent,
+                client_user_agent=client_user_agent,
                 utc_start=utc_start,
                 utc_end=utc_end,
                 offset=offset,
@@ -408,7 +408,7 @@ class RedisBackedVODConnection:
                 'content_uuid': state.content_uuid,
                 'content_name': state.content_name,
                 'client_ip': state.client_ip,
-                'user_agent': state.user_agent,
+                'client_user_agent': state.client_user_agent,
                 'utc_start': state.utc_start,
                 'utc_end': state.utc_end,
                 'offset': state.offset,
@@ -540,7 +540,7 @@ class MultiWorkerVODConnectionManager:
             return None
 
     def stream_content_with_session(self, session_id, content_obj, stream_url, m3u_profile,
-                                  client_ip, user_agent, request,
+                                  client_ip, client_user_agent, request,
                                   utc_start=None, utc_end=None, offset=None, range_header=None):
         """Stream content with Redis-backed persistent connection"""
 
@@ -558,7 +558,7 @@ class MultiWorkerVODConnectionManager:
                 content_type=content_type,
                 content_uuid=content_uuid,
                 client_ip=client_ip,
-                user_agent=user_agent,
+                client_user_agent=client_user_agent,
                 utc_start=utc_start,
                 utc_end=utc_end,
                 offset=offset
@@ -596,10 +596,10 @@ class MultiWorkerVODConnectionManager:
                 if m3u_user_agent:
                     headers['User-Agent'] = m3u_user_agent.user_agent
                     logger.info(f"[{client_id}] Using M3U account user-agent: {m3u_user_agent.user_agent}")
-                elif user_agent:
+                elif client_user_agent:
                     # Fallback to client's user-agent if M3U doesn't have one
-                    headers['User-Agent'] = user_agent
-                    logger.info(f"[{client_id}] Using client user-agent (M3U fallback): {user_agent}")
+                    headers['User-Agent'] = client_user_agent
+                    logger.info(f"[{client_id}] Using client user-agent (M3U fallback): {client_user_agent}")
                 else:
                     logger.warning(f"[{client_id}] No user-agent available (neither M3U nor client)")
 
@@ -628,7 +628,7 @@ class MultiWorkerVODConnectionManager:
                     content_uuid=content_uuid,
                     content_name=content_name,
                     client_ip=client_ip,
-                    user_agent=user_agent,
+                    client_user_agent=client_user_agent,
                     utc_start=utc_start,
                     utc_end=utc_end,
                     offset=str(offset) if offset else None,
@@ -1025,7 +1025,7 @@ class MultiWorkerVODConnectionManager:
             logger.error(f"Error updating connection activity: {e}")
 
     def find_matching_idle_session(self, content_type: str, content_uuid: str,
-                                 client_ip: str, user_agent: str,
+                                 client_ip: str, client_user_agent: str,
                                  utc_start=None, utc_end=None, offset=None) -> Optional[str]:
         """Find existing Redis-backed session that matches criteria using consolidated connection state"""
         if not self.redis_client:
@@ -1071,13 +1071,13 @@ class MultiWorkerVODConnectionManager:
 
                         # Check other criteria (using consolidated data)
                         stored_client_ip = connection_data.get('client_ip', '')
-                        stored_user_agent = connection_data.get('user_agent', '')
+                        stored_user_agent = connection_data.get('client_user_agent', '') or connection_data.get('user_agent', '')
 
                         if stored_client_ip and stored_client_ip == client_ip:
                             score += 5
                             match_reasons.append("ip")
 
-                        if stored_user_agent and stored_user_agent == user_agent:
+                        if stored_user_agent and stored_user_agent == client_user_agent:
                             score += 3
                             match_reasons.append("user-agent")
 

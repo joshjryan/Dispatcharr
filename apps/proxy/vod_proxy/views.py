@@ -41,7 +41,7 @@ class VODStreamView(View):
         logger.info(f"[VOD-REQUEST] Request headers: {dict(request.headers)}")
 
         try:
-            client_ip, user_agent = get_client_info(request)
+            client_ip, client_user_agent = get_client_info(request)
 
             # Extract timeshift parameters from query string
             # Support multiple timeshift parameter formats
@@ -108,7 +108,7 @@ class VODStreamView(View):
             else:
                 logger.info(f"[VOD-RANGE] No Range header - full content request")
 
-            logger.info(f"[VOD-CLIENT] Client info - IP: {client_ip}, User-Agent: {user_agent[:50]}...")
+            logger.info(f"[VOD-CLIENT] Client info - IP: {client_ip}, User-Agent: {client_user_agent[:50]}...")
 
             # If no session ID, create one and redirect to path-based URL
             if not session_id:
@@ -177,7 +177,7 @@ class VODStreamView(View):
                 return HttpResponse("No stream URL available", status=503)
 
             # Get M3U profile
-            m3u_profile = self._get_m3u_profile(m3u_account, profile_id, user_agent)
+            m3u_profile = self._get_m3u_profile(m3u_account, profile_id)
 
             if not m3u_profile:
                 logger.error(f"[VOD-ERROR] No suitable M3U profile found for {content_type} {content_id}")
@@ -207,7 +207,7 @@ class VODStreamView(View):
                 stream_url=final_stream_url,
                 m3u_profile=m3u_profile,
                 client_ip=client_ip,
-                user_agent=user_agent,
+                client_user_agent=client_user_agent,
                 request=request,
                 utc_start=utc_start,
                 utc_end=utc_end,
@@ -232,8 +232,8 @@ class VODStreamView(View):
 
         try:
             # Get client info for M3U profile selection
-            client_ip, user_agent = get_client_info(request)
-            logger.info(f"[VOD-HEAD] Client info - IP: {client_ip}, User-Agent: {user_agent[:50] if user_agent else 'None'}...")
+            client_ip, client_user_agent = get_client_info(request)
+            logger.info(f"[VOD-HEAD] Client info - IP: {client_ip}, User-Agent: {client_user_agent[:50] if client_user_agent else 'None'}...")
 
             # If no session ID, create one (same logic as GET)
             if not session_id:
@@ -281,7 +281,7 @@ class VODStreamView(View):
                 return HttpResponse("No stream URL available", status=503)
 
             # Get M3U profile
-            m3u_profile = self._get_m3u_profile(m3u_account, profile_id, user_agent)
+            m3u_profile = self._get_m3u_profile(m3u_account, profile_id)
             if not m3u_profile:
                 logger.error(f"[VOD-HEAD] No M3U profile found")
                 return HttpResponse("Profile not found", status=404)
@@ -292,7 +292,7 @@ class VODStreamView(View):
             # Make a small range GET request to get content length since providers don't support HEAD
             # We'll use a tiny range to minimize data transfer but get the headers we need
             headers = {
-                'User-Agent': user_agent or 'Dispatcharr/1.0',
+                'User-Agent': client_user_agent or 'Dispatcharr/1.0',
                 'Accept': '*/*',
                 'Range': 'bytes=0-1'  # Request only first 2 bytes
             }
@@ -503,7 +503,7 @@ class VODStreamView(View):
             logger.error(f"[VOD-URL] Error getting stream URL from relation: {e}", exc_info=True)
             return None
 
-    def _get_m3u_profile(self, m3u_account, profile_id, user_agent):
+    def _get_m3u_profile(self, m3u_account, profile_id):
         """Get appropriate M3U profile for streaming"""
         try:
             # If specific profile requested, try to use it
@@ -519,35 +519,23 @@ class VODStreamView(View):
                 except M3UAccountProfile.DoesNotExist:
                     pass
 
-            # Find available profile based on user agent matching
+            # Find available profile ordered by current usage (least loaded first)
             profiles = M3UAccountProfile.objects.filter(
                 m3u_account=m3u_account,
                 is_active=True
             ).order_by('current_viewers')
 
             for profile in profiles:
-                # Check if profile matches user agent pattern
-                if self._matches_user_agent_pattern(profile, user_agent):
-                    if profile.current_viewers < profile.max_streams or profile.max_streams == 0:
-                        return profile
+                # Check if profile has available connection slots
+                if profile.current_viewers < profile.max_streams or profile.max_streams == 0:
+                    return profile
 
-            # Fallback to default profile
+            # Fallback to default profile even if over limit
             return profiles.filter(is_default=True).first()
 
         except Exception as e:
             logger.error(f"Error getting M3U profile: {e}")
             return None
-
-    def _matches_user_agent_pattern(self, profile, user_agent):
-        """Check if user agent matches profile pattern"""
-        try:
-            import re
-            pattern = profile.search_pattern
-            if pattern and user_agent:
-                return bool(re.search(pattern, user_agent, re.IGNORECASE))
-            return True  # If no pattern, match all
-        except Exception:
-            return True
 
     def _transform_url(self, original_url, m3u_profile):
         """Transform URL based on M3U profile settings"""
