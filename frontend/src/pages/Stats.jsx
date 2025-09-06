@@ -1036,9 +1036,9 @@ const ChannelsPage = () => {
   const logos = useLogosStore((s) => s.logos);
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
 
-  const [activeChannels, setActiveChannels] = useState({});
   const [clients, setClients] = useState([]);
   const [vodConnections, setVodConnections] = useState([]);
+  const [channelHistory, setChannelHistory] = useState({});
   const [isPollingActive, setIsPollingActive] = useState(false);
 
   // Use localStorage for stats refresh interval (in seconds)
@@ -1047,86 +1047,6 @@ const ChannelsPage = () => {
     5
   );
   const refreshInterval = refreshIntervalSeconds * 1000; // Convert to milliseconds
-
-  const channelsColumns = useMemo(
-    () => [
-      {
-        id: 'logo',
-        header: 'Logo',
-        accessorKey: 'logo_url',
-        size: 50,
-        cell: ({ cell }) => (
-          <Center>
-            <img src={cell.getValue() || logo} width="20" alt="channel logo" />
-          </Center>
-        ),
-      },
-      {
-        id: 'name',
-        header: 'Name',
-        accessorKey: 'name',
-        cell: ({ cell }) => (
-          <div
-            style={{
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {cell.getValue()}
-          </div>
-        ),
-      },
-      {
-        id: 'started',
-        header: 'Started',
-        accessorFn: (row) => {
-          // Get the current date and time
-          const currentDate = new Date();
-          // Calculate the start date by subtracting uptime (in milliseconds)
-          const startDate = new Date(currentDate.getTime() - row.uptime * 1000);
-          // Format the date as a string (you can adjust the format as needed)
-          return startDate.toLocaleString({
-            weekday: 'short', // optional, adds day of the week
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true, // 12-hour format with AM/PM
-          });
-        },
-      },
-      {
-        id: 'uptime',
-        header: 'Uptime',
-        size: 50,
-        accessorFn: (row) => {
-          const days = Math.floor(row.uptime / (3600 * 24)); // Calculate the number of days
-          const hours = Math.floor((row.uptime % (3600 * 24)) / 3600); // Calculate remaining hours
-          const minutes = Math.floor((row.uptime % 3600) / 60); // Calculate remaining minutes
-          const seconds = parseInt(row.uptime % 60); // Remaining seconds
-
-          // Format uptime as "d hh:mm:ss"
-          return `${days ? days : ''} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-        },
-        mantineTableBodyCellProps: {
-          align: 'right',
-        },
-      },
-      {
-        id: 'num_clients',
-        header: 'Clients',
-        accessorKey: 'client_count',
-        size: 50,
-        mantineTableBodyCellProps: {
-          align: 'center',
-        },
-      },
-    ],
-    []
-  );
 
   const stopChannel = async (id) => {
     await API.stopChannel(id);
@@ -1215,21 +1135,16 @@ const ChannelsPage = () => {
       channelStats.channels.length === 0
     ) {
       console.log('No channel stats available:', channelStats);
-      // Clear active channels when there are no stats
-      setActiveChannels((prevActiveChannels) => {
-        if (Object.keys(prevActiveChannels).length > 0) {
-          setClients([]);
-          return {};
-        }
-        return prevActiveChannels;
-      });
+      // Clear clients when there are no stats
+      setClients([]);
       return;
     }
 
     // Use functional update to access previous state without dependency
-    setActiveChannels((prevActiveChannels) => {
+    setChannelHistory((prevChannelHistory) => {
       // Create a completely new object based only on current channel stats
       const stats = {};
+      const newChannelHistory = { ...prevChannelHistory };
 
       channelStats.channels.forEach((ch) => {
         // Make sure we have a valid channel_id
@@ -1239,10 +1154,10 @@ const ChannelsPage = () => {
         }
 
         let bitrates = [];
-        if (prevActiveChannels[ch.channel_id]) {
-          bitrates = [...(prevActiveChannels[ch.channel_id].bitrates || [])];
+        if (prevChannelHistory[ch.channel_id]) {
+          bitrates = [...(prevChannelHistory[ch.channel_id].bitrates || [])];
           const bitrate =
-            ch.total_bytes - prevActiveChannels[ch.channel_id].total_bytes;
+            ch.total_bytes - prevChannelHistory[ch.channel_id].total_bytes;
           if (bitrate > 0) {
             bitrates.push(bitrate);
           }
@@ -1263,7 +1178,7 @@ const ChannelsPage = () => {
           (profile) => profile.id == parseInt(ch.stream_profile)
         );
 
-        stats[ch.channel_id] = {
+        const channelWithMetadata = {
           ...ch,
           ...(channelData || {}), // Safely merge channel data if available
           bitrates,
@@ -1271,6 +1186,9 @@ const ChannelsPage = () => {
           // Make sure stream_id is set from the active stream info
           stream_id: ch.stream_id || null,
         };
+
+        stats[ch.channel_id] = channelWithMetadata;
+        newChannelHistory[ch.channel_id] = channelWithMetadata;
       });
 
       console.log('Processed active channels:', stats);
@@ -1289,15 +1207,39 @@ const ChannelsPage = () => {
       }, []);
       setClients(clientStats);
 
-      return stats;
+      return newChannelHistory;
     });
   }, [channelStats, channels, channelsByUUID, streamProfiles]);
+
+  // Combine active streams and VOD connections into a single mixed list
+  const combinedConnections = useMemo(() => {
+    const activeStreams = Object.values(channelHistory).map(channel => ({
+      type: 'stream',
+      data: channel,
+      id: channel.channel_id,
+      sortKey: channel.uptime || 0 // Use uptime for sorting streams
+    }));
+
+    const vodItems = vodConnections.map(vodContent => ({
+      type: 'vod',
+      data: vodContent,
+      id: `${vodContent.content_type}-${vodContent.content_uuid}`,
+      sortKey: Date.now() / 1000 // Use current time as fallback for VOD
+    }));
+
+    // Combine and sort by newest connections first (higher sortKey = more recent)
+    return [...activeStreams, ...vodItems].sort((a, b) => b.sortKey - a.sortKey);
+  }, [channelHistory, vodConnections]);
+
   return (
     <Box style={{ overflowX: 'auto' }}>
       <Box style={{ padding: '10px', borderBottom: '1px solid #444' }}>
         <Group justify="space-between" align="center">
-          <Title order={3}>Active Streams</Title>
+          <Title order={3}>Active Connections</Title>
           <Group align="center">
+            <Text size="sm" c="dimmed">
+              {Object.keys(channelHistory).length} stream{Object.keys(channelHistory).length !== 1 ? 's' : ''} • {vodConnections.length} VOD connection{vodConnections.length !== 1 ? 's' : ''}
+            </Text>
             <Group align="center" gap="xs">
               <Text size="sm">Refresh Interval (seconds):</Text>
               <NumberInput
@@ -1342,7 +1284,7 @@ const ChannelsPage = () => {
           gridTemplateColumns: 'repeat(auto-fill, minmax(500px, 1fr))',
         }}
       >
-        {Object.keys(activeChannels).length === 0 ? (
+        {combinedConnections.length === 0 ? (
           <Box
             style={{
               gridColumn: '1 / -1',
@@ -1351,61 +1293,33 @@ const ChannelsPage = () => {
             }}
           >
             <Text size="xl" color="dimmed">
-              No active channels currently streaming
+              No active connections
             </Text>
           </Box>
         ) : (
-          Object.values(activeChannels).map((channel) => (
-            <ChannelCard
-              key={channel.channel_id}
-              channel={channel}
-              clients={clients}
-              stopClient={stopClient}
-              stopChannel={stopChannel}
-              logos={logos}
-              channelsByUUID={channelsByUUID}
-            />
-          ))
-        )}
-      </div>
-
-      {/* VOD Connections Section */}
-      <Box style={{ padding: '10px', borderBottom: '1px solid #444' }}>
-        <Group justify="space-between" align="center">
-          <Title order={3}>VOD Connections</Title>
-          <Text size="sm" c="dimmed">
-            {vodConnections.length} active connection
-            {vodConnections.length !== 1 ? 's' : ''}
-          </Text>
-        </Group>
-      </Box>
-      <div
-        style={{
-          display: 'grid',
-          gap: '1rem',
-          padding: '10px',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
-        }}
-      >
-        {vodConnections.length === 0 ? (
-          <Box
-            style={{
-              gridColumn: '1 / -1',
-              textAlign: 'center',
-              padding: '40px',
-            }}
-          >
-            <Text size="xl" color="dimmed">
-              No active VOD connections
-            </Text>
-          </Box>
-        ) : (
-          vodConnections.map((vodContent) => (
-            <VODCard
-              key={`${vodContent.content_type}-${vodContent.content_uuid}`}
-              vodContent={vodContent}
-            />
-          ))
+          combinedConnections.map((connection) => {
+            if (connection.type === 'stream') {
+              return (
+                <ChannelCard
+                  key={connection.id}
+                  channel={connection.data}
+                  clients={clients}
+                  stopClient={stopClient}
+                  stopChannel={stopChannel}
+                  logos={logos}
+                  channelsByUUID={channelsByUUID}
+                />
+              );
+            } else if (connection.type === 'vod') {
+              return (
+                <VODCard
+                  key={connection.id}
+                  vodContent={connection.data}
+                />
+              );
+            }
+            return null;
+          })
         )}
       </div>
     </Box>
