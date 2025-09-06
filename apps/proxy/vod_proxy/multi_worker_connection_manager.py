@@ -589,10 +589,19 @@ class MultiWorkerVODConnectionManager:
                 # Apply timeshift parameters
                 modified_stream_url = self._apply_timeshift_parameters(stream_url, utc_start, utc_end, offset)
 
-                # Prepare headers
+                # Prepare headers for provider request
                 headers = {}
-                if user_agent:
+                # Use M3U account's user-agent for provider requests, not client's user-agent
+                m3u_user_agent = m3u_profile.m3u_account.get_user_agent()
+                if m3u_user_agent:
+                    headers['User-Agent'] = m3u_user_agent.user_agent
+                    logger.info(f"[{client_id}] Using M3U account user-agent: {m3u_user_agent.user_agent}")
+                elif user_agent:
+                    # Fallback to client's user-agent if M3U doesn't have one
                     headers['User-Agent'] = user_agent
+                    logger.info(f"[{client_id}] Using client user-agent (M3U fallback): {user_agent}")
+                else:
+                    logger.warning(f"[{client_id}] No user-agent available (neither M3U nor client)")
 
                 # Forward important headers from request
                 important_headers = ['authorization', 'x-forwarded-for', 'x-real-ip', 'referer', 'origin', 'accept']
