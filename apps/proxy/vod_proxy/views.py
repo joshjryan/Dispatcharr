@@ -664,3 +664,190 @@ class VODPositionView(View):
         except Exception as e:
             logger.error(f"Error updating VOD position: {e}")
             return JsonResponse({'error': str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class VODStatsView(View):
+    """Get VOD connection statistics"""
+
+    def get(self, request):
+        """Get current VOD connection statistics"""
+        try:
+            connection_manager = MultiWorkerVODConnectionManager.get_instance()
+            redis_client = connection_manager.redis_client
+
+            if not redis_client:
+                return JsonResponse({'error': 'Redis not available'}, status=500)
+
+            # Get all VOD persistent connections (consolidated data)
+            pattern = "vod_persistent_connection:*"
+            cursor = 0
+            connections = []
+            current_time = time.time()
+
+            while True:
+                cursor, keys = redis_client.scan(cursor, match=pattern, count=100)
+
+                for key in keys:
+                    try:
+                        key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                        connection_data = redis_client.hgetall(key)
+
+                        if connection_data:
+                            # Extract session ID from key
+                            session_id = key_str.replace('vod_persistent_connection:', '')
+
+                            # Decode Redis hash data
+                            combined_data = {}
+                            for k, v in connection_data.items():
+                                k_str = k.decode('utf-8') if isinstance(k, bytes) else k
+                                v_str = v.decode('utf-8') if isinstance(v, bytes) else v
+                                combined_data[k_str] = v_str
+
+                            # Get content info from the connection data (not the key)
+                            content_type = combined_data.get('content_type', 'unknown')
+                            content_uuid = combined_data.get('content_uuid', 'unknown')
+                            client_id = session_id
+
+                            # Get content info with enhanced metadata
+                            content_name = "Unknown"
+                            content_metadata = {}
+                            try:
+                                if content_type == 'movie':
+                                    content_obj = Movie.objects.select_related('logo').get(uuid=content_uuid)
+                                    content_name = content_obj.name
+                                    content_metadata = {
+                                        'year': content_obj.year,
+                                        'rating': content_obj.rating,
+                                        'genre': content_obj.genre,
+                                        'duration_secs': content_obj.duration_secs,
+                                        'description': content_obj.description,
+                                        'logo_url': content_obj.logo.url if content_obj.logo else None,
+                                        'tmdb_id': content_obj.tmdb_id,
+                                        'imdb_id': content_obj.imdb_id
+                                    }
+                                elif content_type == 'episode':
+                                    content_obj = Episode.objects.select_related('series', 'series__logo').get(uuid=content_uuid)
+                                    content_name = f"{content_obj.series.name} - {content_obj.name}"
+                                    content_metadata = {
+                                        'series_name': content_obj.series.name,
+                                        'episode_name': content_obj.name,
+                                        'season_number': content_obj.season_number,
+                                        'episode_number': content_obj.episode_number,
+                                        'air_date': content_obj.air_date.isoformat() if content_obj.air_date else None,
+                                        'rating': content_obj.rating,
+                                        'duration_secs': content_obj.duration_secs,
+                                        'description': content_obj.description,
+                                        'logo_url': content_obj.series.logo.url if content_obj.series.logo else None,
+                                        'series_year': content_obj.series.year,
+                                        'series_genre': content_obj.series.genre,
+                                        'tmdb_id': content_obj.tmdb_id,
+                                        'imdb_id': content_obj.imdb_id
+                                    }
+                            except:
+                                pass
+
+                            # Get M3U profile information
+                            m3u_profile_info = {}
+                            # Use m3u_profile_id for consistency (rename profile_id)
+                            m3u_profile_id = combined_data.get('profile_id') or combined_data.get('m3u_profile_id')
+                            if m3u_profile_id:
+                                try:
+                                    from apps.m3u.models import M3UAccountProfile
+                                    profile = M3UAccountProfile.objects.select_related('m3u_account').get(id=m3u_profile_id)
+                                    m3u_profile_info = {
+                                        'profile_name': profile.name,
+                                        'account_name': profile.m3u_account.name,
+                                        'account_id': profile.m3u_account.id,
+                                        'max_streams': profile.m3u_account.max_streams,
+                                        'm3u_profile_id': int(m3u_profile_id)
+                                    }
+                                except Exception as e:
+                                    logger.warning(f"Could not fetch M3U profile {m3u_profile_id}: {e}")
+
+                            # Also try to get profile info from stored data if database lookup fails
+                            if not m3u_profile_info and (combined_data.get('m3u_profile_name') or combined_data.get('m3u_profile_id')):
+                                m3u_profile_info = {
+                                        'profile_name': combined_data.get('m3u_profile_name', 'Unknown Profile'),
+                                        'm3u_profile_id': combined_data.get('m3u_profile_id'),
+                                        'account_name': 'Unknown Account'  # We don't store account name directly
+                                    }
+
+                                connection_info = {
+                                    'content_type': content_type,
+                                    'content_uuid': content_uuid,
+                                    'content_name': content_name,
+                                    'content_metadata': content_metadata,
+                                    'm3u_profile': m3u_profile_info,
+                                    'client_id': client_id,
+                                    'client_ip': combined_data.get('client_ip', 'Unknown'),
+                                    'user_agent': combined_data.get('user_agent', 'Unknown'),
+                                    'connected_at': combined_data.get('connected_at'),
+                                    'last_activity': combined_data.get('last_activity'),
+                                    'm3u_profile_id': m3u_profile_id  # Use m3u_profile_id instead of profile_id
+                                }
+
+                                # Calculate connection duration
+                                duration_calculated = False
+                                if connection_info['connected_at']:
+                                    try:
+                                        connected_time = float(connection_info['connected_at'])
+                                        duration = current_time - connected_time
+                                        connection_info['duration'] = int(duration)
+                                        duration_calculated = True
+                                    except:
+                                        pass
+
+                                # Fallback: use last_activity if connected_at is not available
+                                if not duration_calculated and connection_info['last_activity']:
+                                    try:
+                                        last_activity_time = float(connection_info['last_activity'])
+                                        # Estimate connection duration using client_id timestamp if available
+                                        if connection_info['client_id'].startswith('vod_'):
+                                            # Extract timestamp from client_id (format: vod_timestamp_random)
+                                            parts = connection_info['client_id'].split('_')
+                                            if len(parts) >= 2:
+                                                client_start_time = float(parts[1]) / 1000.0  # Convert ms to seconds
+                                                duration = current_time - client_start_time
+                                                connection_info['duration'] = int(duration)
+                                                duration_calculated = True
+                                    except:
+                                        pass
+
+                                # Final fallback
+                                if not duration_calculated:
+                                    connection_info['duration'] = 0
+
+                                connections.append(connection_info)
+
+                    except Exception as e:
+                        logger.error(f"Error processing connection key {key}: {e}")
+
+                if cursor == 0:
+                    break
+
+            # Group connections by content
+            content_stats = {}
+            for conn in connections:
+                content_key = f"{conn['content_type']}:{conn['content_uuid']}"
+                if content_key not in content_stats:
+                    content_stats[content_key] = {
+                        'content_type': conn['content_type'],
+                        'content_name': conn['content_name'],
+                        'content_uuid': conn['content_uuid'],
+                        'content_metadata': conn['content_metadata'],
+                        'connection_count': 0,
+                        'connections': []
+                    }
+                content_stats[content_key]['connection_count'] += 1
+                content_stats[content_key]['connections'].append(conn)
+
+            return JsonResponse({
+                'vod_connections': list(content_stats.values()),
+                'total_connections': len(connections),
+                'timestamp': current_time
+            })
+
+        except Exception as e:
+            logger.error(f"Error getting VOD stats: {e}")
+            return JsonResponse({'error': str(e)}, status=500)

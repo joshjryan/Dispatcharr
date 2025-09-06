@@ -82,6 +82,316 @@ const getStartDate = (uptime) => {
   });
 };
 
+// Create a VOD Card component similar to ChannelCard
+const VODCard = ({ vodContent }) => {
+  const [dateFormatSetting] = useLocalStorage('date-format', 'mdy');
+  const dateFormat = dateFormatSetting === 'mdy' ? 'MM/DD' : 'DD/MM';
+
+  // Get metadata from the VOD content
+  const metadata = vodContent.content_metadata || {};
+  const contentType = vodContent.content_type;
+  const isMovie = contentType === 'movie';
+  const isEpisode = contentType === 'episode';
+
+  // Get poster/logo URL
+  const posterUrl = metadata.logo_url || logo;
+
+  // Format duration
+  const formatDuration = (seconds) => {
+    if (!seconds) return 'Unknown';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  };
+
+  // Get display title
+  const getDisplayTitle = () => {
+    if (isMovie) {
+      return metadata.year
+        ? `${vodContent.content_name} (${metadata.year})`
+        : vodContent.content_name;
+    } else if (isEpisode) {
+      const season = metadata.season_number
+        ? `S${metadata.season_number.toString().padStart(2, '0')}`
+        : 'S??';
+      const episode = metadata.episode_number
+        ? `E${metadata.episode_number.toString().padStart(2, '0')}`
+        : 'E??';
+      return `${metadata.series_name} - ${season}${episode}`;
+    }
+    return vodContent.content_name;
+  };
+
+  // Get subtitle info
+  const getSubtitle = () => {
+    if (isMovie) {
+      const parts = [];
+      if (metadata.genre) parts.push(metadata.genre);
+      if (metadata.rating) parts.push(`Rated ${metadata.rating}`);
+      return parts.join(' • ');
+    } else if (isEpisode) {
+      return metadata.episode_name || 'Episode';
+    }
+    return '';
+  };
+
+  // Calculate duration for connection
+  const calculateConnectionDuration = (connection) => {
+    // If duration is provided by API, use it
+    if (connection.duration && connection.duration > 0) {
+      return dayjs.duration(connection.duration, 'seconds').humanize();
+    }
+
+    // Fallback: try to extract from client_id timestamp
+    if (connection.client_id && connection.client_id.startsWith('vod_')) {
+      try {
+        const parts = connection.client_id.split('_');
+        if (parts.length >= 2) {
+          const clientStartTime = parseInt(parts[1]) / 1000; // Convert ms to seconds
+          const currentTime = Date.now() / 1000;
+          const duration = currentTime - clientStartTime;
+          return dayjs.duration(duration, 'seconds').humanize();
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
+    return 'Unknown duration';
+  };
+
+  // Get connection start time for tooltip
+  const getConnectionStartTime = (connection) => {
+    if (connection.connected_at) {
+      return dayjs(connection.connected_at * 1000).format(
+        `${dateFormat} HH:mm:ss`
+      );
+    }
+
+    // Fallback: calculate from client_id timestamp
+    if (connection.client_id && connection.client_id.startsWith('vod_')) {
+      try {
+        const parts = connection.client_id.split('_');
+        if (parts.length >= 2) {
+          const clientStartTime = parseInt(parts[1]);
+          return dayjs(clientStartTime).format(`${dateFormat} HH:mm:ss`);
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
+    return 'Unknown';
+  };
+
+  return (
+    <Card
+      shadow="sm"
+      padding="md"
+      radius="md"
+      withBorder
+      style={{
+        color: '#fff',
+        backgroundColor: '#27272A',
+        maxWidth: '700px',
+        width: '100%',
+      }}
+    >
+      <Stack style={{ position: 'relative' }}>
+        {/* Header with poster and basic info */}
+        <Group justify="space-between">
+          <Box
+            style={{
+              width: '100px',
+              height: '50px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <img
+              src={posterUrl}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
+              }}
+              alt="content poster"
+            />
+          </Box>
+
+          <Group>
+            <Tooltip label="Content Duration">
+              <Center>
+                <Timer style={{ paddingRight: 5 }} />
+                {formatDuration(metadata.duration_secs)}
+              </Center>
+            </Tooltip>
+          </Group>
+        </Group>
+
+        {/* Title and type */}
+        <Flex justify="space-between" align="center">
+          <Group>
+            <Text fw={500}>{getDisplayTitle()}</Text>
+          </Group>
+
+          <Tooltip label="Content Type">
+            <Group gap={5}>
+              <Video size="18" />
+              {isMovie ? 'Movie' : 'TV Episode'}
+            </Group>
+          </Tooltip>
+        </Flex>
+
+        {/* Subtitle/episode info */}
+        {getSubtitle() && (
+          <Flex justify="flex-start" align="center" mt={-8}>
+            <Text size="sm" c="dimmed">
+              {getSubtitle()}
+            </Text>
+          </Flex>
+        )}
+
+        {/* Content information badges */}
+        <Group gap="xs" mt="xs">
+          <Tooltip label="Content Type">
+            <Badge size="sm" variant="light" color={isMovie ? 'blue' : 'green'}>
+              {contentType.toUpperCase()}
+            </Badge>
+          </Tooltip>
+
+          {metadata.year && (
+            <Tooltip label="Release Year">
+              <Badge size="sm" variant="light" color="orange">
+                {metadata.year}
+              </Badge>
+            </Tooltip>
+          )}
+
+          {metadata.rating && (
+            <Tooltip label="Content Rating">
+              <Badge size="sm" variant="light" color="yellow">
+                {metadata.rating}
+              </Badge>
+            </Tooltip>
+          )}
+
+          {metadata.genre && (
+            <Tooltip label="Genre">
+              <Badge size="sm" variant="light" color="pink">
+                {metadata.genre}
+              </Badge>
+            </Tooltip>
+          )}
+
+          {isEpisode && metadata.season_number && (
+            <Tooltip label="Season Number">
+              <Badge size="sm" variant="light" color="cyan">
+                Season {metadata.season_number}
+              </Badge>
+            </Tooltip>
+          )}
+        </Group>
+
+        {/* Connection statistics */}
+        <Group justify="space-between">
+          <Group gap={5}>
+            <Tooltip
+              label={`${vodContent.connection_count} active viewer${vodContent.connection_count !== 1 ? 's' : ''}`}
+            >
+              <Group gap={4} style={{ cursor: 'help' }}>
+                <Users size="18" />
+                <Text size="sm">{vodContent.connection_count}</Text>
+              </Group>
+            </Tooltip>
+          </Group>
+
+          <Tooltip label="VOD Content">
+            <Text size="sm" style={{ cursor: 'help' }}>
+              On Demand
+            </Text>
+          </Tooltip>
+        </Group>
+
+        {/* Connection details table */}
+        <Box mt="md">
+          <Text size="sm" fw={500} mb="xs">
+            Active Connections:
+          </Text>
+          <Stack gap="xs">
+            {vodContent.connections.map((connection, index) => (
+              <Box
+                key={`${connection.client_id}-${index}`}
+                p="xs"
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '4px',
+                  border: '1px solid #444',
+                }}
+              >
+                <Group justify="space-between" align="center">
+                  <Group align="center" gap="xs">
+                    <HardDriveDownload size={14} />
+                    <Text size="xs">{connection.client_ip}</Text>
+                    <Text size="xs" c="dimmed">
+                      (Client: {connection.client_id.slice(0, 12)}...)
+                    </Text>
+                  </Group>
+
+                  <Group align="center" gap="xs">
+                    <Timer size={14} />
+                    <Tooltip
+                      label={`Connected at ${getConnectionStartTime(connection)}`}
+                    >
+                      <Text size="xs" c="dimmed">
+                        {calculateConnectionDuration(connection)}
+                      </Text>
+                    </Tooltip>
+                  </Group>
+                </Group>
+
+                {/* M3U Profile Information */}
+                {connection.m3u_profile &&
+                  (connection.m3u_profile.profile_name ||
+                    connection.m3u_profile.account_name) && (
+                    <Group mt="xs" gap="xs">
+                      <HardDriveUpload size={12} />
+                      <Text size="xs" c="dimmed">
+                        M3U:{' '}
+                        {connection.m3u_profile.account_name ||
+                          'Unknown Account'}{' '}
+                        →{' '}
+                        {connection.m3u_profile.profile_name ||
+                          'Default Profile'}
+                      </Text>
+                    </Group>
+                  )}
+
+                {/* User Agent info */}
+                {connection.user_agent &&
+                  connection.user_agent !== 'Unknown' && (
+                    <Group mt="xs" gap="xs">
+                      <Text
+                        size="xs"
+                        c="dimmed"
+                        style={{ fontFamily: 'monospace' }}
+                      >
+                        {connection.user_agent.length > 60
+                          ? `${connection.user_agent.substring(0, 60)}...`
+                          : connection.user_agent}
+                      </Text>
+                    </Group>
+                  )}
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+      </Stack>
+    </Card>
+  );
+};
+
 // Create a separate component for each channel card to properly handle the hook
 const ChannelCard = ({
   channel,
@@ -728,6 +1038,7 @@ const ChannelsPage = () => {
 
   const [activeChannels, setActiveChannels] = useState({});
   const [clients, setClients] = useState([]);
+  const [vodConnections, setVodConnections] = useState([]);
   const [isPollingActive, setIsPollingActive] = useState(false);
 
   // Use localStorage for stats refresh interval (in seconds)
@@ -844,6 +1155,24 @@ const ChannelsPage = () => {
     }
   }, [setChannelStats]);
 
+  const fetchVODStats = useCallback(async () => {
+    try {
+      const response = await API.getVODStats();
+      if (response) {
+        setVodConnections(response.vod_connections || []);
+      } else {
+        console.log('VOD API response was empty or null');
+      }
+    } catch (error) {
+      console.error('Error fetching VOD stats:', error);
+      console.error('Error details:', {
+        message: error.message,
+        status: error.status,
+        body: error.body,
+      });
+    }
+  }, []);
+
   // Set up polling for stats when on stats page
   useEffect(() => {
     const location = window.location;
@@ -854,10 +1183,12 @@ const ChannelsPage = () => {
 
       // Initial fetch
       fetchChannelStats();
+      fetchVODStats();
 
       // Set up interval
       const interval = setInterval(() => {
         fetchChannelStats();
+        fetchVODStats();
       }, refreshInterval);
 
       return () => {
@@ -867,12 +1198,13 @@ const ChannelsPage = () => {
     } else {
       setIsPollingActive(false);
     }
-  }, [refreshInterval, fetchChannelStats]);
+  }, [refreshInterval, fetchChannelStats, fetchVODStats]);
 
   // Fetch initial stats on component mount (for immediate data when navigating to page)
   useEffect(() => {
     fetchChannelStats();
-  }, [fetchChannelStats]);
+    fetchVODStats();
+  }, [fetchChannelStats, fetchVODStats]);
 
   useEffect(() => {
     console.log('Processing channel stats:', channelStats);
@@ -967,7 +1299,7 @@ const ChannelsPage = () => {
           <Title order={3}>Active Streams</Title>
           <Group align="center">
             <Group align="center" gap="xs">
-              <Text size="sm">Automatic Refresh Interval (seconds):</Text>
+              <Text size="sm">Refresh Interval (seconds):</Text>
               <NumberInput
                 value={refreshIntervalSeconds}
                 onChange={(value) => setRefreshIntervalSeconds(value || 0)}
@@ -991,7 +1323,10 @@ const ChannelsPage = () => {
             <Button
               size="xs"
               variant="subtle"
-              onClick={fetchChannelStats}
+              onClick={() => {
+                fetchChannelStats();
+                fetchVODStats();
+              }}
               loading={false}
             >
               Refresh Now
@@ -1029,6 +1364,46 @@ const ChannelsPage = () => {
               stopChannel={stopChannel}
               logos={logos}
               channelsByUUID={channelsByUUID}
+            />
+          ))
+        )}
+      </div>
+
+      {/* VOD Connections Section */}
+      <Box style={{ padding: '10px', borderBottom: '1px solid #444' }}>
+        <Group justify="space-between" align="center">
+          <Title order={3}>VOD Connections</Title>
+          <Text size="sm" c="dimmed">
+            {vodConnections.length} active connection
+            {vodConnections.length !== 1 ? 's' : ''}
+          </Text>
+        </Group>
+      </Box>
+      <div
+        style={{
+          display: 'grid',
+          gap: '1rem',
+          padding: '10px',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
+        }}
+      >
+        {vodConnections.length === 0 ? (
+          <Box
+            style={{
+              gridColumn: '1 / -1',
+              textAlign: 'center',
+              padding: '40px',
+            }}
+          >
+            <Text size="xl" color="dimmed">
+              No active VOD connections
+            </Text>
+          </Box>
+        ) : (
+          vodConnections.map((vodContent) => (
+            <VODCard
+              key={`${vodContent.content_type}-${vodContent.content_uuid}`}
+              vodContent={vodContent}
             />
           ))
         )}
