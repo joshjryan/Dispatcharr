@@ -604,19 +604,11 @@ class MultiWorkerVODConnectionManager:
                     logger.warning(f"[{client_id}] No user-agent available (neither M3U nor client)")
 
                 # Forward important headers from request
-                important_headers = ['authorization', 'x-forwarded-for', 'x-real-ip', 'referer', 'origin', 'accept']
+                important_headers = ['authorization', 'referer', 'origin', 'accept']
                 for header_name in important_headers:
                     django_header = f'HTTP_{header_name.upper().replace("-", "_")}'
                     if hasattr(request, 'META') and django_header in request.META:
                         headers[header_name] = request.META[django_header]
-
-                # Add client IP
-                if client_ip:
-                    headers['X-Forwarded-For'] = client_ip
-                    headers['X-Real-IP'] = client_ip
-
-                # Add worker identification
-                headers['X-Worker-ID'] = self.worker_id
 
                 # Create connection state in Redis with consolidated session metadata
                 if not redis_connection.create_connection(
