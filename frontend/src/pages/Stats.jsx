@@ -93,22 +93,13 @@ const VODCard = ({ vodContent }) => {
   const isMovie = contentType === 'movie';
   const isEpisode = contentType === 'episode';
 
+  // Get the individual connection (since we now separate cards per connection)
+  const connection =
+    vodContent.individual_connection ||
+    (vodContent.connections && vodContent.connections[0]);
+
   // Get poster/logo URL
   const posterUrl = metadata.logo_url || logo;
-
-  // Transform VOD connections to match table data structure
-  const connectionData = useMemo(() => {
-    return (vodContent.connections || []).map((connection, index) => ({
-      id: `${connection.client_id}-${index}`,
-      ip_address: connection.client_ip,
-      client_id: connection.client_id,
-      user_agent: connection.user_agent || 'Unknown',
-      connected_since: connection.duration || 0,
-      connected_at: connection.connected_at,
-      m3u_profile: connection.m3u_profile,
-      ...connection,
-    }));
-  }, [vodContent.connections]);
 
   // Format duration
   const formatDuration = (seconds) => {
@@ -166,7 +157,7 @@ const VODCard = ({ vodContent }) => {
           const duration = currentTime - clientStartTime;
           return dayjs.duration(duration, 'seconds').humanize();
         }
-      } catch (e) {
+      } catch {
         // Ignore parsing errors
       }
     }
@@ -191,7 +182,7 @@ const VODCard = ({ vodContent }) => {
             const clientStartTime = parseInt(parts[1]);
             return dayjs(clientStartTime).format(`${dateFormat} HH:mm:ss`);
           }
-        } catch (e) {
+        } catch {
           // Ignore parsing errors
         }
       }
@@ -200,156 +191,6 @@ const VODCard = ({ vodContent }) => {
     },
     [dateFormat]
   );
-
-  // Define table columns similar to ChannelCard
-  const vodConnectionsColumns = useMemo(
-    () => [
-      {
-        id: 'expand',
-        size: 20,
-      },
-      {
-        header: 'IP Address',
-        accessorKey: 'ip_address',
-        cell: ({ cell }) => <Text size="xs">{cell.getValue()}</Text>,
-      },
-      {
-        id: 'connected',
-        header: 'Connected',
-        accessorFn: (row) => {
-          return getConnectionStartTime(row);
-        },
-        cell: ({ cell }) => (
-          <Tooltip
-            label={
-              cell.getValue() !== 'Unknown'
-                ? `Connected at ${cell.getValue()}`
-                : 'Unknown connection time'
-            }
-          >
-            <Text size="xs">{cell.getValue()}</Text>
-          </Tooltip>
-        ),
-      },
-      {
-        id: 'duration',
-        header: 'Duration',
-        accessorFn: (row) => {
-          return calculateConnectionDuration(row);
-        },
-        cell: ({ cell, row }) => {
-          const exactDuration = row.original.duration;
-          return (
-            <Tooltip
-              label={
-                exactDuration
-                  ? `${exactDuration.toFixed(1)} seconds`
-                  : 'Unknown duration'
-              }
-            >
-              <Text size="xs">{cell.getValue()}</Text>
-            </Tooltip>
-          );
-        },
-      },
-    ],
-    [getConnectionStartTime, calculateConnectionDuration]
-  );
-
-  // Table configuration similar to ChannelCard
-  const vodConnectionsTable = useTable({
-    ...TableHelper.defaultProperties,
-    columns: vodConnectionsColumns,
-    data: connectionData,
-    allRowIds: connectionData.map((connection) => connection.id),
-    tableCellProps: () => ({
-      padding: 4,
-      borderColor: '#444',
-      color: '#E0E0E0',
-      fontSize: '0.85rem',
-    }),
-    headerCellRenderFns: {
-      ip_address: ({ header }) => (
-        <Group>
-          <Text size="sm">
-            {header?.column?.columnDef?.header || 'IP Address'}
-          </Text>
-        </Group>
-      ),
-      connected: ({ header }) => (
-        <Group>
-          <Text size="sm">
-            {header?.column?.columnDef?.header || 'Connected'}
-          </Text>
-        </Group>
-      ),
-      duration: ({ header }) => (
-        <Group>
-          <Text size="sm">
-            {header?.column?.columnDef?.header || 'Duration'}
-          </Text>
-        </Group>
-      ),
-    },
-    expandedRowRenderer: ({ row }) => {
-      return (
-        <Box p="xs">
-          <Stack gap="xs">
-            <Group spacing="xs" align="flex-start">
-              <Text size="xs" fw={500} color="dimmed">
-                Client ID:
-              </Text>
-              <Text size="xs" style={{ fontFamily: 'monospace' }}>
-                {row.original.client_id}
-              </Text>
-            </Group>
-
-            {row.original.user_agent &&
-              row.original.user_agent !== 'Unknown' && (
-                <Group spacing="xs" align="flex-start">
-                  <Text size="xs" fw={500} color="dimmed">
-                    User Agent:
-                  </Text>
-                  <Text size="xs" style={{ fontFamily: 'monospace' }}>
-                    {row.original.user_agent.length > 60
-                      ? `${row.original.user_agent.substring(0, 60)}...`
-                      : row.original.user_agent}
-                  </Text>
-                </Group>
-              )}
-
-            {row.original.m3u_profile &&
-              (row.original.m3u_profile.profile_name ||
-                row.original.m3u_profile.account_name) && (
-                <Group spacing="xs" align="flex-start">
-                  <Text size="xs" fw={500} color="dimmed">
-                    M3U Profile:
-                  </Text>
-                  <Text size="xs">
-                    {row.original.m3u_profile.account_name || 'Unknown Account'}{' '}
-                    →{' '}
-                    {row.original.m3u_profile.profile_name || 'Default Profile'}
-                  </Text>
-                </Group>
-              )}
-          </Stack>
-        </Box>
-      );
-    },
-    mantineExpandButtonProps: ({ row }) => ({
-      size: 'xs',
-      style: {
-        transform: row.getIsExpanded() ? 'rotate(180deg)' : 'rotate(-90deg)',
-        transition: 'transform 0.2s',
-      },
-    }),
-    displayColumnDefOptions: {
-      'mrt-row-expand': {
-        size: 15,
-        header: '',
-      },
-    },
-  });
 
   return (
     <Card
@@ -411,6 +252,30 @@ const VODCard = ({ vodContent }) => {
           </Tooltip>
         </Flex>
 
+        {/* Display M3U profile information - matching channel card style */}
+        {connection &&
+          connection.m3u_profile &&
+          (connection.m3u_profile.profile_name ||
+            connection.m3u_profile.account_name) && (
+            <Flex justify="flex-end" align="flex-start" mt={-8}>
+              <Group gap={5} align="flex-start">
+                <HardDriveUpload size="18" style={{ marginTop: '2px' }} />
+                <Stack gap={0}>
+                  <Tooltip label="M3U Account">
+                    <Text size="xs" fw={500}>
+                      {connection.m3u_profile.account_name || 'Unknown Account'}
+                    </Text>
+                  </Tooltip>
+                  <Tooltip label="M3U Profile">
+                    <Text size="xs" c="dimmed">
+                      {connection.m3u_profile.profile_name || 'Default Profile'}
+                    </Text>
+                  </Tooltip>
+                </Stack>
+              </Group>
+            </Flex>
+          )}
+
         {/* Subtitle/episode info */}
         {getSubtitle() && (
           <Flex justify="flex-start" align="center" mt={-12}>
@@ -461,28 +326,77 @@ const VODCard = ({ vodContent }) => {
           )}
         </Group>
 
-        {/* Connection statistics */}
-        <Group justify="space-between">
-          <Group gap={5}>
-            <Tooltip
-              label={`${vodContent.connection_count} active viewer${vodContent.connection_count !== 1 ? 's' : ''}`}
-            >
-              <Group gap={4} style={{ cursor: 'help' }}>
-                <Users size="18" />
-                <Text size="sm">{vodContent.connection_count}</Text>
-              </Group>
-            </Tooltip>
+        {/* Individual client information */}
+        {connection && (
+          <Group justify="space-between" mt="xs">
+            <Group gap={8}>
+              <Text size="xs" fw={500} color="dimmed">
+                Client IP:
+              </Text>
+              <Text size="xs" style={{ fontFamily: 'monospace' }}>
+                {connection.client_ip || 'Unknown'}
+              </Text>
+            </Group>
+
+            <Group gap={8}>
+              <Text size="xs" fw={500} color="dimmed">
+                Duration:
+              </Text>
+              <Text size="xs">{calculateConnectionDuration(connection)}</Text>
+            </Group>
           </Group>
+        )}
 
-          <Tooltip label="VOD Content">
-            <Text size="sm" style={{ cursor: 'help' }}>
-              On Demand
-            </Text>
-          </Tooltip>
-        </Group>
+        {/* Additional client details */}
+        {connection && (
+          <Stack gap="xs" mt="sm">
+            {connection.user_agent && connection.user_agent !== 'Unknown' && (
+              <Group gap={8} align="flex-start">
+                <Text
+                  size="xs"
+                  fw={500}
+                  color="dimmed"
+                  style={{ minWidth: '80px' }}
+                >
+                  User Agent:
+                </Text>
+                <Text size="xs" style={{ fontFamily: 'monospace', flex: 1 }}>
+                  {connection.user_agent.length > 80
+                    ? `${connection.user_agent.substring(0, 80)}...`
+                    : connection.user_agent}
+                </Text>
+              </Group>
+            )}
 
-        {/* Connection details table - similar to ChannelCard */}
-        <CustomTable table={vodConnectionsTable} />
+            <Group gap={8}>
+              <Text
+                size="xs"
+                fw={500}
+                color="dimmed"
+                style={{ minWidth: '80px' }}
+              >
+                Client ID:
+              </Text>
+              <Text size="xs" style={{ fontFamily: 'monospace' }}>
+                {connection.client_id || 'Unknown'}
+              </Text>
+            </Group>
+
+            {connection.connected_at && (
+              <Group gap={8}>
+                <Text
+                  size="xs"
+                  fw={500}
+                  color="dimmed"
+                  style={{ minWidth: '80px' }}
+                >
+                  Connected:
+                </Text>
+                <Text size="xs">{getConnectionStartTime(connection)}</Text>
+              </Group>
+            )}
+          </Stack>
+        )}
       </Stack>
     </Card>
   );
@@ -1317,12 +1231,22 @@ const ChannelsPage = () => {
       sortKey: channel.uptime || 0, // Use uptime for sorting streams
     }));
 
-    const vodItems = vodConnections.map((vodContent) => ({
-      type: 'vod',
-      data: vodContent,
-      id: `${vodContent.content_type}-${vodContent.content_uuid}`,
-      sortKey: Date.now() / 1000, // Use current time as fallback for VOD
-    }));
+    // Flatten VOD connections so each individual client gets its own card
+    const vodItems = vodConnections.flatMap((vodContent) => {
+      return (vodContent.connections || []).map((connection, index) => ({
+        type: 'vod',
+        data: {
+          ...vodContent,
+          // Override the connections array to contain only this specific connection
+          connections: [connection],
+          connection_count: 1, // Each card now represents a single connection
+          // Add individual connection details at the top level for easier access
+          individual_connection: connection,
+        },
+        id: `${vodContent.content_type}-${vodContent.content_uuid}-${connection.client_id}-${index}`,
+        sortKey: connection.connected_at || Date.now() / 1000, // Use connection time for sorting
+      }));
+    });
 
     // Combine and sort by newest connections first (higher sortKey = more recent)
     return [...activeStreams, ...vodItems].sort(
@@ -1339,8 +1263,19 @@ const ChannelsPage = () => {
             <Text size="sm" c="dimmed">
               {Object.keys(channelHistory).length} stream
               {Object.keys(channelHistory).length !== 1 ? 's' : ''} •{' '}
-              {vodConnections.length} VOD connection
-              {vodConnections.length !== 1 ? 's' : ''}
+              {vodConnections.reduce(
+                (total, vodContent) =>
+                  total + (vodContent.connections?.length || 0),
+                0
+              )}{' '}
+              VOD connection
+              {vodConnections.reduce(
+                (total, vodContent) =>
+                  total + (vodContent.connections?.length || 0),
+                0
+              ) !== 1
+                ? 's'
+                : ''}
             </Text>
             <Group align="center" gap="xs">
               <Text size="sm">Refresh Interval (seconds):</Text>
