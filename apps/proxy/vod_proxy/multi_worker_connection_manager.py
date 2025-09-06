@@ -60,6 +60,12 @@ class SerializableConnectionState:
         self.bytes_sent = 0
         self.position_seconds = 0
 
+        # Range/seek tracking for position calculation
+        self.last_seek_byte = 0
+        self.last_seek_percentage = 0.0
+        self.total_content_size = 0
+        self.last_seek_timestamp = 0.0
+
     def to_dict(self):
         """Convert to dictionary for Redis storage"""
         return {
@@ -87,7 +93,12 @@ class SerializableConnectionState:
             'created_at': str(self.created_at),
             # Additional tracking fields
             'bytes_sent': str(self.bytes_sent),
-            'position_seconds': str(self.position_seconds)
+            'position_seconds': str(self.position_seconds),
+            # Range/seek tracking
+            'last_seek_byte': str(self.last_seek_byte),
+            'last_seek_percentage': str(self.last_seek_percentage),
+            'total_content_size': str(self.total_content_size),
+            'last_seek_timestamp': str(self.last_seek_timestamp)
         }
 
     @classmethod
@@ -120,6 +131,11 @@ class SerializableConnectionState:
         # Additional tracking fields
         obj.bytes_sent = int(data.get('bytes_sent', 0))
         obj.position_seconds = int(data.get('position_seconds', 0))
+        # Range/seek tracking
+        obj.last_seek_byte = int(data.get('last_seek_byte', 0))
+        obj.last_seek_percentage = float(data.get('last_seek_percentage', 0.0))
+        obj.total_content_size = int(data.get('total_content_size', 0))
+        obj.last_seek_timestamp = float(data.get('last_seek_timestamp', 0.0))
         return obj
 
 
@@ -420,7 +436,12 @@ class RedisBackedVODConnection:
                 'bytes_sent': state.bytes_sent,
                 'position_seconds': state.position_seconds,
                 'active_streams': state.active_streams,
-                'request_count': state.request_count
+                'request_count': state.request_count,
+                # Range/seek tracking
+                'last_seek_byte': state.last_seek_byte,
+                'last_seek_percentage': state.last_seek_percentage,
+                'total_content_size': state.total_content_size,
+                'last_seek_timestamp': state.last_seek_timestamp
             }
         return {}
 
@@ -751,12 +772,51 @@ class MultiWorkerVODConnectionManager:
                         if '-' in range_part:
                             start_byte, end_byte = range_part.split('-', 1)
                             start = int(start_byte) if start_byte else 0
-                            end = int(end_byte) if end_byte else int(connection_headers['content_length']) - 1
-                            total_size = int(connection_headers['content_length'])
 
-                            content_range = f"bytes {start}-{end}/{total_size}"
-                            response['Content-Range'] = content_range
-                            logger.info(f"[{client_id}] Worker {self.worker_id} - Set Content-Range: {content_range}")
+                            # Get the FULL content size from the connection state (from initial request)
+                            state = redis_connection._get_connection_state()
+                            if state and state.content_length:
+                                full_content_size = int(state.content_length)
+                                end = int(end_byte) if end_byte else full_content_size - 1
+
+                                # Content-Range should show full file size per HTTP standards
+                                content_range = f"bytes {start}-{end}/{full_content_size}"
+                                response['Content-Range'] = content_range
+                                logger.info(f"[{client_id}] Worker {self.worker_id} - Set Content-Range: {content_range}")
+
+                                # Store range information for the VOD stats API to calculate position
+                                if start > 0:
+                                    try:
+                                        position_percentage = (start / full_content_size) * 100
+                                        current_timestamp = time.time()
+
+                                        # Update the Redis connection state with seek information
+                                        if redis_connection._acquire_lock():
+                                            try:
+                                                # Refresh state in case it changed
+                                                state = redis_connection._get_connection_state()
+                                                if state:
+                                                    # Store range/seek information for stats API
+                                                    state.last_seek_byte = start
+                                                    state.last_seek_percentage = position_percentage
+                                                    state.total_content_size = full_content_size
+                                                    state.last_seek_timestamp = current_timestamp
+                                                    state.last_activity = current_timestamp
+                                                    redis_connection._save_connection_state(state)
+                                                    logger.info(f"[{client_id}] *** SEEK INFO STORED *** {position_percentage:.1f}% at byte {start:,}/{full_content_size:,} (timestamp: {current_timestamp})")
+                                            finally:
+                                                redis_connection._release_lock()
+                                        else:
+                                            logger.warning(f"[{client_id}] Could not acquire lock to update seek info")
+                                    except Exception as pos_e:
+                                        logger.error(f"[{client_id}] Error storing seek info: {pos_e}")
+                            else:
+                                # Fallback to partial content size if full size not available
+                                partial_size = int(connection_headers['content_length'])
+                                end = int(end_byte) if end_byte else partial_size - 1
+                                content_range = f"bytes {start}-{end}/{partial_size}"
+                                response['Content-Range'] = content_range
+                                logger.warning(f"[{client_id}] Using partial content size for Content-Range (full size not available): {content_range}")
                     except Exception as e:
                         logger.warning(f"[{client_id}] Worker {self.worker_id} - Could not set Content-Range: {e}")
 

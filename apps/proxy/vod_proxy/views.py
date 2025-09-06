@@ -198,56 +198,6 @@ class VODStreamView(View):
             # Get connection manager (Redis-backed for multi-worker support)
             connection_manager = MultiWorkerVODConnectionManager.get_instance()
 
-
-            # Calculate and update position if this is a range request (seeking)
-            if range_header and session_id:
-                try:
-                    if 'bytes=' in range_header:
-                        range_part = range_header.replace('bytes=', '')
-                        if '-' in range_part:
-                            start_byte, end_byte = range_part.split('-', 1)
-                            if start_byte and int(start_byte) > 0:
-                                # Get file size and duration for position calculation
-                                file_size_bytes = None
-                                duration_secs = None
-
-                                # Try to get file size from Redis (persistent connection)
-                                try:
-                                    import redis
-                                    redis_client = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
-                                    persistent_conn_key = f"vod_persistent_connection:{session_id}"
-
-                                    if redis_client.exists(persistent_conn_key):
-                                        conn_data = redis_client.hgetall(persistent_conn_key)
-                                        if conn_data:
-                                            content_length = conn_data.get('content_length')
-                                            if content_length:
-                                                file_size_bytes = int(content_length)
-                                except Exception as e:
-                                    logger.warning(f"[VOD-POSITION] Could not get file size from Redis: {e}")
-
-                                # Get duration from content object
-                                if hasattr(content_obj, 'duration_secs') and content_obj.duration_secs:
-                                    duration_secs = content_obj.duration_secs
-
-                                # Calculate position if we have the required data
-                                if file_size_bytes and file_size_bytes > 0 and duration_secs and duration_secs > 0:
-                                    position_percentage = (int(start_byte) / file_size_bytes) * 100
-                                    position_seconds = int((position_percentage / 100) * duration_secs)
-                                    current_timestamp = time.time()
-
-                                    # Update persistent connection position with timestamp
-                                    try:
-                                        redis_client.hset(persistent_conn_key, mapping={
-                                            "position_seconds": str(position_seconds),
-                                            "last_position_update": str(current_timestamp)
-                                        })
-                                        logger.info(f"[VOD-POSITION] Updated position: {position_seconds}s ({position_percentage:.1f}%)")
-                                    except Exception as redis_e:
-                                        logger.error(f"[VOD-POSITION] Failed to update position: {redis_e}")
-                except Exception as e:
-                    logger.warning(f"[VOD-POSITION] Position calculation error: {e}")
-
             # Stream the content with session-based connection reuse
             logger.info("[VOD-STREAM] Calling connection manager to stream content")
             response = connection_manager.stream_content_with_session(
@@ -753,11 +703,32 @@ class VODStatsView(View):
                                 if content_type == 'movie':
                                     content_obj = Movie.objects.select_related('logo').get(uuid=content_uuid)
                                     content_name = content_obj.name
+
+                                    # Get duration from content object
+                                    duration_secs = None
+                                    if hasattr(content_obj, 'duration_secs') and content_obj.duration_secs:
+                                        duration_secs = content_obj.duration_secs
+
+                                    # If we don't have duration_secs, try to calculate it from file size and position data
+                                    if not duration_secs:
+                                        file_size_bytes = int(combined_data.get('total_content_size', 0))
+                                        last_seek_byte = int(combined_data.get('last_seek_byte', 0))
+                                        last_seek_percentage = float(combined_data.get('last_seek_percentage', 0.0))
+
+                                        # Calculate position if we have the required data
+                                        if file_size_bytes and file_size_bytes > 0 and last_seek_percentage > 0:
+                                            # If we know the seek percentage and current time position, we can estimate duration
+                                            # But we need to know the current time position in seconds first
+                                            # For now, let's use a rough estimate based on file size and typical bitrates
+                                            # This is a fallback - ideally duration should be in the database
+                                            estimated_duration = 6000  # 100 minutes as default for movies
+                                            duration_secs = estimated_duration
+
                                     content_metadata = {
                                         'year': content_obj.year,
                                         'rating': content_obj.rating,
                                         'genre': content_obj.genre,
-                                        'duration_secs': content_obj.duration_secs,
+                                        'duration_secs': duration_secs,
                                         'description': content_obj.description,
                                         'logo_url': content_obj.logo.url if content_obj.logo else None,
                                         'tmdb_id': content_obj.tmdb_id,
@@ -766,6 +737,17 @@ class VODStatsView(View):
                                 elif content_type == 'episode':
                                     content_obj = Episode.objects.select_related('series', 'series__logo').get(uuid=content_uuid)
                                     content_name = f"{content_obj.series.name} - {content_obj.name}"
+
+                                    # Get duration from content object
+                                    duration_secs = None
+                                    if hasattr(content_obj, 'duration_secs') and content_obj.duration_secs:
+                                        duration_secs = content_obj.duration_secs
+
+                                    # If we don't have duration_secs, estimate for episodes
+                                    if not duration_secs:
+                                        estimated_duration = 2400  # 40 minutes as default for episodes
+                                        duration_secs = estimated_duration
+
                                     content_metadata = {
                                         'series_name': content_obj.series.name,
                                         'episode_name': content_obj.name,
@@ -773,7 +755,7 @@ class VODStatsView(View):
                                         'episode_number': content_obj.episode_number,
                                         'air_date': content_obj.air_date.isoformat() if content_obj.air_date else None,
                                         'rating': content_obj.rating,
-                                        'duration_secs': content_obj.duration_secs,
+                                        'duration_secs': duration_secs,
                                         'description': content_obj.description,
                                         'logo_url': content_obj.series.logo.url if content_obj.series.logo else None,
                                         'series_year': content_obj.series.year,
@@ -809,12 +791,34 @@ class VODStatsView(View):
                                     'account_name': 'Unknown Account'  # We don't store account name directly
                                 }
 
-                            # Calculate estimated current position based on last known position + elapsed time
+                            # Calculate estimated current position based on seek percentage or last known position
                             last_known_position = int(combined_data.get('position_seconds', 0))
                             last_position_update = combined_data.get('last_position_update')
+                            last_seek_percentage = float(combined_data.get('last_seek_percentage', 0.0))
+                            last_seek_timestamp = float(combined_data.get('last_seek_timestamp', 0.0))
                             estimated_position = last_known_position
 
-                            if last_position_update and content_metadata.get('duration_secs'):
+                            # If we have seek percentage and content duration, calculate position from that
+                            if last_seek_percentage > 0 and content_metadata.get('duration_secs'):
+                                try:
+                                    duration_secs = int(content_metadata['duration_secs'])
+                                    # Calculate position from seek percentage
+                                    seek_position = int((last_seek_percentage / 100) * duration_secs)
+
+                                    # If we have a recent seek timestamp, add elapsed time since seek
+                                    if last_seek_timestamp > 0:
+                                        elapsed_since_seek = current_time - last_seek_timestamp
+                                        # Add elapsed time but don't exceed content duration
+                                        estimated_position = min(
+                                            seek_position + int(elapsed_since_seek),
+                                            duration_secs
+                                        )
+                                    else:
+                                        estimated_position = seek_position
+                                except (ValueError, TypeError):
+                                    pass
+                            elif last_position_update and content_metadata.get('duration_secs'):
+                                # Fallback: use time-based estimation from position_seconds
                                 try:
                                     update_timestamp = float(last_position_update)
                                     elapsed_since_update = current_time - update_timestamp
@@ -842,7 +846,12 @@ class VODStatsView(View):
                                 'position_seconds': estimated_position,  # Use estimated position
                                 'last_known_position': last_known_position,  # Include raw position for debugging
                                 'last_position_update': last_position_update,  # Include timestamp for frontend use
-                                'bytes_sent': int(combined_data.get('bytes_sent', 0))
+                                'bytes_sent': int(combined_data.get('bytes_sent', 0)),
+                                # Seek/range information for position calculation and frontend display
+                                'last_seek_byte': int(combined_data.get('last_seek_byte', 0)),
+                                'last_seek_percentage': float(combined_data.get('last_seek_percentage', 0.0)),
+                                'total_content_size': int(combined_data.get('total_content_size', 0)),
+                                'last_seek_timestamp': float(combined_data.get('last_seek_timestamp', 0.0))
                             }
 
                             # Calculate connection duration

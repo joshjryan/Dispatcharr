@@ -89,12 +89,22 @@ const VODCard = ({ vodContent }) => {
   const [dateFormatSetting] = useLocalStorage('date-format', 'mdy');
   const dateFormat = dateFormatSetting === 'mdy' ? 'MM/DD' : 'DD/MM';
   const [isClientExpanded, setIsClientExpanded] = useState(false);
+  const [, setUpdateTrigger] = useState(0); // Force re-renders for progress updates
 
   // Get metadata from the VOD content
   const metadata = vodContent.content_metadata || {};
   const contentType = vodContent.content_type;
   const isMovie = contentType === 'movie';
   const isEpisode = contentType === 'episode';
+
+  // Set up timer to update progress every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setUpdateTrigger((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Get the individual connection (since we now separate cards per connection)
   const connection =
@@ -163,14 +173,40 @@ const VODCard = ({ vodContent }) => {
       };
     }
 
-    const positionSeconds = connection.position_seconds || 0;
     const totalSeconds = metadata.duration_secs;
-    const percentage =
-      totalSeconds > 0 ? (positionSeconds / totalSeconds) * 100 : 0;
+    let percentage = 0;
+    let currentTime = 0;
+    const now = Date.now() / 1000; // Current time in seconds
+
+    // Priority 1: Use last_seek_percentage if available (most accurate from range requests)
+    if (
+      connection.last_seek_percentage &&
+      connection.last_seek_percentage > 0 &&
+      connection.last_seek_timestamp
+    ) {
+      // Calculate the position at the time of seek
+      const seekPosition = Math.round(
+        (connection.last_seek_percentage / 100) * totalSeconds
+      );
+
+      // Add elapsed time since the seek
+      const elapsedSinceSeek = now - connection.last_seek_timestamp;
+      currentTime = seekPosition + Math.floor(elapsedSinceSeek);
+
+      // Don't exceed the total duration
+      currentTime = Math.min(currentTime, totalSeconds);
+
+      percentage = (currentTime / totalSeconds) * 100;
+    }
+    // Priority 2: Use position_seconds if available
+    else if (connection.position_seconds && connection.position_seconds > 0) {
+      currentTime = connection.position_seconds;
+      percentage = (currentTime / totalSeconds) * 100;
+    }
 
     return {
       percentage: Math.min(percentage, 100), // Cap at 100%
-      currentTime: positionSeconds,
+      currentTime: Math.max(0, currentTime), // Don't go negative
       totalTime: totalSeconds,
     };
   }, [connection, metadata.duration_secs]);
@@ -511,6 +547,76 @@ const VODCard = ({ vodContent }) => {
                       {dayjs
                         .duration(connection.duration, 'seconds')
                         .humanize()}
+                    </Text>
+                  </Group>
+                )}
+
+                {/* Seek/Position Information */}
+                {(connection.last_seek_percentage > 0 ||
+                  connection.last_seek_byte > 0) && (
+                  <>
+                    <Group gap={8}>
+                      <Text
+                        size="xs"
+                        fw={500}
+                        color="dimmed"
+                        style={{ minWidth: '80px' }}
+                      >
+                        Last Seek:
+                      </Text>
+                      <Text size="xs">
+                        {connection.last_seek_percentage?.toFixed(1)}%
+                        {connection.total_content_size > 0 && (
+                          <span
+                            style={{ color: 'var(--mantine-color-dimmed)' }}
+                          >
+                            {' '}
+                            (
+                            {Math.round(
+                              connection.last_seek_byte / (1024 * 1024)
+                            )}
+                            MB /{' '}
+                            {Math.round(
+                              connection.total_content_size / (1024 * 1024)
+                            )}
+                            MB)
+                          </span>
+                        )}
+                      </Text>
+                    </Group>
+
+                    {Number(connection.last_seek_timestamp) > 0 && (
+                      <Group gap={8}>
+                        <Text
+                          size="xs"
+                          fw={500}
+                          color="dimmed"
+                          style={{ minWidth: '80px' }}
+                        >
+                          Seek Time:
+                        </Text>
+                        <Text size="xs">
+                          {dayjs
+                            .unix(Number(connection.last_seek_timestamp))
+                            .fromNow()}
+                        </Text>
+                      </Group>
+                    )}
+                  </>
+                )}
+
+                {connection.bytes_sent > 0 && (
+                  <Group gap={8}>
+                    <Text
+                      size="xs"
+                      fw={500}
+                      color="dimmed"
+                      style={{ minWidth: '80px' }}
+                    >
+                      Data Sent:
+                    </Text>
+                    <Text size="xs">
+                      {(connection.bytes_sent / (1024 * 1024)).toFixed(1)} MB
                     </Text>
                   </Group>
                 )}
