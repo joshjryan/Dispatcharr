@@ -199,6 +199,55 @@ class VODStreamView(View):
             connection_manager = MultiWorkerVODConnectionManager.get_instance()
 
 
+            # Calculate and update position if this is a range request (seeking)
+            if range_header and session_id:
+                try:
+                    if 'bytes=' in range_header:
+                        range_part = range_header.replace('bytes=', '')
+                        if '-' in range_part:
+                            start_byte, end_byte = range_part.split('-', 1)
+                            if start_byte and int(start_byte) > 0:
+                                # Get file size and duration for position calculation
+                                file_size_bytes = None
+                                duration_secs = None
+
+                                # Try to get file size from Redis (persistent connection)
+                                try:
+                                    import redis
+                                    redis_client = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
+                                    persistent_conn_key = f"vod_persistent_connection:{session_id}"
+
+                                    if redis_client.exists(persistent_conn_key):
+                                        conn_data = redis_client.hgetall(persistent_conn_key)
+                                        if conn_data:
+                                            content_length = conn_data.get('content_length')
+                                            if content_length:
+                                                file_size_bytes = int(content_length)
+                                except Exception as e:
+                                    logger.warning(f"[VOD-POSITION] Could not get file size from Redis: {e}")
+
+                                # Get duration from content object
+                                if hasattr(content_obj, 'duration_secs') and content_obj.duration_secs:
+                                    duration_secs = content_obj.duration_secs
+
+                                # Calculate position if we have the required data
+                                if file_size_bytes and file_size_bytes > 0 and duration_secs and duration_secs > 0:
+                                    position_percentage = (int(start_byte) / file_size_bytes) * 100
+                                    position_seconds = int((position_percentage / 100) * duration_secs)
+                                    current_timestamp = time.time()
+
+                                    # Update persistent connection position with timestamp
+                                    try:
+                                        redis_client.hset(persistent_conn_key, mapping={
+                                            "position_seconds": str(position_seconds),
+                                            "last_position_update": str(current_timestamp)
+                                        })
+                                        logger.info(f"[VOD-POSITION] Updated position: {position_seconds}s ({position_percentage:.1f}%)")
+                                    except Exception as redis_e:
+                                        logger.error(f"[VOD-POSITION] Failed to update position: {redis_e}")
+                except Exception as e:
+                    logger.warning(f"[VOD-POSITION] Position calculation error: {e}")
+
             # Stream the content with session-based connection reuse
             logger.info("[VOD-STREAM] Calling connection manager to stream content")
             response = connection_manager.stream_content_with_session(
@@ -760,6 +809,24 @@ class VODStatsView(View):
                                     'account_name': 'Unknown Account'  # We don't store account name directly
                                 }
 
+                            # Calculate estimated current position based on last known position + elapsed time
+                            last_known_position = int(combined_data.get('position_seconds', 0))
+                            last_position_update = combined_data.get('last_position_update')
+                            estimated_position = last_known_position
+
+                            if last_position_update and content_metadata.get('duration_secs'):
+                                try:
+                                    update_timestamp = float(last_position_update)
+                                    elapsed_since_update = current_time - update_timestamp
+                                    # Add elapsed time to last known position, but don't exceed content duration
+                                    estimated_position = min(
+                                        last_known_position + int(elapsed_since_update),
+                                        int(content_metadata['duration_secs'])
+                                    )
+                                except (ValueError, TypeError):
+                                    # If timestamp parsing fails, fall back to last known position
+                                    estimated_position = last_known_position
+
                             connection_info = {
                                 'content_type': content_type,
                                 'content_uuid': content_uuid,
@@ -771,7 +838,11 @@ class VODStatsView(View):
                                 'user_agent': combined_data.get('client_user_agent', 'Unknown'),
                                 'connected_at': combined_data.get('created_at'),
                                 'last_activity': combined_data.get('last_activity'),
-                                'm3u_profile_id': m3u_profile_id
+                                'm3u_profile_id': m3u_profile_id,
+                                'position_seconds': estimated_position,  # Use estimated position
+                                'last_known_position': last_known_position,  # Include raw position for debugging
+                                'last_position_update': last_position_update,  # Include timestamp for frontend use
+                                'bytes_sent': int(combined_data.get('bytes_sent', 0))
                             }
 
                             # Calculate connection duration

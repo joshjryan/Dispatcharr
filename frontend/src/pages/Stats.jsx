@@ -8,6 +8,7 @@ import {
   Container,
   Flex,
   Group,
+  Progress,
   SimpleGrid,
   Stack,
   Text,
@@ -150,6 +151,43 @@ const VODCard = ({ vodContent }) => {
         {subtitleParts.join(' • ')}
       </Text>
     );
+  };
+
+  // Calculate progress percentage and time
+  const calculateProgress = useCallback(() => {
+    if (!connection || !metadata.duration_secs) {
+      return {
+        percentage: 0,
+        currentTime: 0,
+        totalTime: metadata.duration_secs || 0,
+      };
+    }
+
+    const positionSeconds = connection.position_seconds || 0;
+    const totalSeconds = metadata.duration_secs;
+    const percentage =
+      totalSeconds > 0 ? (positionSeconds / totalSeconds) * 100 : 0;
+
+    return {
+      percentage: Math.min(percentage, 100), // Cap at 100%
+      currentTime: positionSeconds,
+      totalTime: totalSeconds,
+    };
+  }, [connection, metadata.duration_secs]);
+
+  // Format time for display (e.g., "1:23:45" or "23:45")
+  const formatTime = (seconds) => {
+    if (!seconds || seconds === 0) return '0:00';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
   };
 
   // Calculate duration for connection
@@ -325,6 +363,37 @@ const VODCard = ({ vodContent }) => {
             </Tooltip>
           )}
         </Group>
+
+        {/* Progress bar - show current position in content */}
+        {connection &&
+          metadata.duration_secs &&
+          (() => {
+            const progress = calculateProgress();
+            return progress.totalTime > 0 ? (
+              <Stack gap="xs" mt="sm">
+                <Group justify="space-between" align="center">
+                  <Text size="xs" fw={500} color="dimmed">
+                    Progress
+                  </Text>
+                  <Text size="xs" color="dimmed">
+                    {formatTime(progress.currentTime)} /{' '}
+                    {formatTime(progress.totalTime)}
+                  </Text>
+                </Group>
+                <Progress
+                  value={progress.percentage}
+                  size="sm"
+                  color="blue"
+                  style={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  }}
+                />
+                <Text size="xs" color="dimmed" ta="center">
+                  {progress.percentage.toFixed(1)}% watched
+                </Text>
+              </Stack>
+            ) : null;
+          })()}
 
         {/* Client information section - collapsible like channel cards */}
         {connection && (
