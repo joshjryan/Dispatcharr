@@ -96,6 +96,20 @@ const VODCard = ({ vodContent }) => {
   // Get poster/logo URL
   const posterUrl = metadata.logo_url || logo;
 
+  // Transform VOD connections to match table data structure
+  const connectionData = useMemo(() => {
+    return (vodContent.connections || []).map((connection, index) => ({
+      id: `${connection.client_id}-${index}`,
+      ip_address: connection.client_ip,
+      client_id: connection.client_id,
+      user_agent: connection.user_agent || 'Unknown',
+      connected_since: connection.duration || 0,
+      connected_at: connection.connected_at,
+      m3u_profile: connection.m3u_profile,
+      ...connection,
+    }));
+  }, [vodContent.connections]);
+
   // Format duration
   const formatDuration = (seconds) => {
     if (!seconds) return 'Unknown';
@@ -136,7 +150,7 @@ const VODCard = ({ vodContent }) => {
   };
 
   // Calculate duration for connection
-  const calculateConnectionDuration = (connection) => {
+  const calculateConnectionDuration = useCallback((connection) => {
     // If duration is provided by API, use it
     if (connection.duration && connection.duration > 0) {
       return dayjs.duration(connection.duration, 'seconds').humanize();
@@ -158,31 +172,184 @@ const VODCard = ({ vodContent }) => {
     }
 
     return 'Unknown duration';
-  };
+  }, []);
 
   // Get connection start time for tooltip
-  const getConnectionStartTime = (connection) => {
-    if (connection.connected_at) {
-      return dayjs(connection.connected_at * 1000).format(
-        `${dateFormat} HH:mm:ss`
-      );
-    }
-
-    // Fallback: calculate from client_id timestamp
-    if (connection.client_id && connection.client_id.startsWith('vod_')) {
-      try {
-        const parts = connection.client_id.split('_');
-        if (parts.length >= 2) {
-          const clientStartTime = parseInt(parts[1]);
-          return dayjs(clientStartTime).format(`${dateFormat} HH:mm:ss`);
-        }
-      } catch (e) {
-        // Ignore parsing errors
+  const getConnectionStartTime = useCallback(
+    (connection) => {
+      if (connection.connected_at) {
+        return dayjs(connection.connected_at * 1000).format(
+          `${dateFormat} HH:mm:ss`
+        );
       }
-    }
 
-    return 'Unknown';
-  };
+      // Fallback: calculate from client_id timestamp
+      if (connection.client_id && connection.client_id.startsWith('vod_')) {
+        try {
+          const parts = connection.client_id.split('_');
+          if (parts.length >= 2) {
+            const clientStartTime = parseInt(parts[1]);
+            return dayjs(clientStartTime).format(`${dateFormat} HH:mm:ss`);
+          }
+        } catch (e) {
+          // Ignore parsing errors
+        }
+      }
+
+      return 'Unknown';
+    },
+    [dateFormat]
+  );
+
+  // Define table columns similar to ChannelCard
+  const vodConnectionsColumns = useMemo(
+    () => [
+      {
+        id: 'expand',
+        size: 20,
+      },
+      {
+        header: 'IP Address',
+        accessorKey: 'ip_address',
+        cell: ({ cell }) => <Text size="xs">{cell.getValue()}</Text>,
+      },
+      {
+        id: 'connected',
+        header: 'Connected',
+        accessorFn: (row) => {
+          return getConnectionStartTime(row);
+        },
+        cell: ({ cell }) => (
+          <Tooltip
+            label={
+              cell.getValue() !== 'Unknown'
+                ? `Connected at ${cell.getValue()}`
+                : 'Unknown connection time'
+            }
+          >
+            <Text size="xs">{cell.getValue()}</Text>
+          </Tooltip>
+        ),
+      },
+      {
+        id: 'duration',
+        header: 'Duration',
+        accessorFn: (row) => {
+          return calculateConnectionDuration(row);
+        },
+        cell: ({ cell, row }) => {
+          const exactDuration = row.original.duration;
+          return (
+            <Tooltip
+              label={
+                exactDuration
+                  ? `${exactDuration.toFixed(1)} seconds`
+                  : 'Unknown duration'
+              }
+            >
+              <Text size="xs">{cell.getValue()}</Text>
+            </Tooltip>
+          );
+        },
+      },
+    ],
+    [getConnectionStartTime, calculateConnectionDuration]
+  );
+
+  // Table configuration similar to ChannelCard
+  const vodConnectionsTable = useTable({
+    ...TableHelper.defaultProperties,
+    columns: vodConnectionsColumns,
+    data: connectionData,
+    allRowIds: connectionData.map((connection) => connection.id),
+    tableCellProps: () => ({
+      padding: 4,
+      borderColor: '#444',
+      color: '#E0E0E0',
+      fontSize: '0.85rem',
+    }),
+    headerCellRenderFns: {
+      ip_address: ({ header }) => (
+        <Group>
+          <Text size="sm">
+            {header?.column?.columnDef?.header || 'IP Address'}
+          </Text>
+        </Group>
+      ),
+      connected: ({ header }) => (
+        <Group>
+          <Text size="sm">
+            {header?.column?.columnDef?.header || 'Connected'}
+          </Text>
+        </Group>
+      ),
+      duration: ({ header }) => (
+        <Group>
+          <Text size="sm">
+            {header?.column?.columnDef?.header || 'Duration'}
+          </Text>
+        </Group>
+      ),
+    },
+    expandedRowRenderer: ({ row }) => {
+      return (
+        <Box p="xs">
+          <Stack gap="xs">
+            <Group spacing="xs" align="flex-start">
+              <Text size="xs" fw={500} color="dimmed">
+                Client ID:
+              </Text>
+              <Text size="xs" style={{ fontFamily: 'monospace' }}>
+                {row.original.client_id}
+              </Text>
+            </Group>
+
+            {row.original.user_agent &&
+              row.original.user_agent !== 'Unknown' && (
+                <Group spacing="xs" align="flex-start">
+                  <Text size="xs" fw={500} color="dimmed">
+                    User Agent:
+                  </Text>
+                  <Text size="xs" style={{ fontFamily: 'monospace' }}>
+                    {row.original.user_agent.length > 60
+                      ? `${row.original.user_agent.substring(0, 60)}...`
+                      : row.original.user_agent}
+                  </Text>
+                </Group>
+              )}
+
+            {row.original.m3u_profile &&
+              (row.original.m3u_profile.profile_name ||
+                row.original.m3u_profile.account_name) && (
+                <Group spacing="xs" align="flex-start">
+                  <Text size="xs" fw={500} color="dimmed">
+                    M3U Profile:
+                  </Text>
+                  <Text size="xs">
+                    {row.original.m3u_profile.account_name || 'Unknown Account'}{' '}
+                    →{' '}
+                    {row.original.m3u_profile.profile_name || 'Default Profile'}
+                  </Text>
+                </Group>
+              )}
+          </Stack>
+        </Box>
+      );
+    },
+    mantineExpandButtonProps: ({ row }) => ({
+      size: 'xs',
+      style: {
+        transform: row.getIsExpanded() ? 'rotate(180deg)' : 'rotate(-90deg)',
+        transition: 'transform 0.2s',
+      },
+    }),
+    displayColumnDefOptions: {
+      'mrt-row-expand': {
+        size: 15,
+        header: '',
+      },
+    },
+  });
 
   return (
     <Card
@@ -202,8 +369,8 @@ const VODCard = ({ vodContent }) => {
         <Group justify="space-between">
           <Box
             style={{
-              width: '100px',
-              height: '50px',
+              //width: '150px',
+              height: '100px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -246,7 +413,7 @@ const VODCard = ({ vodContent }) => {
 
         {/* Subtitle/episode info */}
         {getSubtitle() && (
-          <Flex justify="flex-start" align="center" mt={-8}>
+          <Flex justify="flex-start" align="center" mt={-12}>
             <Text size="sm" c="dimmed">
               {getSubtitle()}
             </Text>
@@ -254,7 +421,7 @@ const VODCard = ({ vodContent }) => {
         )}
 
         {/* Content information badges */}
-        <Group gap="xs" mt="xs">
+        <Group gap="xs" mt={-4}>
           <Tooltip label="Content Type">
             <Badge size="sm" variant="light" color={isMovie ? 'blue' : 'green'}>
               {contentType.toUpperCase()}
@@ -314,79 +481,8 @@ const VODCard = ({ vodContent }) => {
           </Tooltip>
         </Group>
 
-        {/* Connection details table */}
-        <Box mt="md">
-          <Text size="sm" fw={500} mb="xs">
-            Active Connections:
-          </Text>
-          <Stack gap="xs">
-            {vodContent.connections.map((connection, index) => (
-              <Box
-                key={`${connection.client_id}-${index}`}
-                p="xs"
-                style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: '4px',
-                  border: '1px solid #444',
-                }}
-              >
-                <Group justify="space-between" align="center">
-                  <Group align="center" gap="xs">
-                    <HardDriveDownload size={14} />
-                    <Text size="xs">{connection.client_ip}</Text>
-                    <Text size="xs" c="dimmed">
-                      (Client: {connection.client_id.slice(0, 12)}...)
-                    </Text>
-                  </Group>
-
-                  <Group align="center" gap="xs">
-                    <Timer size={14} />
-                    <Tooltip
-                      label={`Connected at ${getConnectionStartTime(connection)}`}
-                    >
-                      <Text size="xs" c="dimmed">
-                        {calculateConnectionDuration(connection)}
-                      </Text>
-                    </Tooltip>
-                  </Group>
-                </Group>
-
-                {/* M3U Profile Information */}
-                {connection.m3u_profile &&
-                  (connection.m3u_profile.profile_name ||
-                    connection.m3u_profile.account_name) && (
-                    <Group mt="xs" gap="xs">
-                      <HardDriveUpload size={12} />
-                      <Text size="xs" c="dimmed">
-                        M3U:{' '}
-                        {connection.m3u_profile.account_name ||
-                          'Unknown Account'}{' '}
-                        →{' '}
-                        {connection.m3u_profile.profile_name ||
-                          'Default Profile'}
-                      </Text>
-                    </Group>
-                  )}
-
-                {/* User Agent info */}
-                {connection.user_agent &&
-                  connection.user_agent !== 'Unknown' && (
-                    <Group mt="xs" gap="xs">
-                      <Text
-                        size="xs"
-                        c="dimmed"
-                        style={{ fontFamily: 'monospace' }}
-                      >
-                        {connection.user_agent.length > 60
-                          ? `${connection.user_agent.substring(0, 60)}...`
-                          : connection.user_agent}
-                      </Text>
-                    </Group>
-                  )}
-              </Box>
-            ))}
-          </Stack>
-        </Box>
+        {/* Connection details table - similar to ChannelCard */}
+        <CustomTable table={vodConnectionsTable} />
       </Stack>
     </Card>
   );
@@ -1213,22 +1309,24 @@ const ChannelsPage = () => {
 
   // Combine active streams and VOD connections into a single mixed list
   const combinedConnections = useMemo(() => {
-    const activeStreams = Object.values(channelHistory).map(channel => ({
+    const activeStreams = Object.values(channelHistory).map((channel) => ({
       type: 'stream',
       data: channel,
       id: channel.channel_id,
-      sortKey: channel.uptime || 0 // Use uptime for sorting streams
+      sortKey: channel.uptime || 0, // Use uptime for sorting streams
     }));
 
-    const vodItems = vodConnections.map(vodContent => ({
+    const vodItems = vodConnections.map((vodContent) => ({
       type: 'vod',
       data: vodContent,
       id: `${vodContent.content_type}-${vodContent.content_uuid}`,
-      sortKey: Date.now() / 1000 // Use current time as fallback for VOD
+      sortKey: Date.now() / 1000, // Use current time as fallback for VOD
     }));
 
     // Combine and sort by newest connections first (higher sortKey = more recent)
-    return [...activeStreams, ...vodItems].sort((a, b) => b.sortKey - a.sortKey);
+    return [...activeStreams, ...vodItems].sort(
+      (a, b) => b.sortKey - a.sortKey
+    );
   }, [channelHistory, vodConnections]);
 
   return (
@@ -1238,7 +1336,10 @@ const ChannelsPage = () => {
           <Title order={3}>Active Connections</Title>
           <Group align="center">
             <Text size="sm" c="dimmed">
-              {Object.keys(channelHistory).length} stream{Object.keys(channelHistory).length !== 1 ? 's' : ''} • {vodConnections.length} VOD connection{vodConnections.length !== 1 ? 's' : ''}
+              {Object.keys(channelHistory).length} stream
+              {Object.keys(channelHistory).length !== 1 ? 's' : ''} •{' '}
+              {vodConnections.length} VOD connection
+              {vodConnections.length !== 1 ? 's' : ''}
             </Text>
             <Group align="center" gap="xs">
               <Text size="sm">Refresh Interval (seconds):</Text>
@@ -1312,10 +1413,7 @@ const ChannelsPage = () => {
               );
             } else if (connection.type === 'vod') {
               return (
-                <VODCard
-                  key={connection.id}
-                  vodContent={connection.data}
-                />
+                <VODCard key={connection.id} vodContent={connection.data} />
               );
             }
             return null;
