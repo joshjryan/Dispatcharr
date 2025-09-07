@@ -15,7 +15,7 @@ from django.views import View
 from apps.vod.models import Movie, Series, Episode
 from apps.m3u.models import M3UAccount, M3UAccountProfile
 from apps.proxy.vod_proxy.connection_manager import VODConnectionManager
-from apps.proxy.vod_proxy.multi_worker_connection_manager import MultiWorkerVODConnectionManager
+from apps.proxy.vod_proxy.multi_worker_connection_manager import MultiWorkerVODConnectionManager, infer_content_type_from_url
 from .utils import get_client_info, create_vod_response
 
 logger = logging.getLogger(__name__)
@@ -344,7 +344,20 @@ class VODStreamView(View):
             # The actual GET requests from FUSE will use the persistent connection
 
             # Use the total_size we extracted from the range response
-            content_type_header = response.headers.get('Content-Type', 'video/mp4')
+            provider_content_type = response.headers.get('Content-Type')
+
+            if provider_content_type:
+                content_type_header = provider_content_type
+                logger.info(f"[VOD-HEAD] Using provider Content-Type: {content_type_header}")
+            else:
+                # Provider didn't send Content-Type, infer from URL
+                inferred_content_type = infer_content_type_from_url(final_stream_url)
+                if inferred_content_type:
+                    content_type_header = inferred_content_type
+                    logger.info(f"[VOD-HEAD] Provider missing Content-Type, inferred from URL: {content_type_header}")
+                else:
+                    content_type_header = 'video/mp4'
+                    logger.info(f"[VOD-HEAD] No Content-Type from provider and could not infer from URL, using default: {content_type_header}")
 
             logger.info(f"[VOD-HEAD] Provider response - Total Size: {total_size}, Type: {content_type_header}")
 

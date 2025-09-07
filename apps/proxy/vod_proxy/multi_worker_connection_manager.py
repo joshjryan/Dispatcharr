@@ -11,6 +11,10 @@ import re
 import requests
 import pickle
 import base64
+import os
+import socket
+import mimetypes
+from urllib.parse import urlparse
 from typing import Optional, Dict, Any
 from django.http import StreamingHttpResponse, HttpResponse
 from core.utils import RedisClient
@@ -20,11 +24,64 @@ from apps.m3u.models import M3UAccountProfile
 logger = logging.getLogger("vod_proxy")
 
 
+def infer_content_type_from_url(url: str) -> Optional[str]:
+    """
+    Infer MIME type from file extension in URL
+
+    Args:
+        url: The stream URL
+
+    Returns:
+        MIME type string or None if cannot be determined
+    """
+    try:
+        parsed_url = urlparse(url)
+        path = parsed_url.path
+
+        # Extract file extension
+        _, ext = os.path.splitext(path)
+        ext = ext.lower()
+
+        # Common video format mappings
+        video_mime_types = {
+            '.mp4': 'video/mp4',
+            '.mkv': 'video/x-matroska',
+            '.avi': 'video/x-msvideo',
+            '.mov': 'video/quicktime',
+            '.wmv': 'video/x-ms-wmv',
+            '.flv': 'video/x-flv',
+            '.webm': 'video/webm',
+            '.m4v': 'video/x-m4v',
+            '.3gp': 'video/3gpp',
+            '.ts': 'video/mp2t',
+            '.m3u8': 'application/x-mpegURL',
+            '.mpg': 'video/mpeg',
+            '.mpeg': 'video/mpeg',
+        }
+
+        if ext in video_mime_types:
+            logger.debug(f"Inferred content type '{video_mime_types[ext]}' from extension '{ext}' in URL: {url}")
+            return video_mime_types[ext]
+
+        # Fallback to mimetypes module
+        mime_type, _ = mimetypes.guess_type(path)
+        if mime_type and mime_type.startswith('video/'):
+            logger.debug(f"Inferred content type '{mime_type}' using mimetypes for URL: {url}")
+            return mime_type
+
+        logger.debug(f"Could not infer content type from URL: {url}")
+        return None
+
+    except Exception as e:
+        logger.warning(f"Error inferring content type from URL '{url}': {e}")
+        return None
+
+
 class SerializableConnectionState:
     """Serializable connection state that can be stored in Redis"""
 
     def __init__(self, session_id: str, stream_url: str, headers: dict,
-                 content_length: str = None, content_type: str = 'video/mp4',
+                 content_length: str = None, content_type: str = None,
                  final_url: str = None, m3u_profile_id: int = None,
                  # Session metadata fields (previously stored in vod_session key)
                  content_obj_type: str = None, content_uuid: str = None,
@@ -73,7 +130,7 @@ class SerializableConnectionState:
             'stream_url': self.stream_url or '',
             'headers': json.dumps(self.headers or {}),
             'content_length': str(self.content_length) if self.content_length is not None else '',
-            'content_type': self.content_type or 'video/mp4',
+            'content_type': self.content_type or '',
             'final_url': self.final_url or '',
             'm3u_profile_id': str(self.m3u_profile_id) if self.m3u_profile_id is not None else '',
             'last_activity': str(self.last_activity),
@@ -109,7 +166,7 @@ class SerializableConnectionState:
             stream_url=data['stream_url'],
             headers=json.loads(data['headers']) if data['headers'] else {},
             content_length=data.get('content_length') if data.get('content_length') else None,
-            content_type=data.get('content_type', 'video/mp4'),
+            content_type=data.get('content_type') or None,
             final_url=data.get('final_url') if data.get('final_url') else None,
             m3u_profile_id=int(data.get('m3u_profile_id')) if data.get('m3u_profile_id') else None,
             # Session metadata
@@ -309,8 +366,28 @@ class RedisBackedVODConnection:
             if state.request_count == 1:
                 if not state.content_length:
                     state.content_length = response.headers.get('content-length')
-                if not state.content_type:
-                    state.content_type = response.headers.get('content-type', 'video/mp4')
+                logger.debug(f"[{self.session_id}] Response headers received: {dict(response.headers)}")
+
+                if not state.content_type:  # This will be True for None, '', or any falsy value
+                    # Get content type from provider response headers
+                    provider_content_type = (response.headers.get('content-type') or
+                                           response.headers.get('Content-Type') or
+                                           response.headers.get('CONTENT-TYPE'))
+
+                    if provider_content_type:
+                        logger.debug(f"[{self.session_id}] Using provider Content-Type: '{provider_content_type}'")
+                        state.content_type = provider_content_type
+                    else:
+                        # Provider didn't send Content-Type, infer from URL extension
+                        inferred_content_type = infer_content_type_from_url(state.stream_url)
+                        if inferred_content_type:
+                            logger.info(f"[{self.session_id}] Provider missing Content-Type, inferred from URL: '{inferred_content_type}'")
+                            state.content_type = inferred_content_type
+                        else:
+                            logger.debug(f"[{self.session_id}] No Content-Type from provider and could not infer from URL, using default: 'video/mp4'")
+                            state.content_type = 'video/mp4'
+                else:
+                    logger.debug(f"[{self.session_id}] Content-Type already set in state: {state.content_type}")
                 if not state.final_url:
                     state.final_url = response.url
 
@@ -410,7 +487,7 @@ class RedisBackedVODConnection:
         if state:
             return {
                 'content_length': state.content_length,
-                'content_type': state.content_type,
+                'content_type': state.content_type or 'video/mp4',
                 'final_url': state.final_url
             }
         return {}
