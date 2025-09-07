@@ -71,24 +71,41 @@ class PluginManager:
         return self._registry
 
     def _load_plugin(self, key: str, path: str):
-        # Plugin can be a package or contain plugin.py
-        module_name = None
-        if os.path.exists(os.path.join(path, "__init__.py")):
-            module_name = key
-        elif os.path.exists(os.path.join(path, "plugin.py")):
-            module_name = f"{key}.plugin"
-        else:
+        # Plugin can be a package and/or contain plugin.py. Prefer plugin.py when present.
+        has_pkg = os.path.exists(os.path.join(path, "__init__.py"))
+        has_pluginpy = os.path.exists(os.path.join(path, "plugin.py"))
+        if not (has_pkg or has_pluginpy):
             logger.debug(f"Skipping {path}: no plugin.py or package")
             return
 
-        logger.debug(f"Importing plugin module {module_name}")
-        module = importlib.import_module(module_name)
+        candidate_modules = []
+        if has_pluginpy:
+            candidate_modules.append(f"{key}.plugin")
+        if has_pkg:
+            candidate_modules.append(key)
 
-        # Expect a class named Plugin in the module
-        plugin_cls = getattr(module, "Plugin", None)
+        module = None
+        plugin_cls = None
+        last_error = None
+        for module_name in candidate_modules:
+            try:
+                logger.debug(f"Importing plugin module {module_name}")
+                module = importlib.import_module(module_name)
+                plugin_cls = getattr(module, "Plugin", None)
+                if plugin_cls is not None:
+                    break
+                else:
+                    logger.warning(f"Module {module_name} has no Plugin class")
+            except Exception as e:
+                last_error = e
+                logger.exception(f"Error importing module {module_name}")
+
         if plugin_cls is None:
-            logger.warning(f"Module {module_name} has no Plugin class; skipping")
-            return
+            if last_error:
+                raise last_error
+            else:
+                logger.warning(f"No Plugin class found for {key}; skipping")
+                return
 
         instance = plugin_cls()
 
@@ -138,8 +155,10 @@ class PluginManager:
     def list_plugins(self) -> List[Dict[str, Any]]:
         from .models import PluginConfig
 
-        plugins = []
+        plugins: List[Dict[str, Any]] = []
         configs = {c.key: c for c in PluginConfig.objects.all()}
+
+        # First, include all discovered plugins
         for key, lp in self._registry.items():
             conf = configs.get(key)
             plugins.append(
@@ -148,12 +167,35 @@ class PluginManager:
                     "name": lp.name,
                     "version": lp.version,
                     "description": lp.description,
-                    "enabled": conf.enabled if conf else True,
+                    "enabled": conf.enabled if conf else False,
+                    "ever_enabled": getattr(conf, "ever_enabled", False) if conf else False,
                     "fields": lp.fields or [],
                     "settings": (conf.settings if conf else {}),
                     "actions": lp.actions or [],
+                    "missing": False,
                 }
             )
+
+        # Then, include any DB-only configs (files missing or failed to load)
+        discovered_keys = set(self._registry.keys())
+        for key, conf in configs.items():
+            if key in discovered_keys:
+                continue
+            plugins.append(
+                {
+                    "key": key,
+                    "name": conf.name,
+                    "version": conf.version,
+                    "description": conf.description,
+                    "enabled": conf.enabled,
+                    "ever_enabled": getattr(conf, "ever_enabled", False),
+                    "fields": [],
+                    "settings": conf.settings or {},
+                    "actions": [],
+                    "missing": True,
+                }
+            )
+
         return plugins
 
     def get_plugin(self, key: str) -> Optional[LoadedPlugin]:

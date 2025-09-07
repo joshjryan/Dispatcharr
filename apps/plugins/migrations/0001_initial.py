@@ -15,11 +15,11 @@ class Migration(migrations.Migration):
                 ("name", models.CharField(max_length=255)),
                 ("version", models.CharField(blank=True, default="", max_length=64)),
                 ("description", models.TextField(blank=True, default="")),
-                ("enabled", models.BooleanField(default=True)),
+                ("enabled", models.BooleanField(default=False)),  # merged change
+                ("ever_enabled", models.BooleanField(default=False)),  # merged addition
                 ("settings", models.JSONField(blank=True, default=dict)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
             ],
         )
     ]
-

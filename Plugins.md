@@ -118,13 +118,21 @@ Each action is a dict:
 
 Clicking an action calls your plugin’s `run(action, params, context)` and shows a notification with the result or error.
 
-### Confirmation Prompt
-If you want the UI to ask for confirmation before executing an action, include a boolean field with id `confirm` set to `True` (or default `True`). The UI checks it and prompts using a confirm dialog.
+### Action Confirmation (Modal)
+Developers can request a confirmation modal per action using the `confirm` key on the action. Options:
+
+- Boolean: `confirm: true` will show a default confirmation modal.
+- Object: `confirm: { required: true, title: '...', message: '...' }` to customize the modal title and message.
 
 Example:
 ```
-fields = [
-    {"id": "confirm", "label": "Require confirmation", "type": "boolean", "default": True},
+actions = [
+    {
+        "id": "danger_run",
+        "label": "Do Something Risky",
+        "description": "Runs a job that affects many records.",
+        "confirm": { "required": true, "title": "Proceed?", "message": "This will modify many records." },
+    }
 ]
 ```
 
@@ -181,6 +189,7 @@ Prefer Celery tasks (`.delay()`) to keep `run` fast and non-blocking.
 - List plugins: `GET /api/plugins/plugins/`
   - Response: `{ "plugins": [{ key, name, version, description, enabled, fields, settings, actions }, ...] }`
 - Reload discovery: `POST /api/plugins/plugins/reload/`
+- Import plugin: `POST /api/plugins/plugins/import/` with form-data file field `file`
 - Update settings: `POST /api/plugins/plugins/<key>/settings/` with `{"settings": {...}}`
 - Run action: `POST /api/plugins/plugins/<key>/run/` with `{"action": "id", "params": {...}}`
 - Enable/disable: `POST /api/plugins/plugins/<key>/enabled/` with `{"enabled": true|false}`
@@ -190,9 +199,19 @@ Notes:
 
 ---
 
+## Importing Plugins
+
+- In the UI, click the Import button on the Plugins page and upload a `.zip` containing a plugin folder.
+- The archive should contain either `plugin.py` or a Python package (`__init__.py`).
+- On success, the UI shows the plugin name/description and lets you enable it immediately (plugins are disabled by default).
+
+---
+
 ## Enabling / Disabling Plugins
 
-- Each plugin has a persisted `enabled` flag in the DB (`apps/plugins/models.py`).
+- Each plugin has a persisted `enabled` flag (default: disabled) and `ever_enabled` flag in the DB (`apps/plugins/models.py`).
+- New plugins are disabled by default and require an explicit enable.
+- The first time a plugin is enabled, the UI shows a trust warning modal explaining that plugins can run arbitrary server-side code.
 - The Plugins page shows a toggle in the card header. Turning it off dims the card and disables the Run button.
 - Backend enforcement: Attempts to run an action for a disabled plugin return HTTP 403.
 
@@ -265,4 +284,3 @@ class Plugin:
 - Model: `apps/plugins/models.py`
 - Frontend page: `frontend/src/pages/Plugins.jsx`
 - Sidebar entry: `frontend/src/components/Sidebar.jsx`
-

@@ -1240,6 +1240,34 @@ export default class API {
     }
   }
 
+  static async importPlugin(file) {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const response = await request(`${host}/api/plugins/plugins/import/`, {
+        method: 'POST',
+        body: form,
+      });
+      return response;
+    } catch (e) {
+      // Show only the concise error message for plugin import
+      const msg = (e?.body && (e.body.error || e.body.detail)) || e?.message || 'Failed to import plugin';
+      notifications.show({ title: 'Import failed', message: msg, color: 'red' });
+      throw e;
+    }
+  }
+
+  static async deletePlugin(key) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/delete/`, {
+        method: 'DELETE',
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to delete plugin', e);
+    }
+  }
+
   static async updatePluginSettings(key, settings) {
     try {
       const response = await request(
@@ -1273,7 +1301,7 @@ export default class API {
         method: 'POST',
         body: { enabled },
       });
-      return response?.enabled;
+      return response;
     } catch (e) {
       errorNotification('Failed to update plugin enabled state', e);
     }
