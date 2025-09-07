@@ -290,8 +290,10 @@ class VODStreamView(View):
 
             # Make a small range GET request to get content length since providers don't support HEAD
             # We'll use a tiny range to minimize data transfer but get the headers we need
+            # Use M3U account's user agent as primary, client user agent as fallback
+            m3u_user_agent = m3u_account.get_user_agent().user_agent if m3u_account.get_user_agent() else None
             headers = {
-                'User-Agent': client_user_agent or 'Dispatcharr/1.0',
+                'User-Agent': m3u_user_agent or client_user_agent or 'Dispatcharr/1.0',
                 'Accept': '*/*',
                 'Range': 'bytes=0-1'  # Request only first 2 bytes
             }
