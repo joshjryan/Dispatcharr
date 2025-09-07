@@ -45,8 +45,11 @@ class PluginManager:
         if self.plugins_dir not in sys.path:
             sys.path.append(self.plugins_dir)
 
-    def discover_plugins(self) -> Dict[str, LoadedPlugin]:
-        logger.info(f"Discovering plugins in {self.plugins_dir}")
+    def discover_plugins(self, *, sync_db: bool = True) -> Dict[str, LoadedPlugin]:
+        if sync_db:
+            logger.info(f"Discovering plugins in {self.plugins_dir}")
+        else:
+            logger.debug(f"Discovering plugins (no DB sync) in {self.plugins_dir}")
         self._registry.clear()
 
         try:
@@ -66,8 +69,13 @@ class PluginManager:
         except FileNotFoundError:
             logger.warning(f"Plugins directory not found: {self.plugins_dir}")
 
-        # Sync DB records
-        self._sync_db_with_registry()
+        # Sync DB records (optional)
+        if sync_db:
+            try:
+                self._sync_db_with_registry()
+            except Exception:
+                # Defer sync if database is not ready (e.g., first startup before migrate)
+                logger.exception("Deferring plugin DB sync; database not ready yet")
         return self._registry
 
     def _load_plugin(self, key: str, path: str):
@@ -156,7 +164,12 @@ class PluginManager:
         from .models import PluginConfig
 
         plugins: List[Dict[str, Any]] = []
-        configs = {c.key: c for c in PluginConfig.objects.all()}
+        try:
+            configs = {c.key: c for c in PluginConfig.objects.all()}
+        except Exception as e:
+            # Database might not be migrated yet; fall back to registry only
+            logger.warning("PluginConfig table unavailable; listing registry only: %s", e)
+            configs = {}
 
         # First, include all discovered plugins
         for key, lp in self._registry.items():
