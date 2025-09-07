@@ -365,7 +365,25 @@ class RedisBackedVODConnection:
             # Update state with response info on first request
             if state.request_count == 1:
                 if not state.content_length:
-                    state.content_length = response.headers.get('content-length')
+                    # Try to get full file size from Content-Range header first (for range requests)
+                    content_range = response.headers.get('content-range')
+                    if content_range and '/' in content_range:
+                        try:
+                            # Parse "bytes 0-1023/12653476926" to get total size
+                            total_size = content_range.split('/')[-1]
+                            if total_size.isdigit():
+                                state.content_length = total_size
+                                logger.debug(f"[{self.session_id}] Got full file size from Content-Range: {total_size}")
+                            else:
+                                # Fallback to Content-Length for partial size
+                                state.content_length = response.headers.get('content-length')
+                        except Exception as e:
+                            logger.warning(f"[{self.session_id}] Error parsing Content-Range: {e}")
+                            state.content_length = response.headers.get('content-length')
+                    else:
+                        # No Content-Range, use Content-Length (for non-range requests)
+                        state.content_length = response.headers.get('content-length')
+
                 logger.debug(f"[{self.session_id}] Response headers received: {dict(response.headers)}")
 
                 if not state.content_type:  # This will be True for None, '', or any falsy value
@@ -841,9 +859,8 @@ class MultiWorkerVODConnectionManager:
 
             if connection_headers.get('content_length'):
                 response['Accept-Ranges'] = 'bytes'
-                response['Content-Length'] = connection_headers['content_length']
 
-                # Set Content-Range for partial requests
+                # For range requests, Content-Length should be the partial content size, not full file size
                 if range_header and 'bytes=' in range_header:
                     try:
                         range_part = range_header.replace('bytes=', '')
@@ -857,10 +874,14 @@ class MultiWorkerVODConnectionManager:
                                 full_content_size = int(state.content_length)
                                 end = int(end_byte) if end_byte else full_content_size - 1
 
+                                # Calculate partial content size for Content-Length header
+                                partial_content_size = end - start + 1
+                                response['Content-Length'] = str(partial_content_size)
+
                                 # Content-Range should show full file size per HTTP standards
                                 content_range = f"bytes {start}-{end}/{full_content_size}"
                                 response['Content-Range'] = content_range
-                                logger.info(f"[{client_id}] Worker {self.worker_id} - Set Content-Range: {content_range}")
+                                logger.info(f"[{client_id}] Worker {self.worker_id} - Set Content-Range: {content_range}, Content-Length: {partial_content_size}")
 
                                 # Store range information for the VOD stats API to calculate position
                                 if start > 0:
@@ -894,9 +915,14 @@ class MultiWorkerVODConnectionManager:
                                 end = int(end_byte) if end_byte else partial_size - 1
                                 content_range = f"bytes {start}-{end}/{partial_size}"
                                 response['Content-Range'] = content_range
+                                response['Content-Length'] = str(end - start + 1)
                                 logger.warning(f"[{client_id}] Using partial content size for Content-Range (full size not available): {content_range}")
                     except Exception as e:
                         logger.warning(f"[{client_id}] Worker {self.worker_id} - Could not set Content-Range: {e}")
+                        response['Content-Length'] = connection_headers['content_length']
+                else:
+                    # For non-range requests, use the full content length
+                    response['Content-Length'] = connection_headers['content_length']
 
             logger.info(f"[{client_id}] Worker {self.worker_id} - Redis-backed response ready (status: {response.status_code})")
             return response
