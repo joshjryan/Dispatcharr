@@ -699,6 +699,7 @@ class MultiWorkerVODConnectionManager:
                             # Update activity every 100 chunks in consolidated connection state
                             if chunk_count % 100 == 0:
                                 # Update the connection state
+                                logger.debug(f"Client: [{client_id}] Worker: {self.worker_id} sent {chunk_count} chunks for VOD: {content_name}")
                                 if redis_connection._acquire_lock():
                                     try:
                                         state = redis_connection._get_connection_state()
