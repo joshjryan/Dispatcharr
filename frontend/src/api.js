@@ -1219,6 +1219,94 @@ export default class API {
     }
   }
 
+  // Plugins API
+  static async getPlugins() {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/`);
+      return response.plugins || [];
+    } catch (e) {
+      errorNotification('Failed to retrieve plugins', e);
+    }
+  }
+
+  static async reloadPlugins() {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/reload/`, {
+        method: 'POST',
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to reload plugins', e);
+    }
+  }
+
+  static async importPlugin(file) {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const response = await request(`${host}/api/plugins/plugins/import/`, {
+        method: 'POST',
+        body: form,
+      });
+      return response;
+    } catch (e) {
+      // Show only the concise error message for plugin import
+      const msg = (e?.body && (e.body.error || e.body.detail)) || e?.message || 'Failed to import plugin';
+      notifications.show({ title: 'Import failed', message: msg, color: 'red' });
+      throw e;
+    }
+  }
+
+  static async deletePlugin(key) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/delete/`, {
+        method: 'DELETE',
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to delete plugin', e);
+    }
+  }
+
+  static async updatePluginSettings(key, settings) {
+    try {
+      const response = await request(
+        `${host}/api/plugins/plugins/${key}/settings/`,
+        {
+          method: 'POST',
+          body: { settings },
+        }
+      );
+      return response?.settings || {};
+    } catch (e) {
+      errorNotification('Failed to update plugin settings', e);
+    }
+  }
+
+  static async runPluginAction(key, action, params = {}) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/run/`, {
+        method: 'POST',
+        body: { action, params },
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to run plugin action', e);
+    }
+  }
+
+  static async setPluginEnabled(key, enabled) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/enabled/`, {
+        method: 'POST',
+        body: { enabled },
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to update plugin enabled state', e);
+    }
+  }
+
   static async checkSetting(values) {
     const { id, ...payload } = values;
 
