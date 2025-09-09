@@ -40,6 +40,7 @@ class M3UAccountProfileSerializer(serializers.ModelSerializer):
             "current_viewers",
             "search_pattern",
             "replace_pattern",
+            "custom_properties",
         ]
         read_only_fields = ["id"]
 
