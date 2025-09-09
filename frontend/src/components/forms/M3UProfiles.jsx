@@ -28,6 +28,7 @@ const M3UProfiles = ({ playlist = null, isOpen, onClose }) => {
   const theme = useMantineTheme();
 
   const allProfiles = usePlaylistsStore((s) => s.profiles);
+  const fetchPlaylist = usePlaylistsStore((s) => s.fetchPlaylist);
   const isWarningSuppressed = useWarningsStore((s) => s.isWarningSuppressed);
   const suppressWarning = useWarningsStore((s) => s.suppressWarning);
 
@@ -39,6 +40,13 @@ const M3UProfiles = ({ playlist = null, isOpen, onClose }) => {
   const [profileToDelete, setProfileToDelete] = useState(null);
   const [accountInfoOpen, setAccountInfoOpen] = useState(false);
   const [selectedProfileForInfo, setSelectedProfileForInfo] = useState(null);
+
+  const handleRefreshAccountInfo = async () => {
+    // Refresh the playlist data to get updated account info
+    if (playlist?.id) {
+      await fetchPlaylist(playlist.id);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -348,6 +356,7 @@ This action cannot be undone.`}
         isOpen={accountInfoOpen}
         onClose={closeAccountInfo}
         profile={selectedProfileForInfo}
+        onRefresh={handleRefreshAccountInfo}
       />
     </>
   );

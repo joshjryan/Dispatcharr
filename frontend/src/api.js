@@ -1145,6 +1145,22 @@ export default class API {
     }
   }
 
+  static async refreshAccountInfo(profileId) {
+    try {
+      const response = await request(`${host}/api/m3u/refresh-account-info/${profileId}/`, {
+        method: 'POST',
+      });
+      return response;
+    } catch (e) {
+      // If it's a structured error response, return it instead of throwing
+      if (e.body && typeof e.body === 'object') {
+        return e.body;
+      }
+      errorNotification(`Failed to refresh account info for profile ${profileId}`, e);
+      throw e;
+    }
+  }
+
   static async addM3UFilter(accountId, values) {
     try {
       const response = await request(

@@ -465,7 +465,10 @@ export const WebsocketProvider = ({ children }) => {
               try {
                 await fetchEPGs();
               } catch (e) {
-                console.warn('Failed to refresh EPG sources after change notification:', e);
+                console.warn(
+                  'Failed to refresh EPG sources after change notification:',
+                  e
+                );
               }
               break;
 
@@ -522,6 +525,28 @@ export const WebsocketProvider = ({ children }) => {
                 autoClose: 5000,
               });
               fetchLogos();
+              break;
+
+            case 'account_info_refresh_success':
+              notifications.show({
+                title: 'Account Info Refreshed',
+                message: `Successfully updated account information for ${parsedEvent.data.profile_name}`,
+                color: 'green',
+                autoClose: 4000,
+              });
+              // Trigger refresh of playlists to update the UI
+              fetchPlaylists();
+              break;
+
+            case 'account_info_refresh_error':
+              notifications.show({
+                title: 'Account Info Refresh Failed',
+                message:
+                  parsedEvent.data.error ||
+                  'Failed to refresh account information',
+                color: 'red',
+                autoClose: 8000,
+              });
               break;
 
             default:

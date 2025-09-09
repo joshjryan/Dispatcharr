@@ -29,6 +29,17 @@ class M3UFilterSerializer(serializers.ModelSerializer):
 
 
 class M3UAccountProfileSerializer(serializers.ModelSerializer):
+    account = serializers.SerializerMethodField()
+
+    def get_account(self, obj):
+        """Include basic account information for frontend use"""
+        return {
+            'id': obj.m3u_account.id,
+            'name': obj.m3u_account.name,
+            'account_type': obj.m3u_account.account_type,
+            'is_xtream_codes': obj.m3u_account.account_type == 'XC'
+        }
+
     class Meta:
         model = M3UAccountProfile
         fields = [
@@ -41,8 +52,9 @@ class M3UAccountProfileSerializer(serializers.ModelSerializer):
             "search_pattern",
             "replace_pattern",
             "custom_properties",
+            "account",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "account"]
 
     def create(self, validated_data):
         m3u_account = self.context.get("m3u_account")

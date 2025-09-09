@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   Text,
@@ -11,7 +11,10 @@ import {
   Alert,
   Loader,
   Center,
+  ActionIcon,
+  Tooltip,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import {
   Info,
   Clock,
@@ -19,9 +22,58 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
+import API from '../../api';
 
-const AccountInfoModal = ({ isOpen, onClose, profile }) => {
+const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (!profile?.id) {
+      notifications.show({
+        title: 'Error',
+        message: 'Unable to refresh: Profile information not available',
+        color: 'red',
+        icon: <XCircle size={16} />,
+      });
+      return;
+    }
+
+    setIsRefreshing(true);
+
+    try {
+      const data = await API.refreshAccountInfo(profile.id);
+
+      if (data.success) {
+        notifications.show({
+          title: 'Success',
+          message:
+            'Account info refresh initiated. The information will be updated shortly.',
+          color: 'green',
+          icon: <CheckCircle size={16} />,
+        });
+
+        // Call the parent's refresh function if provided
+        if (onRefresh) {
+          // Wait a moment for the backend to process, then refresh
+          setTimeout(onRefresh, 2000);
+        }
+      } else {
+        notifications.show({
+          title: 'Error',
+          message: data.error || 'Failed to refresh account information',
+          color: 'red',
+          icon: <XCircle size={16} />,
+        });
+      }
+    } catch {
+      // Error notification is already handled by the API function
+      // Just need to handle the UI state
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
   if (!profile || !profile.custom_properties) {
     return (
       <Modal opened={isOpen} onClose={onClose} title="Account Information">
@@ -39,7 +91,8 @@ const AccountInfoModal = ({ isOpen, onClose, profile }) => {
     );
   }
 
-  const { user_info, server_info, last_refresh } = profile.custom_properties;
+  const { user_info, server_info, last_refresh } =
+    profile.custom_properties || {};
 
   // Helper function to format timestamps
   const formatTimestamp = (timestamp) => {
@@ -337,13 +390,30 @@ const AccountInfoModal = ({ isOpen, onClose, profile }) => {
             borderRadius: 6,
           }}
         >
-          <Group spacing="xs" align="center">
-            <Text fw={500} size="sm">
-              Last Account Info Refresh:
-            </Text>
-            <Badge variant="light" color="gray" size="sm">
-              {last_refresh ? formatTimestamp(last_refresh) : 'Never'}
-            </Badge>
+          <Group spacing="xs" align="center" position="apart">
+            {/* Show refresh button for XtreamCodes accounts */}
+            {profile?.account?.is_xtream_codes && (
+              <Tooltip label="Refresh Account Info Now" position="top">
+                <ActionIcon
+                  size="sm"
+                  variant="light"
+                  color="blue"
+                  onClick={handleRefresh}
+                  loading={isRefreshing}
+                  disabled={isRefreshing}
+                >
+                  <RefreshCw size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Group spacing="xs" align="center">
+              <Text fw={500} size="sm">
+                Last Account Info Refresh:
+              </Text>
+              <Badge variant="light" color="gray" size="sm">
+                {last_refresh ? formatTimestamp(last_refresh) : 'Never'}
+              </Badge>
+            </Group>
           </Group>
         </Box>
       </Stack>
