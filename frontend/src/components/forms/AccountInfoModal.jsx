@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Modal,
   Text,
@@ -25,12 +25,26 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import API from '../../api';
+import usePlaylistsStore from '../../store/playlists';
 
 const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Get fresh profile data from store to ensure we have the latest custom_properties
+  const profiles = usePlaylistsStore((state) => state.profiles);
+  const currentProfile = useMemo(() => {
+    if (!profile?.id || !profile?.account?.id) return profile;
+
+    // Find the current profile in the store by ID
+    const accountProfiles = profiles[profile.account.id] || [];
+    const freshProfile = accountProfiles.find((p) => p.id === profile.id);
+
+    // Return fresh profile if found, otherwise fall back to the passed profile
+    return freshProfile || profile;
+  }, [profile, profiles]);
+
   const handleRefresh = async () => {
-    if (!profile?.id) {
+    if (!currentProfile?.id) {
       notifications.show({
         title: 'Error',
         message: 'Unable to refresh: Profile information not available',
@@ -43,7 +57,7 @@ const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
     setIsRefreshing(true);
 
     try {
-      const data = await API.refreshAccountInfo(profile.id);
+      const data = await API.refreshAccountInfo(currentProfile.id);
 
       if (data.success) {
         notifications.show({
@@ -74,7 +88,7 @@ const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
       setIsRefreshing(false);
     }
   };
-  if (!profile || !profile.custom_properties) {
+  if (!currentProfile || !currentProfile.custom_properties) {
     return (
       <Modal opened={isOpen} onClose={onClose} title="Account Information">
         <Center p="lg">
@@ -92,7 +106,7 @@ const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
   }
 
   const { user_info, server_info, last_refresh } =
-    profile.custom_properties || {};
+    currentProfile.custom_properties || {};
 
   // Helper function to format timestamps
   const formatTimestamp = (timestamp) => {
@@ -181,7 +195,7 @@ const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
         <Group spacing="sm">
           <Info size={20} color="var(--mantine-color-blue-6)" />
           <Text fw={600} size="lg">
-            Account Information - {profile.name}
+            Account Information - {currentProfile.name}
           </Text>
         </Group>
       }
@@ -392,7 +406,7 @@ const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
         >
           <Group spacing="xs" align="center" position="apart">
             {/* Show refresh button for XtreamCodes accounts */}
-            {profile?.account?.is_xtream_codes && (
+            {currentProfile?.account?.is_xtream_codes && (
               <Tooltip label="Refresh Account Info Now" position="top">
                 <ActionIcon
                   size="sm"
