@@ -47,9 +47,18 @@ const AccountInfoModal = ({ isOpen, onClose, profile }) => {
     try {
       const date =
         typeof timestamp === 'string' && timestamp.includes('T')
-          ? new Date(timestamp)
+          ? new Date(timestamp) // This should handle ISO format properly
           : new Date(parseInt(timestamp) * 1000);
-      return date.toLocaleString();
+
+      // Convert to user's local time and display with timezone
+      return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
     } catch {
       return 'Invalid date';
     }
@@ -330,7 +339,7 @@ const AccountInfoModal = ({ isOpen, onClose, profile }) => {
         >
           <Group spacing="xs" align="center">
             <Text fw={500} size="sm">
-              Last Updated:
+              Last Account Info Refresh:
             </Text>
             <Badge variant="light" color="gray" size="sm">
               {last_refresh ? formatTimestamp(last_refresh) : 'Never'}

@@ -140,16 +140,16 @@ class Client:
         """Get account information from the last authentication response"""
         if not self.server_info:
             raise ValueError("Not authenticated. Call authenticate() first.")
-        
+
         from datetime import datetime
-        
+
         # Extract relevant account information
         user_info = self.server_info.get('user_info', {})
         server_info = self.server_info.get('server_info', {})
-        
+
         account_info = {
-            'last_refresh': datetime.now().isoformat(),
-            'auth_timestamp': datetime.now().timestamp(),
+            'last_refresh': datetime.utcnow().isoformat() + 'Z',  # Explicit UTC with Z suffix
+            'auth_timestamp': datetime.utcnow().timestamp(),
             'user_info': {
                 'username': user_info.get('username'),
                 'password': user_info.get('password'),
@@ -174,7 +174,7 @@ class Client:
                 'time_now': server_info.get('time_now')
             }
         }
-        
+
         return account_info
 
     def get_live_categories(self):
