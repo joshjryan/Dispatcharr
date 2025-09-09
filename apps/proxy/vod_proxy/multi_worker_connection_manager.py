@@ -571,7 +571,16 @@ class RedisBackedVODConnection:
 
                 # Decrement profile connections if we have the state and connection manager
                 if state and state.m3u_profile_id and connection_manager:
+                    logger.info(f"[{self.session_id}] Decrementing profile connection count for profile {state.m3u_profile_id}")
                     connection_manager._decrement_profile_connections(state.m3u_profile_id)
+                    logger.info(f"[{self.session_id}] Profile connection count decremented for profile {state.m3u_profile_id}")
+                else:
+                    if not state:
+                        logger.warning(f"[{self.session_id}] No connection state found during cleanup - cannot decrement profile connections")
+                    elif not state.m3u_profile_id:
+                        logger.warning(f"[{self.session_id}] No profile ID in connection state - cannot decrement profile connections")
+                    elif not connection_manager:
+                        logger.warning(f"[{self.session_id}] No connection manager provided - cannot decrement profile connections")
 
             except Exception as e:
                 logger.error(f"[{self.session_id}] Error cleaning up Redis state: {e}")
@@ -809,6 +818,19 @@ class MultiWorkerVODConnectionManager:
                     logger.info(f"[{client_id}] Worker {self.worker_id} - Redis-backed stream completed: {bytes_sent} bytes sent")
                     redis_connection.decrement_active_streams()
                     decremented = True
+
+                    # Schedule cleanup if no active streams after normal completion
+                    if not redis_connection.has_active_streams():
+                        def delayed_cleanup():
+                            time.sleep(10)  # Wait 10 seconds
+                            if not redis_connection.has_active_streams():
+                                logger.info(f"[{client_id}] Worker {self.worker_id} - Cleaning up idle Redis connection after normal completion")
+                                redis_connection.cleanup(connection_manager=self)
+
+                        import threading
+                        cleanup_thread = threading.Thread(target=delayed_cleanup)
+                        cleanup_thread.daemon = True
+                        cleanup_thread.start()
 
                 except GeneratorExit:
                     logger.info(f"[{client_id}] Worker {self.worker_id} - Client disconnected from Redis-backed stream")
