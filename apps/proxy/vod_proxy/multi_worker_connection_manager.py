@@ -822,7 +822,7 @@ class MultiWorkerVODConnectionManager:
                     # Schedule cleanup if no active streams after normal completion
                     if not redis_connection.has_active_streams():
                         def delayed_cleanup():
-                            time.sleep(10)  # Wait 10 seconds
+                            time.sleep(1)  # Wait 1 second
                             if not redis_connection.has_active_streams():
                                 logger.info(f"[{client_id}] Worker {self.worker_id} - Cleaning up idle Redis connection after normal completion")
                                 redis_connection.cleanup(connection_manager=self)
@@ -841,7 +841,7 @@ class MultiWorkerVODConnectionManager:
                     # Schedule cleanup if no active streams
                     if not redis_connection.has_active_streams():
                         def delayed_cleanup():
-                            time.sleep(10)  # Wait 10 seconds
+                            time.sleep(1)  # Wait 1 second
                             if not redis_connection.has_active_streams():
                                 logger.info(f"[{client_id}] Worker {self.worker_id} - Cleaning up idle Redis connection")
                                 redis_connection.cleanup(connection_manager=self)
