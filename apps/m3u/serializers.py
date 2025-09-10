@@ -55,6 +55,10 @@ class M3UAccountProfileSerializer(serializers.ModelSerializer):
             "account",
         ]
         read_only_fields = ["id", "account"]
+        extra_kwargs = {
+            'search_pattern': {'required': False, 'allow_blank': True},
+            'replace_pattern': {'required': False, 'allow_blank': True},
+        }
 
     def create(self, validated_data):
         m3u_account = self.context.get("m3u_account")
@@ -64,9 +68,39 @@ class M3UAccountProfileSerializer(serializers.ModelSerializer):
 
         return super().create(validated_data)
 
+    def validate(self, data):
+        """Custom validation to handle default profiles"""
+        # For updates to existing instances
+        if self.instance and self.instance.is_default:
+            # For default profiles, search_pattern and replace_pattern are not required
+            # and we don't want to validate them since they shouldn't be changed
+            return data
+
+        # For non-default profiles or new profiles, ensure required fields are present
+        if not data.get('search_pattern'):
+            raise serializers.ValidationError({
+                'search_pattern': ['This field is required for non-default profiles.']
+            })
+        if not data.get('replace_pattern'):
+            raise serializers.ValidationError({
+                'replace_pattern': ['This field is required for non-default profiles.']
+            })
+
+        return data
+
     def update(self, instance, validated_data):
         if instance.is_default:
-            raise serializers.ValidationError("Default profiles cannot be modified.")
+            # For default profiles, only allow updating name and custom_properties (for notes)
+            allowed_fields = {'name', 'custom_properties'}
+
+            # Remove any fields that aren't allowed for default profiles
+            disallowed_fields = set(validated_data.keys()) - allowed_fields
+            if disallowed_fields:
+                raise serializers.ValidationError(
+                    f"Default profiles can only modify name and notes. "
+                    f"Cannot modify: {', '.join(disallowed_fields)}"
+                )
+
         return super().update(instance, validated_data)
 
     def destroy(self, request, *args, **kwargs):

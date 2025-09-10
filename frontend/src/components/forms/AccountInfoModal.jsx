@@ -284,6 +284,30 @@ const AccountInfoModal = ({ isOpen, onClose, profile, onRefresh }) => {
           </Box>
         </Group>
 
+        {/* Profile Notes */}
+        {currentProfile?.custom_properties?.notes && (
+          <>
+            <Divider />
+            <Box>
+              <Text fw={600} mb="sm">
+                Profile Notes
+              </Text>
+              <Box
+                p="sm"
+                style={{
+                  backgroundColor: 'rgba(134, 142, 150, 0.08)',
+                  border: '1px solid rgba(134, 142, 150, 0.2)',
+                  borderRadius: 6,
+                }}
+              >
+                <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+                  {currentProfile.custom_properties.notes}
+                </Text>
+              </Box>
+            </Box>
+          </>
+        )}
+
         <Divider />
 
         {/* Detailed Information Table */}

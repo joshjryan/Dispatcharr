@@ -122,8 +122,11 @@ const M3UProfiles = ({ playlist = null, isOpen, onClose }) => {
   };
 
   const closeEditor = () => {
-    setProfile(null);
     setProfileEditorOpen(false);
+    // Delay clearing the profile until after the modal animation completes
+    setTimeout(() => {
+      setProfile(null);
+    }, 300); // Mantine modal animation typically takes ~200-300ms
   };
 
   const showAccountInfo = (profile) => {
@@ -209,7 +212,19 @@ const M3UProfiles = ({ playlist = null, isOpen, onClose }) => {
                   {/* Header with name and status badges */}
                   <Group justify="space-between" align="center">
                     <Group spacing="sm" align="center">
-                      <Text fw={600}>{item.name}</Text>
+                      <Stack spacing={2}>
+                        <Text fw={600}>{item.name}</Text>
+                        {/* Show notes if they exist */}
+                        {item.custom_properties?.notes && (
+                          <Text
+                            size="xs"
+                            c="dimmed"
+                            style={{ fontStyle: 'italic' }}
+                          >
+                            {item.custom_properties.notes}
+                          </Text>
+                        )}
+                      </Stack>
                       {playlist?.account_type === 'XC' &&
                         item.custom_properties && (
                           <Group spacing="xs">
@@ -279,18 +294,23 @@ const M3UProfiles = ({ playlist = null, isOpen, onClose }) => {
                         size="sm"
                       />
 
+                      {/* Always show edit button, but limit what can be edited for default profiles */}
+                      <ActionIcon
+                        size="sm"
+                        variant="transparent"
+                        color={theme.tailwind.yellow[3]}
+                        onClick={() => editProfile(item)}
+                        title={
+                          item.is_default
+                            ? 'Edit profile name and notes'
+                            : 'Edit profile'
+                        }
+                      >
+                        <SquarePen size="20" />
+                      </ActionIcon>
+
                       {!item.is_default && (
                         <>
-                          <ActionIcon
-                            size="sm"
-                            variant="transparent"
-                            color={theme.tailwind.yellow[3]}
-                            onClick={() => editProfile(item)}
-                            title="Edit profile"
-                          >
-                            <SquarePen size="20" />
-                          </ActionIcon>
-
                           <ActionIcon
                             color={theme.tailwind.red[6]}
                             onClick={() => deleteProfile(item.id)}
