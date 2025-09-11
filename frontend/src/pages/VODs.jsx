@@ -375,10 +375,16 @@ const VODsPage = () => {
 
   const categoryOptions = [
     { value: '', label: 'All Categories' },
-    ...Object.values(categories).map((cat) => ({
-      value: `${cat.name}|${cat.category_type}`, // Combine name and type for uniqueness
-      label: `${cat.name} (${cat.category_type})`, // Show type in label for clarity
-    })),
+    ...Object.values(categories)
+      .filter((cat) => {
+        if (filters.type === 'movies') return cat.category_type === 'movie';
+        if (filters.type === 'series') return cat.category_type === 'series';
+        return true; // 'all' shows all
+      })
+      .map((cat) => ({
+        value: `${cat.name}|${cat.category_type}`,
+        label: `${cat.name} (${cat.category_type})`,
+      })),
   ];
 
   const totalPages = Math.ceil(totalCount / pageSize);
