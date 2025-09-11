@@ -45,6 +45,7 @@ import {
   Stack,
   Select,
   NumberInput,
+  Tooltip,
 } from '@mantine/core';
 import { getCoreRowModel, flexRender } from '@tanstack/react-table';
 import './table.css';
@@ -52,6 +53,7 @@ import useChannelsTableStore from '../../store/channelsTable';
 import ChannelTableStreams from './ChannelTableStreams';
 import LazyLogo from '../LazyLogo';
 import useLocalStorage from '../../hooks/useLocalStorage';
+import useEPGsStore from '../../store/epgs';
 import { CustomTable, useTable } from './CustomTable';
 import ChannelsTableOnboarding from './ChannelsTable/ChannelsTableOnboarding';
 import ChannelTableHeader from './ChannelsTable/ChannelTableHeader';
@@ -217,6 +219,9 @@ const ChannelRowActions = React.memo(
 );
 
 const ChannelsTable = ({}) => {
+  // EPG data lookup
+  const tvgsById = useEPGsStore((s) => s.tvgsById);
+  const epgs = useEPGsStore((s) => s.epgs);
   const theme = useMantineTheme();
   const channelGroups = useChannelsStore((s) => s.channelGroups);
   const canEditChannelGroup = useChannelsStore((s) => s.canEditChannelGroup);
@@ -706,6 +711,50 @@ const ChannelsTable = ({}) => {
         ),
       },
       {
+        id: 'epg',
+        header: 'EPG',
+        accessorKey: 'epg_data_id',
+        cell: ({ getValue }) => {
+          const epgDataId = getValue();
+          const epgObj = epgDataId ? tvgsById[epgDataId] : null;
+          const epgName =
+            epgObj && epgObj.epg_source
+              ? epgs[epgObj.epg_source]?.name || epgObj.epg_source
+              : null;
+          const epgDataName = epgObj?.name;
+          const tvgId = epgObj?.tvg_id;
+          const tooltip = epgObj
+            ? `${epgName ? `EPG Name: ${epgName}\n` : ''}${epgDataName ? `TVG Name: ${epgDataName}\n` : ''}${tvgId ? `TVG-ID: ${tvgId}` : ''}`.trim()
+            : '';
+          return (
+            <Box
+              style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {epgObj && epgName ? (
+                <Tooltip
+                  label={
+                    <span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>
+                  }
+                  withArrow
+                  position="top"
+                >
+                  <span>{epgName}</span>
+                </Tooltip>
+              ) : epgObj ? (
+                <span>{epgObj.name}</span>
+              ) : (
+                <span style={{ color: '#888' }}>Not linked</span>
+              )}
+            </Box>
+          );
+        },
+        size: 120,
+      },
+      {
         id: 'channel_group',
         accessorFn: (row) =>
           channelGroups[row.channel_group_id]
@@ -776,6 +825,24 @@ const ChannelsTable = ({}) => {
     }
 
     switch (header.id) {
+      case 'epg':
+        return (
+          <Flex gap="sm">
+            <Text
+              className="table-input-header"
+              style={{
+                fontWeight: 400,
+                fontSize: 14,
+                color: '#212529',
+                padding: 0,
+                margin: 0,
+              }}
+            >
+              EPG
+            </Text>
+            <Center style={{ width: 24 }} />
+          </Flex>
+        );
       case 'enabled':
         return (
           <Center style={{ width: '100%' }}>
@@ -867,6 +934,7 @@ const ChannelsTable = ({}) => {
       channel_number: renderHeaderCell,
       channel_group: renderHeaderCell,
       enabled: renderHeaderCell,
+      epg: renderHeaderCell,
     },
     getRowStyles: (row) => {
       const hasStreams =
