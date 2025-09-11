@@ -503,26 +503,12 @@ const SeriesModal = ({ series, opened, onClose }) => {
                     <Badge color="blue" variant="light">
                       {displaySeries.m3u_account.name}
                     </Badge>
-                    {displaySeries.m3u_account.account_type && (
-                      <Badge color="gray" variant="outline" size="xs">
-                        {displaySeries.m3u_account.account_type === 'XC'
-                          ? 'Xtream Codes'
-                          : 'Standard M3U'}
-                      </Badge>
-                    )}
                   </Group>
                 ) : providers.length === 1 ? (
                   <Group spacing="md">
                     <Badge color="blue" variant="light">
                       {providers[0].m3u_account.name}
                     </Badge>
-                    {providers[0].m3u_account.account_type && (
-                      <Badge color="gray" variant="outline" size="xs">
-                        {providers[0].m3u_account.account_type === 'XC'
-                          ? 'Xtream Codes'
-                          : 'Standard M3U'}
-                      </Badge>
-                    )}
                     {providers[0].stream_id && (
                       <Badge color="orange" variant="outline" size="xs">
                         Stream {providers[0].stream_id}
