@@ -651,9 +651,19 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                     }
                     readOnly
                     value={
-                      formik.values.epg_data_id
-                        ? tvgsById[formik.values.epg_data_id].name
-                        : 'Dummy'
+                      (() => {
+                        const tvg = tvgsById[formik.values.epg_data_id];
+                        const epgSource = tvg && epgs[tvg.epg_source];
+                        if (epgSource && formik.values.name) {
+                          return `${epgSource.name} - ${formik.values.name}`;
+                        } else if (epgSource) {
+                          return epgSource.name;
+                        } else if (formik.values.name) {
+                          return formik.values.name;
+                        } else {
+                          return 'Dummy';
+                        }
+                      })()
                     }
                     onClick={() => setEpgPopoverOpened(true)}
                     size="xs"
