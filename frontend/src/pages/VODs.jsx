@@ -373,6 +373,12 @@ const VODsPage = () => {
     setPage(1);
   };
 
+  // When type changes, reset category to all
+  const handleTypeChange = (value) => {
+    setFilters({ type: value, category: '' });
+    setPage(1);
+  };
+
   const categoryOptions = [
     { value: '', label: 'All Categories' },
     ...Object.values(categories)
@@ -400,7 +406,7 @@ const VODsPage = () => {
         <Group spacing="md" align="end">
           <SegmentedControl
             value={filters.type}
-            onChange={(value) => setFilters({ type: value })}
+            onChange={handleTypeChange}
             data={[
               { label: 'All', value: 'all' },
               { label: 'Movies', value: 'movies' },
