@@ -812,6 +812,7 @@ const ChannelsTable = ({}) => {
             {getValue()}
           </Box>
         ),
+        size: 175,
       },
       {
         id: 'logo',
