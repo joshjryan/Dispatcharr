@@ -274,6 +274,20 @@ const VODsPage = () => {
   const setFilters = useVODStore((s) => s.setFilters);
   const setPage = useVODStore((s) => s.setPage);
   const setPageSize = useVODStore((s) => s.setPageSize);
+
+  // Persist page size in localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('vodsPageSize');
+    if (stored && !isNaN(Number(stored)) && Number(stored) !== pageSize) {
+      setPageSize(Number(stored));
+    }
+    // eslint-disable-next-line
+  }, []);
+
+  const handlePageSizeChange = (value) => {
+    setPageSize(Number(value));
+    localStorage.setItem('vodsPageSize', value);
+  };
   const fetchMovies = useVODStore((s) => s.fetchMovies);
   const fetchSeries = useVODStore((s) => s.fetchSeries);
   const fetchCategories = useVODStore((s) => s.fetchCategories);
@@ -434,7 +448,7 @@ const VODsPage = () => {
           <Select
             label="Page Size"
             value={String(pageSize)}
-            onChange={(value) => setPageSize(Number(value))}
+            onChange={handlePageSizeChange}
             data={['12', '24', '48', '96'].map((v) => ({
               value: v,
               label: v,
