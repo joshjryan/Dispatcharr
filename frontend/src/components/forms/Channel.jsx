@@ -650,21 +650,20 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                       </Group>
                     }
                     readOnly
-                    value={
-                      (() => {
-                        const tvg = tvgsById[formik.values.epg_data_id];
-                        const epgSource = tvg && epgs[tvg.epg_source];
-                        if (epgSource && formik.values.name) {
-                          return `${epgSource.name} - ${formik.values.name}`;
-                        } else if (epgSource) {
-                          return epgSource.name;
-                        } else if (formik.values.name) {
-                          return formik.values.name;
-                        } else {
-                          return 'Dummy';
-                        }
-                      })()
-                    }
+                    value={(() => {
+                      const tvg = tvgsById[formik.values.epg_data_id];
+                      const epgSource = tvg && epgs[tvg.epg_source];
+                      const tvgLabel = tvg ? tvg.name || tvg.id : '';
+                      if (epgSource && tvgLabel) {
+                        return `${epgSource.name} - ${tvgLabel}`;
+                      } else if (tvgLabel) {
+                        return tvgLabel;
+                      } else if (formik.values.name) {
+                        return formik.values.name;
+                      } else {
+                        return 'Dummy';
+                      }
+                    })()}
                     onClick={() => setEpgPopoverOpened(true)}
                     size="xs"
                     rightSection={
@@ -738,11 +737,21 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                                   'epg_data_id',
                                   filteredTvgs[index].id
                                 );
+                                // Also update selectedEPG to match the EPG source of the selected tvg
+                                if (filteredTvgs[index].epg_source) {
+                                  setSelectedEPG(
+                                    `${filteredTvgs[index].epg_source}`
+                                  );
+                                }
                               }
                               setEpgPopoverOpened(false);
                             }}
                           >
-                            {filteredTvgs[index].tvg_id}
+                            {filteredTvgs[index].name &&
+                            filteredTvgs[index].tvg_id
+                              ? `${filteredTvgs[index].name} (${filteredTvgs[index].tvg_id})`
+                              : filteredTvgs[index].name ||
+                                filteredTvgs[index].tvg_id}
                           </Button>
                         </div>
                       )}
