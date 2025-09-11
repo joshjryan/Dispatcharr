@@ -457,20 +457,36 @@ const VODModal = ({ vod, opened, onClose }) => {
                     </Box>
                   )}
 
-                  {/* Watch Trailer button at top */}
-                  {displayVOD.youtube_trailer && (
+                  {/* Play and Watch Trailer buttons */}
+                  <Group spacing="xs" mt="sm">
                     <Button
-                      variant="outline"
-                      color="red"
-                      style={{ marginTop: 'auto', alignSelf: 'flex-start' }}
-                      onClick={() => {
-                        setTrailerUrl(getEmbedUrl(displayVOD.youtube_trailer));
-                        setTrailerModalOpened(true);
-                      }}
+                      leftSection={<Play size={16} />}
+                      variant="filled"
+                      color="blue"
+                      size="sm"
+                      onClick={handlePlayVOD}
+                      disabled={providers.length > 0 && !selectedProvider}
+                      style={{ alignSelf: 'flex-start' }}
                     >
-                      Watch Trailer
+                      Play Movie
                     </Button>
-                  )}
+                    {displayVOD.youtube_trailer && (
+                      <Button
+                        variant="outline"
+                        color="red"
+                        size="sm"
+                        onClick={() => {
+                          setTrailerUrl(
+                            getEmbedUrl(displayVOD.youtube_trailer)
+                          );
+                          setTrailerModalOpened(true);
+                        }}
+                        style={{ alignSelf: 'flex-start' }}
+                      >
+                        Watch Trailer
+                      </Button>
+                    )}
+                  </Group>
                 </Stack>
               </Flex>
 
@@ -490,11 +506,6 @@ const VODModal = ({ vod, opened, onClose }) => {
                         <Badge color="blue" variant="light">
                           {providers[0].m3u_account.name}
                         </Badge>
-                        {providers[0].stream_id && (
-                          <Badge color="orange" variant="outline" size="xs">
-                            Stream {providers[0].stream_id}
-                          </Badge>
-                        )}
                       </Group>
                     ) : (
                       <Select
@@ -533,28 +544,7 @@ const VODModal = ({ vod, opened, onClose }) => {
                     </Box>
                   )}
 
-                {/* Play Button */}
-                <Button
-                  leftSection={<Play size={16} />}
-                  variant="filled"
-                  color="blue"
-                  size="md"
-                  onClick={handlePlayVOD}
-                  disabled={providers.length > 0 && !selectedProvider}
-                >
-                  Play Movie
-                  {selectedProvider && (
-                    <span
-                      style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}
-                    >
-                      (
-                      {selectedProvider.stream_id
-                        ? `Stream ${selectedProvider.stream_id}`
-                        : selectedProvider.m3u_account.name}
-                      )
-                    </span>
-                  )}
-                </Button>
+                {/* Play button moved to top next to Watch Trailer */}
               </Group>
 
               {/* Technical Details */}
