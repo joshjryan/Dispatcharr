@@ -1466,8 +1466,10 @@ class LogoViewSet(viewsets.ModelViewSet):
             if redis_client:
                 # Use the same key format as the file scanner
                 redis_key = f"processed_file:{file_path}"
-                redis_client.setex(redis_key, 60 * 60 * 24 * 3, "api_upload")  # 3 day TTL
-                logger.debug(f"Marked uploaded logo file as processed in Redis: {file_path}")
+                # Store the actual file modification time to match the file scanner's expectation
+                file_mtime = os.path.getmtime(file_path)
+                redis_client.setex(redis_key, 60 * 60 * 24 * 3, str(file_mtime))  # 3 day TTL
+                logger.debug(f"Marked uploaded logo file as processed in Redis: {file_path} (mtime: {file_mtime})")
         except Exception as e:
             logger.warning(f"Failed to mark logo file as processed in Redis: {e}")
 
