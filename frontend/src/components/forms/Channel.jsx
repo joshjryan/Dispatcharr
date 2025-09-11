@@ -55,6 +55,11 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     ensureLogosLoaded,
     isLoading: logosLoading,
   } = useChannelLogoSelection();
+
+  // Ensure logos are loaded when component mounts
+  useEffect(() => {
+    ensureLogosLoaded();
+  }, [ensureLogosLoaded]);
   const streams = useStreamsStore((state) => state.streams);
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
   const playlists = usePlaylistsStore((s) => s.playlists);
@@ -242,16 +247,9 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
   // Memoize logo options to prevent infinite re-renders during background loading
   const logoOptions = useMemo(() => {
-    return [{ id: '0', name: 'Default' }].concat(Object.values(logos));
+    const options = [{ id: '0', name: 'Default' }].concat(Object.values(logos));
+    return options;
   }, [logos]); // Only depend on logos object
-
-  const renderLogoOption = ({ option, checked }) => {
-    return (
-      <Center style={{ width: '100%' }}>
-        <img src={logos[option.value].cache_url} width="30" />
-      </Center>
-    );
-  };
 
   // Update the handler for when channel group modal is closed
   const handleChannelGroupModalClose = (newGroup) => {
@@ -454,7 +452,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
               <Select
                 label="User Level Access"
-                data={Object.entries(USER_LEVELS).map(([label, value]) => {
+                data={Object.entries(USER_LEVELS).map(([, value]) => {
                   return {
                     label: USER_LEVEL_LABELS[value],
                     value: `${value}`,
@@ -480,6 +478,9 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                     setLogoPopoverOpened(opened);
                     // Load all logos when popover is opened
                     if (opened) {
+                      console.log(
+                        'Popover opened, calling ensureLogosLoaded...'
+                      );
                       ensureLogosLoaded();
                     }
                   }}
@@ -493,7 +494,12 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                       label="Logo"
                       readOnly
                       value={logos[formik.values.logo_id]?.name || 'Default'}
-                      onClick={() => setLogoPopoverOpened(true)}
+                      onClick={() => {
+                        console.log(
+                          'Logo input clicked, setting popover opened to true'
+                        );
+                        setLogoPopoverOpened(true);
+                      }}
                       size="xs"
                     />
                   </Popover.Target>
@@ -509,34 +515,87 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                         mb="xs"
                         size="xs"
                       />
+                      {logosLoading && (
+                        <Text size="xs" c="dimmed">
+                          Loading...
+                        </Text>
+                      )}
                     </Group>
 
                     <ScrollArea style={{ height: 200 }}>
-                      <List
-                        height={200} // Set max height for visible items
-                        itemCount={filteredLogos.length}
-                        itemSize={20} // Adjust row height for each item
-                        style={{ width: '100%' }}
-                        ref={logoListRef}
-                      >
-                        {({ index, style }) => (
-                          <div style={style}>
-                            <Center>
-                              <img
-                                src={filteredLogos[index].cache_url || logo}
-                                height="20"
-                                style={{ maxWidth: 80 }}
-                                onClick={() => {
-                                  formik.setFieldValue(
-                                    'logo_id',
-                                    filteredLogos[index].id
-                                  );
-                                }}
-                              />
-                            </Center>
-                          </div>
-                        )}
-                      </List>
+                      {filteredLogos.length === 0 ? (
+                        <Center style={{ height: 200 }}>
+                          <Text size="sm" c="dimmed">
+                            {logoFilter
+                              ? 'No logos match your filter'
+                              : 'No logos available'}
+                          </Text>
+                        </Center>
+                      ) : (
+                        <List
+                          height={200} // Set max height for visible items
+                          itemCount={filteredLogos.length}
+                          itemSize={55} // Increased row height for logo + text
+                          style={{ width: '100%' }}
+                          ref={logoListRef}
+                        >
+                          {({ index, style }) => (
+                            <div
+                              style={{
+                                ...style,
+                                cursor: 'pointer',
+                                padding: '5px',
+                                borderRadius: '4px',
+                              }}
+                              onClick={() => {
+                                formik.setFieldValue(
+                                  'logo_id',
+                                  filteredLogos[index].id
+                                );
+                                setLogoPopoverOpened(false);
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor =
+                                  'rgb(68, 68, 68)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor =
+                                  'transparent';
+                              }}
+                            >
+                              <Center
+                                style={{ flexDirection: 'column', gap: '2px' }}
+                              >
+                                <img
+                                  src={filteredLogos[index].cache_url || logo}
+                                  height="30"
+                                  style={{ maxWidth: 80, objectFit: 'contain' }}
+                                  alt={filteredLogos[index].name || 'Logo'}
+                                  onError={(e) => {
+                                    // Fallback to default logo if image fails to load
+                                    if (e.target.src !== logo) {
+                                      e.target.src = logo;
+                                    }
+                                  }}
+                                />
+                                <Text
+                                  size="xs"
+                                  c="dimmed"
+                                  ta="center"
+                                  style={{
+                                    maxWidth: 80,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {filteredLogos[index].name || 'Default'}
+                                </Text>
+                              </Center>
+                            </div>
+                          )}
+                        </List>
+                      )}
                     </ScrollArea>
                   </Popover.Dropdown>
                 </Popover>
