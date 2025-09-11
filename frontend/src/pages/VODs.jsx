@@ -304,8 +304,8 @@ const VODsPage = () => {
         _vodType: 'movie',
       }));
     } else {
-      // 'all' - combine movies and series, tagging each with its type
-      return [
+      // 'all' - combine movies and series, tagging each with its type, then sort alphabetically by name/title
+      const combined = [
         ...Object.values(movies).map((item) => ({
           ...item,
           _vodType: 'movie',
@@ -315,6 +315,13 @@ const VODsPage = () => {
           _vodType: 'series',
         })),
       ];
+      return combined.sort((a, b) => {
+        const nameA = (a.name || a.title || '').toLowerCase();
+        const nameB = (b.name || b.title || '').toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });
     }
   };
 
@@ -341,8 +348,13 @@ const VODsPage = () => {
   useEffect(() => {
     if (filters.type === 'series') {
       fetchSeries().finally(() => setInitialLoad(false));
-    } else {
+    } else if (filters.type === 'movies') {
       fetchMovies().finally(() => setInitialLoad(false));
+    } else {
+      // 'all': fetch both movies and series
+      Promise.all([fetchMovies(), fetchSeries()]).finally(() =>
+        setInitialLoad(false)
+      );
     }
   }, [filters, currentPage, pageSize, fetchMovies, fetchSeries]);
 
