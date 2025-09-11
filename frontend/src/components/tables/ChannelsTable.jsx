@@ -293,6 +293,7 @@ const ChannelsTable = ({}) => {
   const [filters, setFilters] = useState({
     name: '',
     channel_group: '',
+    epg: '',
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -326,6 +327,25 @@ const ChannelsTable = ({}) => {
   const groupOptions = Object.values(channelGroups)
     .filter((group) => activeGroupIds.has(group.id))
     .map((group) => group.name);
+
+  // Get unique EPG sources from active channels
+  const activeEPGSources = new Set();
+  let hasUnlinkedChannels = false;
+  Object.values(channels).forEach((channel) => {
+    if (channel.epg_data_id) {
+      const epgObj = tvgsById[channel.epg_data_id];
+      if (epgObj && epgObj.epg_source) {
+        const epgName = epgs[epgObj.epg_source]?.name || epgObj.epg_source;
+        activeEPGSources.add(epgName);
+      }
+    } else {
+      hasUnlinkedChannels = true;
+    }
+  });
+  const epgOptions = Array.from(activeEPGSources).sort();
+  if (hasUnlinkedChannels) {
+    epgOptions.unshift('No EPG');
+  }
   const debouncedFilters = useDebounce(filters, 500, () => {
     setPagination({
       ...pagination,
@@ -351,7 +371,17 @@ const ChannelsTable = ({}) => {
 
     // Apply debounced filters
     Object.entries(filters).forEach(([key, value]) => {
-      if (value) params.append(key, value);
+      if (value) {
+        if (Array.isArray(value)) {
+          // Convert null values to "null" string for URL parameter
+          const processedValue = value
+            .map((v) => (v === null ? 'null' : v))
+            .join(',');
+          params.append(key, processedValue);
+        } else {
+          params.append(key, value);
+        }
+      }
     });
 
     const [results, ids] = await Promise.all([
@@ -383,6 +413,17 @@ const ChannelsTable = ({}) => {
     setFilters((prev) => ({
       ...prev,
       channel_group: value ? value : '',
+    }));
+  };
+
+  const handleEPGChange = (value) => {
+    // Convert "No EPG" to null for natural filtering
+    const processedValue = value
+      ? value.map((v) => (v === 'No EPG' ? null : v))
+      : '';
+    setFilters((prev) => ({
+      ...prev,
+      epg: processedValue,
     }));
   };
 
@@ -827,21 +868,17 @@ const ChannelsTable = ({}) => {
     switch (header.id) {
       case 'epg':
         return (
-          <Flex gap="sm">
-            <Text
-              className="table-input-header"
-              style={{
-                fontWeight: 400,
-                fontSize: 14,
-                color: '#212529',
-                padding: 0,
-                margin: 0,
-              }}
-            >
-              EPG
-            </Text>
-            <Center style={{ width: 24 }} />
-          </Flex>
+          <MultiSelect
+            placeholder="EPG"
+            variant="unstyled"
+            data={epgOptions}
+            size="xs"
+            searchable
+            clearable
+            onClick={stopPropagation}
+            onChange={handleEPGChange}
+            style={{ width: '100%' }}
+          />
         );
       case 'enabled':
         return (

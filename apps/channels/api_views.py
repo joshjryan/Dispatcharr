@@ -293,17 +293,42 @@ class ChannelPagination(PageNumberPagination):
         return super().paginate_queryset(queryset, request, view)
 
 
+class EPGFilter(django_filters.Filter):
+    """
+    Filter channels by EPG source name or null (unlinked).
+    """
+    def filter(self, queryset, value):
+        if not value:
+            return queryset
+
+        # Split comma-separated values
+        values = [v.strip() for v in value.split(',')]
+        query = Q()
+
+        for val in values:
+            if val == 'null':
+                # Filter for channels with no EPG data
+                query |= Q(epg_data__isnull=True)
+            else:
+                # Filter for channels with specific EPG source name
+                query |= Q(epg_data__epg_source__name__icontains=val)
+
+        return queryset.filter(query)
+
+
 class ChannelFilter(django_filters.FilterSet):
     name = django_filters.CharFilter(lookup_expr="icontains")
-    channel_group_name = OrInFilter(
+    channel_group = OrInFilter(
         field_name="channel_group__name", lookup_expr="icontains"
     )
+    epg = EPGFilter()
 
     class Meta:
         model = Channel
         fields = [
             "name",
-            "channel_group_name",
+            "channel_group",
+            "epg",
         ]
 
 
