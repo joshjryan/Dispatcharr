@@ -15,7 +15,7 @@ const useVODStore = create((set, get) => ({
   },
   currentPage: 1,
   totalCount: 0,
-  pageSize: 20,
+  pageSize: 24,
 
   setFilters: (newFilters) =>
     set((state) => ({
@@ -26,6 +26,12 @@ const useVODStore = create((set, get) => ({
   setPage: (page) =>
     set(() => ({
       currentPage: page,
+    })),
+
+  setPageSize: (size) =>
+    set(() => ({
+      pageSize: size,
+      currentPage: 1, // Reset to first page when page size changes
     })),
 
   fetchMovies: async () => {

@@ -273,6 +273,7 @@ const VODsPage = () => {
   const pageSize = useVODStore((s) => s.pageSize);
   const setFilters = useVODStore((s) => s.setFilters);
   const setPage = useVODStore((s) => s.setPage);
+  const setPageSize = useVODStore((s) => s.setPageSize);
   const fetchMovies = useVODStore((s) => s.fetchMovies);
   const fetchSeries = useVODStore((s) => s.fetchSeries);
   const fetchCategories = useVODStore((s) => s.fetchCategories);
@@ -343,7 +344,7 @@ const VODsPage = () => {
     } else {
       fetchMovies().finally(() => setInitialLoad(false));
     }
-  }, [filters, currentPage, fetchMovies, fetchSeries]);
+  }, [filters, currentPage, pageSize, fetchMovies, fetchSeries]);
 
   const handleVODCardClick = (vod) => {
     setSelectedVOD(vod);
@@ -378,7 +379,7 @@ const VODsPage = () => {
         </Group>
 
         {/* Filters */}
-        <Group spacing="md">
+        <Group spacing="md" align="end">
           <SegmentedControl
             value={filters.type}
             onChange={(value) => setFilters({ type: value })}
@@ -404,6 +405,17 @@ const VODsPage = () => {
             onChange={onCategoryChange}
             clearable
             style={{ minWidth: 150 }}
+          />
+
+          <Select
+            label="Page Size"
+            value={String(pageSize)}
+            onChange={(value) => setPageSize(Number(value))}
+            data={['12', '24', '48', '96'].map((v) => ({
+              value: v,
+              label: v,
+            }))}
+            style={{ width: 110 }}
           />
         </Group>
 
