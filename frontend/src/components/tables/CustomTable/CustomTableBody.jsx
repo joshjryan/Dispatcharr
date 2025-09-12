@@ -1,6 +1,7 @@
 import { Box, Flex } from '@mantine/core';
 import { VariableSizeList as List } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
+import { useMemo } from 'react';
 import table from '../../../helpers/table';
 
 const CustomTableBody = ({
@@ -22,6 +23,15 @@ const CustomTableBody = ({
   };
 
   const rows = getRowModel().rows;
+
+  // Calculate total width of all columns reactively
+  const totalWidth = useMemo(() => {
+    if (rows.length === 0) return 0;
+
+    return rows[0].getVisibleCells().reduce((total, cell) => {
+      return total + cell.column.getSize();
+    }, 0);
+  }, [rows]);
 
   const renderTableBodyContents = () => {
     const virtualized = false;
@@ -94,6 +104,7 @@ const CustomTableBody = ({
           style={{
             display: 'flex',
             width: '100%',
+            minWidth: `${totalWidth}px`,
             ...(row.getIsSelected() && {
               backgroundColor: '#163632',
             }),

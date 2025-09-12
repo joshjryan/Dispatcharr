@@ -1,6 +1,6 @@
 import { Box, Center, Checkbox, Flex } from '@mantine/core';
 import { flexRender } from '@tanstack/react-table';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 
 const CustomTableHeader = ({
   getHeaderGroups,
@@ -40,6 +40,21 @@ const CustomTableHeader = ({
     }
   };
 
+  // Get header groups for dependency tracking
+  const headerGroups = getHeaderGroups();
+
+  // Calculate total width of all columns reactively
+  const totalWidth = useMemo(() => {
+    if (!headerGroups || headerGroups.length === 0) return 0;
+
+    const width =
+      headerGroups[0]?.headers.reduce((total, header) => {
+        return total + header.getSize();
+      }, 0) || 0;
+
+    return width;
+  }, [headerGroups]);
+
   return (
     <Box
       className="thead"
@@ -54,7 +69,11 @@ const CustomTableHeader = ({
         <Box
           className="tr"
           key={headerGroup.id}
-          style={{ display: 'flex', width: '100%' }}
+          style={{
+            display: 'flex',
+            width: '100%',
+            minWidth: `${totalWidth}px`,
+          }}
         >
           {headerGroup.headers.map((header) => {
             return (
