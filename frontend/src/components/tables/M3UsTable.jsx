@@ -482,6 +482,7 @@ const M3UTable = () => {
         header: 'Status Message',
         accessorKey: 'last_message',
         grow: true,
+        minSize: 250,
         cell: ({ cell, row }) => {
           const value = cell.getValue();
           const data = row.original;

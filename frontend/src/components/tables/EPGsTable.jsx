@@ -237,6 +237,7 @@ const EPGsTable = () => {
         header: 'Status Message',
         accessorKey: 'last_message',
         enableSorting: false,
+        minSize: 250,
         grow: true,
         cell: ({ row }) => {
           const data = row.original;
