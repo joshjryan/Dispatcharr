@@ -212,6 +212,10 @@ const StreamsTable = ({}) => {
     channel_group: '',
     m3u_account: '',
   });
+  const [columnSizing, setColumnSizing] = useLocalStorage(
+    'streams-table-column-sizing',
+    {}
+  );
   const debouncedFilters = useDebounce(filters, 500, () => {
     // Reset to first page whenever filters change to avoid "Invalid page" errors
     setPagination((prev) => ({
@@ -256,15 +260,16 @@ const StreamsTable = ({}) => {
     () => [
       {
         id: 'actions',
-        size: tableSize == 'compact' ? 60 : 80,
+        size: columnSizing.actions || (tableSize == 'compact' ? 60 : 80),
       },
       {
         id: 'select',
-        size: 30,
+        size: columnSizing.select || 30,
       },
       {
         header: 'Name',
         accessorKey: 'name',
+        size: columnSizing.name || 200,
         cell: ({ getValue }) => (
           <Box
             style={{
@@ -283,6 +288,7 @@ const StreamsTable = ({}) => {
           channelGroups[row.channel_group]
             ? channelGroups[row.channel_group].name
             : '',
+        size: columnSizing.group || 150,
         cell: ({ getValue }) => (
           <Box
             style={{
@@ -297,7 +303,7 @@ const StreamsTable = ({}) => {
       },
       {
         id: 'm3u',
-        size: 150,
+        size: columnSizing.m3u || 150,
         accessorFn: (row) =>
           playlists.find((playlist) => playlist.id === row.m3u_account)?.name,
         cell: ({ getValue }) => (
@@ -315,7 +321,7 @@ const StreamsTable = ({}) => {
         ),
       },
     ],
-    [channelGroups, playlists]
+    [channelGroups, playlists, columnSizing, tableSize]
   );
 
   /**
@@ -652,6 +658,8 @@ const StreamsTable = ({}) => {
     filters,
     pagination,
     sorting,
+    columnSizing,
+    setColumnSizing,
     onRowSelectionChange: onRowSelectionChange,
     manualPagination: true,
     manualSorting: true,

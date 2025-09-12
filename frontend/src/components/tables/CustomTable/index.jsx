@@ -18,6 +18,8 @@ const useTable = ({
   onRowSelectionChange = null,
   getExpandedRowHeight = null,
   state = [],
+  columnSizing,
+  setColumnSizing,
   ...options
 }) => {
   const [selectedTableIds, setSelectedTableIds] = useState([]);
@@ -93,8 +95,10 @@ const useTable = ({
     state: {
       ...options.state,
       selectedTableIds,
+      ...(columnSizing && { columnSizing }),
     },
     onStateChange: options.onStateChange,
+    ...(setColumnSizing && { onColumnSizingChange: setColumnSizing }),
     getCoreRowModel: options.getCoreRowModel ?? getCoreRowModel(),
     enableColumnResizing: true,
     columnResizeMode: 'onChange',
