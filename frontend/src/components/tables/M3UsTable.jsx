@@ -431,10 +431,10 @@ const M3UTable = () => {
         sortable: true,
       },
       {
-        header: 'Account Type',
+        header: 'Type',
         accessorKey: 'account_type',
         sortable: true,
-        size: 150,
+        size: 100,
         cell: ({ cell }) => {
           const value = cell.getValue();
           return value === 'XC' ? 'XC' : 'M3U';

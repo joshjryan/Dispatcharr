@@ -187,9 +187,9 @@ const EPGsTable = () => {
         size: 200,
       },
       {
-        header: 'Source Type',
+        header: 'Type',
         accessorKey: 'source_type',
-        size: 150,
+        size: 100,
       },
       {
         header: 'URL / API Key / File Path',
