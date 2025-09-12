@@ -1328,7 +1328,7 @@ const ChannelsTable = ({}) => {
                 style={{
                   flex: 1,
                   overflowY: 'auto',
-                  overflowX: 'hidden',
+                  overflowX: 'auto',
                   border: 'solid 1px rgb(68,68,68)',
                   borderRadius: 'var(--mantine-radius-default)',
                 }}
