@@ -43,13 +43,17 @@ const CustomTableHeader = ({
   // Get header groups for dependency tracking
   const headerGroups = getHeaderGroups();
 
-  // Calculate total width of all columns reactively
-  const totalWidth = useMemo(() => {
+  // Calculate minimum width based only on fixed-size columns
+  const minTableWidth = useMemo(() => {
     if (!headerGroups || headerGroups.length === 0) return 0;
 
     const width =
       headerGroups[0]?.headers.reduce((total, header) => {
-        return total + header.getSize();
+        // Only count columns with fixed sizes, flexible columns will expand
+        const columnSize = header.column.columnDef.size
+          ? header.getSize()
+          : header.column.columnDef.minSize || 150; // Default min for flexible columns
+        return total + columnSize;
       }, 0) || 0;
 
     return width;
@@ -72,7 +76,7 @@ const CustomTableHeader = ({
           style={{
             display: 'flex',
             width: '100%',
-            minWidth: `${totalWidth}px`,
+            minWidth: '100%', // Force full width
           }}
         >
           {headerGroup.headers.map((header) => {
@@ -81,18 +85,16 @@ const CustomTableHeader = ({
                 className="th"
                 key={header.id}
                 style={{
-                  flex: header.column.columnDef.size
-                    ? `0 0 ${header.getSize()}px`
-                    : '1 1 0%',
-                  width: header.column.columnDef.size
-                    ? `${header.getSize()}px`
-                    : 'auto',
-                  maxWidth: header.column.columnDef.size
-                    ? `${header.getSize()}px`
-                    : 'none',
-                  minWidth: header.column.columnDef.minSize
-                    ? `${header.column.columnDef.minSize}px`
-                    : '0px',
+                  ...(header.column.columnDef.grow
+                    ? {
+                        flex: '1 1 0%',
+                        minWidth: 0,
+                      }
+                    : {
+                        flex: `0 0 ${header.getSize ? header.getSize() : 150}px`,
+                        width: `${header.getSize ? header.getSize() : 150}px`,
+                        maxWidth: `${header.getSize ? header.getSize() : 150}px`,
+                      }),
                   position: 'relative',
                   // ...(tableCellProps && tableCellProps({ cell: header })),
                 }}

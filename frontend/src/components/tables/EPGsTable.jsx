@@ -195,6 +195,7 @@ const EPGsTable = () => {
         header: 'URL / API Key / File Path',
         accessorKey: 'url',
         enableSorting: false,
+        minSize: 250,
         cell: ({ cell, row }) => {
           const value =
             cell.getValue() ||
@@ -220,7 +221,7 @@ const EPGsTable = () => {
       {
         header: 'Status',
         accessorKey: 'status',
-        size: 150,
+        size: 100,
         cell: ({ row }) => {
           const data = row.original;
 
@@ -236,6 +237,7 @@ const EPGsTable = () => {
         header: 'Status Message',
         accessorKey: 'last_message',
         enableSorting: false,
+        grow: true,
         cell: ({ row }) => {
           const data = row.original;
 

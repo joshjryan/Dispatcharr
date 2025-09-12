@@ -443,6 +443,7 @@ const M3UTable = () => {
       {
         header: 'URL / File',
         accessorKey: 'server_url',
+        size: 250,
         cell: ({ cell, row }) => {
           const value = cell.getValue() || row.original.file_path || '';
           return (
@@ -462,15 +463,9 @@ const M3UTable = () => {
         },
       },
       {
-        header: 'Max Streams',
-        accessorKey: 'max_streams',
-        sortable: true,
-        size: 150,
-      },
-      {
         header: 'Status',
         accessorKey: 'status',
-        size: 150,
+        size: 100,
         cell: ({ cell }) => {
           const value = cell.getValue();
           if (!value) return null;
@@ -486,6 +481,7 @@ const M3UTable = () => {
       {
         header: 'Status Message',
         accessorKey: 'last_message',
+        grow: true,
         cell: ({ cell, row }) => {
           const value = cell.getValue();
           const data = row.original;
@@ -568,6 +564,12 @@ const M3UTable = () => {
             </Tooltip>
           );
         },
+      },
+      {
+        header: 'Max Streams',
+        accessorKey: 'max_streams',
+        sortable: true,
+        size: 125,
       },
       {
         header: 'Updated',

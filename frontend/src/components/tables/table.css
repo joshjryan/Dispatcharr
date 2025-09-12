@@ -8,8 +8,8 @@ html {
 }
 
 .divTable {
+  width: 100%;
   /* border: 1px solid lightgray; */
-  /* width: fit-content; */
   /* display: flex;
     flex-direction: column; */
 }
