@@ -67,6 +67,7 @@ const CustomTableHeader = ({
                     ? header.getSize()
                     : undefined,
                   minWidth: 0,
+                  position: 'relative',
                   // ...(tableCellProps && tableCellProps({ cell: header })),
                 }}
               >
@@ -80,6 +81,40 @@ const CustomTableHeader = ({
                 >
                   {renderHeaderCell(header)}
                 </Flex>
+                {header.column.getCanResize() && (
+                  <Box
+                    onMouseDown={header.getResizeHandler()}
+                    onTouchStart={header.getResizeHandler()}
+                    className={`resizer ${
+                      header.column.getIsResizing() ? 'isResizing' : ''
+                    }`}
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: 0,
+                      height: '100%',
+                      width: '5px',
+                      cursor: 'col-resize',
+                      userSelect: 'none',
+                      touchAction: 'none',
+                      backgroundColor: header.column.getIsResizing()
+                        ? '#3b82f6'
+                        : 'transparent',
+                      opacity: header.column.getIsResizing() ? 1 : 0.5,
+                      transition: 'opacity 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.opacity = '1';
+                      e.target.style.backgroundColor = '#6b7280';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!header.column.getIsResizing()) {
+                        e.target.style.opacity = '0.5';
+                        e.target.style.backgroundColor = 'transparent';
+                      }
+                    }}
+                  />
+                )}
               </Box>
             );
           })}

@@ -92,8 +92,11 @@ const useTable = ({
     state: {
       data: options.data,
       selectedTableIds,
+      columnSizing: options.state?.columnSizing || {},
     },
     getCoreRowModel: options.getCoreRowModel ?? getCoreRowModel(),
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
   });
 
   const selectedTableIdsSet = useMemo(
