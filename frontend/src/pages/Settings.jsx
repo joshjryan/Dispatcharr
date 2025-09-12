@@ -77,6 +77,8 @@ const SettingsPage = () => {
       'dvr-tv-fallback-template': '',
       'dvr-movie-fallback-template': '',
       'dvr-comskip-enabled': false,
+      'dvr-pre-offset-minutes': 0,
+      'dvr-post-offset-minutes': 0,
     },
 
     validate: {
@@ -135,6 +137,11 @@ const SettingsPage = () => {
           switch (key) {
             case 'm3u-hash-key':
               val = value.value.split(',');
+              break;
+            case 'dvr-pre-offset-minutes':
+            case 'dvr-post-offset-minutes':
+              val = Number.parseInt(value.value || '0', 10);
+              if (Number.isNaN(val)) val = 0;
               break;
             default:
               val = value.value;
@@ -440,6 +447,38 @@ const SettingsPage = () => {
                         name={
                           settings['dvr-comskip-enabled']?.key ||
                           'dvr-comskip-enabled'
+                        }
+                      />
+                      <NumberInput
+                        label="Start early (minutes)"
+                        description="Begin recording this many minutes before the scheduled start."
+                        min={0}
+                        step={1}
+                        {...form.getInputProps('dvr-pre-offset-minutes')}
+                        key={form.key('dvr-pre-offset-minutes')}
+                        id={
+                          settings['dvr-pre-offset-minutes']?.id ||
+                          'dvr-pre-offset-minutes'
+                        }
+                        name={
+                          settings['dvr-pre-offset-minutes']?.key ||
+                          'dvr-pre-offset-minutes'
+                        }
+                      />
+                      <NumberInput
+                        label="End late (minutes)"
+                        description="Continue recording this many minutes after the scheduled end."
+                        min={0}
+                        step={1}
+                        {...form.getInputProps('dvr-post-offset-minutes')}
+                        key={form.key('dvr-post-offset-minutes')}
+                        id={
+                          settings['dvr-post-offset-minutes']?.id ||
+                          'dvr-post-offset-minutes'
+                        }
+                        name={
+                          settings['dvr-post-offset-minutes']?.key ||
+                          'dvr-post-offset-minutes'
                         }
                       />
                       <TextInput

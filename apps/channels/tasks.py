@@ -379,10 +379,33 @@ def evaluate_series_rules_impl(tvg_id: str | None = None):
                 except Exception:
                     continue  # already scheduled/recorded
 
+                # Apply global DVR pre/post offsets (in minutes)
+                try:
+                    pre_min = int(CoreSettings.get_dvr_pre_offset_minutes())
+                except Exception:
+                    pre_min = 0
+                try:
+                    post_min = int(CoreSettings.get_dvr_post_offset_minutes())
+                except Exception:
+                    post_min = 0
+
+                adj_start = prog.start_time
+                adj_end = prog.end_time
+                try:
+                    if pre_min and pre_min > 0:
+                        adj_start = adj_start - timedelta(minutes=pre_min)
+                except Exception:
+                    pass
+                try:
+                    if post_min and post_min > 0:
+                        adj_end = adj_end + timedelta(minutes=post_min)
+                except Exception:
+                    pass
+
                 rec = Recording.objects.create(
                     channel=channel,
-                    start_time=prog.start_time,
-                    end_time=prog.end_time,
+                    start_time=adj_start,
+                    end_time=adj_end,
                     custom_properties={
                         "program": {
                             "id": prog.id,
@@ -423,6 +446,85 @@ def evaluate_series_rules_impl(tvg_id: str | None = None):
 @shared_task
 def evaluate_series_rules(tvg_id: str | None = None):
     return evaluate_series_rules_impl(tvg_id)
+
+
+def reschedule_upcoming_recordings_for_offset_change_impl():
+    """Recalculate start/end for all future EPG-based recordings using current DVR offsets.
+
+    Only recordings that have not yet started (start_time > now) and that were
+    scheduled from EPG data (custom_properties.program present) are updated.
+    """
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+    from apps.channels.models import Recording
+
+    now = timezone.now()
+
+    try:
+        pre_min = int(CoreSettings.get_dvr_pre_offset_minutes())
+    except Exception:
+        pre_min = 0
+    try:
+        post_min = int(CoreSettings.get_dvr_post_offset_minutes())
+    except Exception:
+        post_min = 0
+
+    changed = 0
+    scanned = 0
+
+    for rec in Recording.objects.filter(start_time__gt=now).iterator():
+        scanned += 1
+        try:
+            cp = rec.custom_properties or {}
+            program = cp.get("program") if isinstance(cp, dict) else None
+            if not isinstance(program, dict):
+                continue
+            base_start = program.get("start_time")
+            base_end = program.get("end_time")
+            if not base_start or not base_end:
+                continue
+            start_dt = parse_datetime(str(base_start))
+            end_dt = parse_datetime(str(base_end))
+            if start_dt is None or end_dt is None:
+                continue
+
+            adj_start = start_dt
+            adj_end = end_dt
+            try:
+                if pre_min and pre_min > 0:
+                    adj_start = adj_start - timedelta(minutes=pre_min)
+            except Exception:
+                pass
+            try:
+                if post_min and post_min > 0:
+                    adj_end = adj_end + timedelta(minutes=post_min)
+            except Exception:
+                pass
+
+            if rec.start_time != adj_start or rec.end_time != adj_end:
+                rec.start_time = adj_start
+                rec.end_time = adj_end
+                rec.save(update_fields=["start_time", "end_time"])
+                changed += 1
+        except Exception:
+            continue
+
+    # Notify frontend to refresh
+    try:
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'updates',
+            {'type': 'update', 'data': {"success": True, "type": "recordings_refreshed", "rescheduled": changed}},
+        )
+    except Exception:
+        pass
+
+    return {"changed": changed, "scanned": scanned, "pre": pre_min, "post": post_min}
+
+
+@shared_task
+def reschedule_upcoming_recordings_for_offset_change():
+    return reschedule_upcoming_recordings_for_offset_change_impl()
 
 
 @shared_task

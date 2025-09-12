@@ -158,6 +158,8 @@ DVR_TV_FALLBACK_DIR_KEY = slugify("DVR TV Fallback Dir")
 DVR_TV_FALLBACK_TEMPLATE_KEY = slugify("DVR TV Fallback Template")
 DVR_MOVIE_FALLBACK_TEMPLATE_KEY = slugify("DVR Movie Fallback Template")
 DVR_COMSKIP_ENABLED_KEY = slugify("DVR Comskip Enabled")
+DVR_PRE_OFFSET_MINUTES_KEY = slugify("DVR Pre-Offset Minutes")
+DVR_POST_OFFSET_MINUTES_KEY = slugify("DVR Post-Offset Minutes")
 
 
 class CoreSettings(models.Model):
@@ -271,6 +273,34 @@ class CoreSettings(models.Model):
             return str(val).lower() in ("1", "true", "yes", "on")
         except cls.DoesNotExist:
             return False
+
+    @classmethod
+    def get_dvr_pre_offset_minutes(cls):
+        """Minutes to start recording before scheduled start (default 0)."""
+        try:
+            val = cls.objects.get(key=DVR_PRE_OFFSET_MINUTES_KEY).value
+            return int(val)
+        except cls.DoesNotExist:
+            return 0
+        except Exception:
+            try:
+                return int(float(val))
+            except Exception:
+                return 0
+
+    @classmethod
+    def get_dvr_post_offset_minutes(cls):
+        """Minutes to stop recording after scheduled end (default 0)."""
+        try:
+            val = cls.objects.get(key=DVR_POST_OFFSET_MINUTES_KEY).value
+            return int(val)
+        except cls.DoesNotExist:
+            return 0
+        except Exception:
+            try:
+                return int(float(val))
+            except Exception:
+                return 0
 
     @classmethod
     def get_dvr_series_rules(cls):
