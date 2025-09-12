@@ -106,11 +106,18 @@ const CustomTableBody = ({
                 className="td"
                 key={`td-${cell.id}`}
                 style={{
-                  flex: cell.column.columnDef.size ? '0 0 auto' : '1 1 0',
+                  flex: cell.column.columnDef.size
+                    ? `0 0 ${cell.column.getSize()}px`
+                    : '1 1 0%',
                   width: cell.column.columnDef.size
-                    ? cell.column.getSize()
-                    : undefined,
-                  minWidth: 0,
+                    ? `${cell.column.getSize()}px`
+                    : 'auto',
+                  maxWidth: cell.column.columnDef.size
+                    ? `${cell.column.getSize()}px`
+                    : 'none',
+                  minWidth: cell.column.columnDef.minSize
+                    ? `${cell.column.columnDef.minSize}px`
+                    : '0px',
                   ...(tableCellProps && tableCellProps({ cell })),
                 }}
               >

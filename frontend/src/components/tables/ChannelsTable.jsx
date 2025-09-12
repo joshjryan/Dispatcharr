@@ -307,7 +307,10 @@ const ChannelsTable = ({}) => {
   const [channelToDelete, setChannelToDelete] = useState(null);
 
   // Column sizing state for resizable columns
-  const [columnSizing, setColumnSizing] = useLocalStorage('channels-table-column-sizing', {});
+  const [columnSizing, setColumnSizing] = useLocalStorage(
+    'channels-table-column-sizing',
+    {}
+  );
 
   // M3U and EPG URL configuration state
   const [m3uParams, setM3uParams] = useState({
@@ -724,7 +727,7 @@ const ChannelsTable = ({}) => {
       {
         id: 'channel_number',
         accessorKey: 'channel_number',
-        size: 40,
+        size: columnSizing.channel_number || 40,
         minSize: 30,
         maxSize: 100,
         cell: ({ getValue }) => {
@@ -747,6 +750,7 @@ const ChannelsTable = ({}) => {
       {
         id: 'name',
         accessorKey: 'name',
+        size: columnSizing.name || 200,
         minSize: 100,
         cell: ({ getValue }) => (
           <Box
@@ -802,7 +806,7 @@ const ChannelsTable = ({}) => {
             </Box>
           );
         },
-        size: 120,
+        size: columnSizing.epg || 120,
         minSize: 80,
         maxSize: 200,
       },
@@ -823,7 +827,7 @@ const ChannelsTable = ({}) => {
             {getValue()}
           </Box>
         ),
-        size: 175,
+        size: columnSizing.channel_group || 175,
         minSize: 100,
         maxSize: 300,
       },
@@ -870,7 +874,7 @@ const ChannelsTable = ({}) => {
         ),
       },
     ],
-    [selectedProfileId, channelGroups, logos, theme]
+    [selectedProfileId, channelGroups, logos, theme, columnSizing]
   );
 
   const renderHeaderCell = (header) => {
@@ -972,6 +976,8 @@ const ChannelsTable = ({}) => {
     onRowSelectionChange: onRowSelectionChange,
     state: {
       columnSizing,
+      pagination,
+      sorting,
     },
     onColumnSizingChange: setColumnSizing,
     getExpandedRowHeight: (row) => {

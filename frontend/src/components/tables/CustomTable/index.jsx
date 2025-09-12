@@ -85,15 +85,16 @@ const useTable = ({
 
   const table = useReactTable({
     defaultColumn: {
-      size: undefined,
       minSize: 0,
+      maxSize: Number.MAX_SAFE_INTEGER,
+      size: 150,
     },
     ...options,
     state: {
-      data: options.data,
+      ...options.state,
       selectedTableIds,
-      columnSizing: options.state?.columnSizing || {},
     },
+    onStateChange: options.onStateChange,
     getCoreRowModel: options.getCoreRowModel ?? getCoreRowModel(),
     enableColumnResizing: true,
     columnResizeMode: 'onChange',

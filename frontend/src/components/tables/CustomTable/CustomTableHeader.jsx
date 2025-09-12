@@ -62,11 +62,18 @@ const CustomTableHeader = ({
                 className="th"
                 key={header.id}
                 style={{
-                  flex: header.column.columnDef.size ? '0 0 auto' : '1 1 0',
+                  flex: header.column.columnDef.size
+                    ? `0 0 ${header.getSize()}px`
+                    : '1 1 0%',
                   width: header.column.columnDef.size
-                    ? header.getSize()
-                    : undefined,
-                  minWidth: 0,
+                    ? `${header.getSize()}px`
+                    : 'auto',
+                  maxWidth: header.column.columnDef.size
+                    ? `${header.getSize()}px`
+                    : 'none',
+                  minWidth: header.column.columnDef.minSize
+                    ? `${header.column.columnDef.minSize}px`
+                    : '0px',
                   position: 'relative',
                   // ...(tableCellProps && tableCellProps({ cell: header })),
                 }}
@@ -77,12 +84,13 @@ const CustomTableHeader = ({
                     ...(header.column.columnDef.style &&
                       header.column.columnDef.style),
                     height: '100%',
+                    paddingRight: header.column.getCanResize() ? '8px' : '0px', // Add padding for resize handle
                   }}
                 >
                   {renderHeaderCell(header)}
                 </Flex>
                 {header.column.getCanResize() && (
-                  <Box
+                  <div
                     onMouseDown={header.getResizeHandler()}
                     onTouchStart={header.getResizeHandler()}
                     className={`resizer ${
@@ -93,15 +101,16 @@ const CustomTableHeader = ({
                       right: 0,
                       top: 0,
                       height: '100%',
-                      width: '5px',
+                      width: '8px', // Make it slightly wider
                       cursor: 'col-resize',
                       userSelect: 'none',
                       touchAction: 'none',
                       backgroundColor: header.column.getIsResizing()
                         ? '#3b82f6'
                         : 'transparent',
-                      opacity: header.column.getIsResizing() ? 1 : 0.5,
+                      opacity: header.column.getIsResizing() ? 1 : 0.3, // Make it more visible by default
                       transition: 'opacity 0.2s',
+                      zIndex: 1000, // Ensure it's on top
                     }}
                     onMouseEnter={(e) => {
                       e.target.style.opacity = '1';
