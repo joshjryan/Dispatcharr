@@ -9,6 +9,7 @@ from drf_yasg import openapi
 from .routing import websocket_urlpatterns
 from apps.output.views import xc_player_api, xc_panel_api, xc_get, xc_xmltv
 from apps.proxy.ts_proxy.views import stream_xc
+from apps.output.views import xc_movie_stream, xc_series_stream
 
 # Define schema_view for Swagger
 schema_view = get_schema_view(
@@ -55,16 +56,25 @@ urlpatterns = [
         stream_xc,
         name="xc_stream_endpoint",
     ),
-    # Swagger UI
+    # XC VOD endpoints
     path(
-        "swagger/",
-        schema_view.with_ui("swagger", cache_timeout=0),
-        name="schema-swagger-ui",
+        "movie/<str:username>/<str:password>/<str:stream_id>.<str:extension>",
+        xc_movie_stream,
+        name="xc_movie_stream",
     ),
+    path(
+        "series/<str:username>/<str:password>/<str:stream_id>.<str:extension>",
+        xc_series_stream,
+        name="xc_series_stream",
+    ),
+
+    re_path(r"^swagger/?$", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),
     # ReDoc UI
     path("redoc/", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
     # Optionally, serve the raw Swagger JSON
     path("swagger.json", schema_view.without_ui(cache_timeout=0), name="schema-json"),
+
+    # VOD proxy is now handled by the main proxy URLs above
     # Catch-all routes should always be last
     path("", TemplateView.as_view(template_name="index.html")),  # React entry point
     path("<path:unused_path>", TemplateView.as_view(template_name="index.html")),

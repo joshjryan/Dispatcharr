@@ -11,7 +11,7 @@ services:
       - 8001:8001
     volumes:
       - ../:/app
-      # - ./data/db:/data
+      - ./data:/data
     environment:
       - DISPATCHARR_ENV=dev
       - REDIS_HOST=localhost

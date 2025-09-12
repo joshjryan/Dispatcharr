@@ -14,9 +14,12 @@ import Guide from './pages/Guide';
 import Stats from './pages/Stats';
 import DVR from './pages/DVR';
 import Settings from './pages/Settings';
+import PluginsPage from './pages/Plugins';
 import Users from './pages/Users';
 import LogosPage from './pages/Logos';
+import VODsPage from './pages/VODs';
 import useAuthStore from './store/auth';
+import useLogosStore from './store/logos';
 import FloatingVideo from './components/FloatingVideo';
 import { WebsocketProvider } from './WebSocket';
 import { Box, AppShell, MantineProvider } from '@mantine/core';
@@ -37,6 +40,8 @@ const defaultRoute = '/channels';
 
 const App = () => {
   const [open, setOpen] = useState(true);
+  const [backgroundLoadingStarted, setBackgroundLoadingStarted] =
+    useState(false);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setIsAuthenticated = useAuthStore((s) => s.setIsAuthenticated);
   const logout = useAuthStore((s) => s.logout);
@@ -76,6 +81,11 @@ const App = () => {
         const loggedIn = await initializeAuth();
         if (loggedIn) {
           await initData();
+          // Start background logo loading after app is fully initialized (only once)
+          if (!backgroundLoadingStarted) {
+            setBackgroundLoadingStarted(true);
+            useLogosStore.getState().startBackgroundLoading();
+          }
         } else {
           await logout();
         }
@@ -86,7 +96,7 @@ const App = () => {
     };
 
     checkAuth();
-  }, [initializeAuth, initData, logout]);
+  }, [initializeAuth, initData, logout, backgroundLoadingStarted]);
 
   return (
     <MantineProvider
@@ -132,9 +142,11 @@ const App = () => {
                         <Route path="/guide" element={<Guide />} />
                         <Route path="/dvr" element={<DVR />} />
                         <Route path="/stats" element={<Stats />} />
+                        <Route path="/plugins" element={<PluginsPage />} />
                         <Route path="/users" element={<Users />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="/logos" element={<LogosPage />} />
+                        <Route path="/vods" element={<VODsPage />} />
                       </>
                     ) : (
                       <Route path="/login" element={<Login needsSuperuser />} />

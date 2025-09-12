@@ -188,6 +188,12 @@ def refresh_epg_data(source_id):
             fetch_schedules_direct(source)
 
         source.save(update_fields=['updated_at'])
+        # After successful EPG refresh, evaluate DVR series rules to schedule new episodes
+        try:
+            from apps.channels.tasks import evaluate_series_rules
+            evaluate_series_rules.delay()
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Error in refresh_epg_data for source {source_id}: {e}", exc_info=True)
         try:
@@ -1234,10 +1240,7 @@ def parse_programs_for_tvg_id(epg_id):
 
                         if custom_props:
                             logger.trace(f"Number of custom properties: {len(custom_props)}")
-                            try:
-                                custom_properties_json = json.dumps(custom_props)
-                            except Exception as e:
-                                logger.error(f"Error serializing custom properties to JSON: {e}", exc_info=True)
+                            custom_properties_json = custom_props
 
                         programs_to_create.append(ProgramData(
                             epg=epg,

@@ -14,7 +14,6 @@ const useChannelsStore = create((set, get) => ({
   stats: {},
   activeChannels: {},
   activeClients: {},
-  logos: {},
   recordings: [],
   isLoading: false,
   error: null,
@@ -55,7 +54,7 @@ const useChannelsStore = create((set, get) => ({
           hasChannels: group.channel_count > 0,
           hasM3UAccounts: group.m3u_account_count > 0,
           canEdit: group.m3u_account_count === 0,
-          canDelete: group.channel_count === 0 && group.m3u_account_count === 0
+          canDelete: group.channel_count === 0 && group.m3u_account_count === 0,
         };
         return acc;
       }, {});
@@ -153,9 +152,14 @@ const useChannelsStore = create((set, get) => ({
   updateChannels: (channels) => {
     // Ensure channels is an array
     if (!Array.isArray(channels)) {
-      console.error('updateChannels expects an array, received:', typeof channels, channels);
+      console.error(
+        'updateChannels expects an array, received:',
+        typeof channels,
+        channels
+      );
       return;
-    } const channelsByUUID = {};
+    }
+    const channelsByUUID = {};
     const updatedChannels = channels.reduce((acc, chan) => {
       channelsByUUID[chan.uuid] = chan.id;
       acc[chan.id] = chan;
@@ -213,52 +217,6 @@ const useChannelsStore = create((set, get) => ({
     set((state) => {
       const { [groupId]: removed, ...remainingGroups } = state.channelGroups;
       return { channelGroups: remainingGroups };
-    }),
-
-  fetchLogos: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const logos = await api.getLogos();
-      set({
-        logos: logos.reduce((acc, logo) => {
-          acc[logo.id] = {
-            ...logo,
-          };
-          return acc;
-        }, {}),
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('Failed to fetch logos:', error);
-      set({ error: 'Failed to load logos.', isLoading: false });
-    }
-  },
-
-  addLogo: (newLogo) =>
-    set((state) => ({
-      logos: {
-        ...state.logos,
-        [newLogo.id]: {
-          ...newLogo,
-        },
-      },
-    })),
-
-  updateLogo: (logo) =>
-    set((state) => ({
-      logos: {
-        ...state.logos,
-        [logo.id]: {
-          ...logo,
-        },
-      },
-    })),
-
-  removeLogo: (logoId) =>
-    set((state) => {
-      const newLogos = { ...state.logos };
-      delete newLogos[logoId];
-      return { logos: newLogos };
     }),
 
   addProfile: (profile) =>
@@ -348,10 +306,10 @@ const useChannelsStore = create((set, get) => ({
     }),
 
   setChannelsPageSelection: (channelsPageSelection) =>
-    set((state) => ({ channelsPageSelection })),
+    set(() => ({ channelsPageSelection })),
 
   setSelectedProfileId: (id) =>
-    set((state) => ({
+    set(() => ({
       selectedProfileId: id,
     })),
 
@@ -450,14 +408,38 @@ const useChannelsStore = create((set, get) => ({
     }
   },
 
+  // Optimistically remove a single recording from the local store
+  removeRecording: (id) =>
+    set((state) => {
+      const target = String(id);
+      const current = state.recordings;
+      if (Array.isArray(current)) {
+        return {
+          recordings: current.filter((r) => String(r?.id) !== target),
+        };
+      }
+      if (current && typeof current === 'object') {
+        const next = { ...current };
+        for (const k of Object.keys(next)) {
+          try {
+            if (String(next[k]?.id) === target) delete next[k];
+          } catch {}
+        }
+        return { recordings: next };
+      }
+      return {};
+    }),
+
   // Add helper methods for validation
   canEditChannelGroup: (groupIdOrGroup) => {
-    const groupId = typeof groupIdOrGroup === 'object' ? groupIdOrGroup.id : groupIdOrGroup;
+    const groupId =
+      typeof groupIdOrGroup === 'object' ? groupIdOrGroup.id : groupIdOrGroup;
     return get().channelGroups[groupId]?.canEdit ?? true;
   },
 
   canDeleteChannelGroup: (groupIdOrGroup) => {
-    const groupId = typeof groupIdOrGroup === 'object' ? groupIdOrGroup.id : groupIdOrGroup;
+    const groupId =
+      typeof groupIdOrGroup === 'object' ? groupIdOrGroup.id : groupIdOrGroup;
     return get().channelGroups[groupId]?.canDelete ?? true;
   },
 }));

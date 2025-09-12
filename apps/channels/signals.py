@@ -8,7 +8,7 @@ from .models import Channel, Stream, ChannelProfile, ChannelProfileMembership, R
 from apps.m3u.models import M3UAccount
 from apps.epg.tasks import parse_programs_for_tvg_id
 import logging, requests, time
-from .tasks import run_recording
+from .tasks import run_recording, prefetch_recording_artwork
 from django.utils.timezone import now, is_aware, make_aware
 from datetime import timedelta
 
@@ -73,8 +73,9 @@ def create_profile_memberships(sender, instance, created, **kwargs):
 
 def schedule_recording_task(instance):
     eta = instance.start_time
+    # Pass recording_id first so task can persist metadata to the correct row
     task = run_recording.apply_async(
-        args=[instance.channel_id, str(instance.start_time), str(instance.end_time)],
+        args=[instance.id, instance.channel_id, str(instance.start_time), str(instance.end_time)],
         eta=eta
     )
     return task.id
@@ -123,6 +124,11 @@ def schedule_task_on_save(sender, instance, created, **kwargs):
                 instance.save(update_fields=['task_id'])
             else:
                 print("Start time is in the past. Not scheduling.")
+        # Kick off poster/artwork prefetch to enrich Upcoming cards
+        try:
+            prefetch_recording_artwork.apply_async(args=[instance.id], countdown=1)
+        except Exception as e:
+            print("Error scheduling artwork prefetch:", e)
     except Exception as e:
         import traceback
         print("Error in post_save signal:", e)

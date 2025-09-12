@@ -30,7 +30,7 @@ const ConfirmationDialog = ({
   size = 'md',
   zIndex = 1000,
   showDeleteFileOption = false,
-  deleteFileLabel = "Also delete files from disk",
+  deleteFileLabel = 'Also delete files from disk',
 }) => {
   const suppressWarning = useWarningsStore((s) => s.suppressWarning);
   const isWarningSuppressed = useWarningsStore((s) => s.isWarningSuppressed);

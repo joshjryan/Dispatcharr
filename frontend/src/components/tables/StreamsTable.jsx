@@ -3,6 +3,7 @@ import API from '../../api';
 import StreamForm from '../forms/Stream';
 import usePlaylistsStore from '../../store/playlists';
 import useChannelsStore from '../../store/channels';
+import useLogosStore from '../../store/logos';
 import { copyToClipboard, useDebounce } from '../../utils';
 import {
   SquarePlus,
@@ -59,17 +60,20 @@ const StreamRowActions = ({
     (state) =>
       state.channels.find((chan) => chan.id === selectedChannelIds[0])?.streams
   );
-  const fetchLogos = useChannelsStore((s) => s.fetchLogos);
+  const fetchLogos = useLogosStore((s) => s.fetchLogos);
 
   const createChannelFromStream = async () => {
-    const selectedChannelProfileId = useChannelsStore.getState().selectedProfileId;
+    const selectedChannelProfileId =
+      useChannelsStore.getState().selectedProfileId;
 
     await API.createChannelFromStream({
       name: row.original.name,
       channel_number: null,
       stream_id: row.original.id,
       // Only pass channel_profile_ids if a specific profile is selected (not "All")
-      ...(selectedChannelProfileId !== '0' && { channel_profile_ids: selectedChannelProfileId }),
+      ...(selectedChannelProfileId !== '0' && {
+        channel_profile_ids: selectedChannelProfileId,
+      }),
     });
     await API.requeryChannels();
     fetchLogos();
@@ -102,7 +106,7 @@ const StreamRowActions = ({
       'ID:',
       row.original.id,
       'Hash:',
-      row.original.stream_hash,
+      row.original.stream_hash
     );
     handleWatchStream(row.original.stream_hash);
   }, [row.original, handleWatchStream]); // Add proper dependencies to ensure correct stream
@@ -174,7 +178,7 @@ const StreamRowActions = ({
   );
 };
 
-const StreamsTable = ({ }) => {
+const StreamsTable = ({}) => {
   const theme = useMantineTheme();
 
   /**
@@ -195,7 +199,10 @@ const StreamsTable = ({ }) => {
   // const [allRowsSelected, setAllRowsSelected] = useState(false);
 
   // Add local storage for page size
-  const [storedPageSize, setStoredPageSize] = useLocalStorage('streams-page-size', 50);
+  const [storedPageSize, setStoredPageSize] = useLocalStorage(
+    'streams-page-size',
+    50
+  );
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: storedPageSize,
@@ -408,7 +415,8 @@ const StreamsTable = ({ }) => {
   const createChannelsFromStreams = async () => {
     setIsLoading(true);
     try {
-      const selectedChannelProfileId = useChannelsStore.getState().selectedProfileId;
+      const selectedChannelProfileId =
+        useChannelsStore.getState().selectedProfileId;
 
       // Try to fetch the actual stream data for selected streams
       let streamsData = [];
@@ -418,12 +426,14 @@ const StreamsTable = ({ }) => {
         console.warn('Could not fetch stream details, using IDs only:', error);
       }
 
-      const streamData = selectedStreamIds.map(streamId => {
-        const stream = streamsData.find(s => s.id === streamId);
+      const streamData = selectedStreamIds.map((streamId) => {
+        const stream = streamsData.find((s) => s.id === streamId);
         return {
           stream_id: streamId,
           name: stream?.name || `Stream ${streamId}`,
-          ...(selectedChannelProfileId !== '0' && { channel_profile_ids: selectedChannelProfileId }),
+          ...(selectedChannelProfileId !== '0' && {
+            channel_profile_ids: selectedChannelProfileId,
+          }),
         };
       });
 
@@ -715,10 +725,10 @@ const StreamsTable = ({ }) => {
               style={
                 selectedStreamIds.length > 0 && selectedChannelIds.length === 1
                   ? {
-                    borderWidth: '1px',
-                    borderColor: theme.tailwind.green[5],
-                    color: 'white',
-                  }
+                      borderWidth: '1px',
+                      borderColor: theme.tailwind.green[5],
+                      color: 'white',
+                    }
                   : undefined
               }
               disabled={

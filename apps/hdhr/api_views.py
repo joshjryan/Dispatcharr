@@ -17,7 +17,6 @@ from django.views import View
 from django.utils.decorators import method_decorator
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
-from apps.m3u.models import M3UAccountProfile
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -60,43 +59,9 @@ class DiscoverAPIView(APIView):
         base_url = request.build_absolute_uri(f'/{"/".join(uri_parts)}/').rstrip("/")
         device = HDHRDevice.objects.first()
 
-        # Calculate tuner count from active profiles from active M3U accounts (excluding default "custom Default" profile)
-        profiles = M3UAccountProfile.objects.filter(
-            is_active=True,
-            m3u_account__is_active=True,  # Only include profiles from enabled M3U accounts
-        ).exclude(id=1)
-
-        # 1. Check if any profile has unlimited streams (max_streams=0)
-        has_unlimited = profiles.filter(max_streams=0).exists()
-
-        # 2. Calculate tuner count from limited profiles
-        limited_tuners = 0
-        if not has_unlimited:
-            limited_tuners = (
-                profiles.filter(max_streams__gt=0)
-                .aggregate(total=models.Sum("max_streams"))
-                .get("total", 0)
-                or 0
-            )
-
-        # 3. Add custom stream count to tuner count
-        custom_stream_count = Stream.objects.filter(is_custom=True).count()
-        logger.debug(f"Found {custom_stream_count} custom streams")
-
-        # 4. Calculate final tuner count
-        if has_unlimited:
-            # If there are unlimited profiles, start with 10 plus custom streams
-            tuner_count = 10 + custom_stream_count
-        else:
-            # Otherwise use the limited profile sum plus custom streams
-            tuner_count = limited_tuners + custom_stream_count
-
-        # 5. Ensure minimum of 1 tuners
-        tuner_count = max(1, tuner_count)
-
-        logger.debug(
-            f"Calculated tuner count: {tuner_count} (limited profiles: {limited_tuners}, custom streams: {custom_stream_count}, unlimited: {has_unlimited})"
-        )
+        # Calculate tuner count using centralized function
+        from apps.m3u.utils import calculate_tuner_count
+        tuner_count = calculate_tuner_count(minimum=1, unlimited_default=10)
 
         # Create a unique DeviceID for the HDHomeRun device based on profile ID or a default value
         device_ID = "12345678"  # Default DeviceID

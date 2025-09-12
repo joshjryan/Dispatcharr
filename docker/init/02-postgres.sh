@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Temporary migration from postgres in /data to $POSTGRES_DIR. Can likely remove
 # some time in the future.
 if [ -e "/data/postgresql.conf" ]; then
@@ -115,9 +114,8 @@ if [ -z "$(ls -A $POSTGRES_DIR)" ]; then
     if ! su - postgres -c "psql -p ${POSTGRES_PORT} -tAc \"SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB';\"" | grep -q 1; then
         # Create PostgreSQL database
         echo "Creating PostgreSQL database..."
-        su - postgres -c "createdb -p ${POSTGRES_PORT} ${POSTGRES_DB}"
-
-        # Create user, set ownership, and grant privileges
+        su - postgres -c "createdb -p ${POSTGRES_PORT} --encoding=UTF8 ${POSTGRES_DB}"
+                # Create user, set ownership, and grant privileges
         echo "Creating PostgreSQL user..."
         su - postgres -c "psql -p ${POSTGRES_PORT} -d ${POSTGRES_DB}" <<EOF
 DO \$\$
@@ -140,3 +138,29 @@ EOF
         sleep 1
     done
 fi
+
+ensure_utf8_encoding() {
+    # Check encoding of existing database
+    CURRENT_ENCODING=$(su - postgres -c "psql -p ${POSTGRES_PORT} -tAc \"SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = '$POSTGRES_DB';\"" | tr -d ' ')
+    if [ "$CURRENT_ENCODING" != "UTF8" ]; then
+        echo "Database $POSTGRES_DB encoding is $CURRENT_ENCODING, converting to UTF8..."
+        DUMP_FILE="/tmp/${POSTGRES_DB}_utf8_dump_$(date +%s).sql"
+        # Dump database (include permissions and ownership)
+        su - postgres -c "pg_dump -p ${POSTGRES_PORT} $POSTGRES_DB > $DUMP_FILE"
+        # Drop and recreate database with UTF8 encoding using template0
+        su - postgres -c "dropdb -p ${POSTGRES_PORT} $POSTGRES_DB"
+        # Recreate database with UTF8 encoding
+        su - postgres -c "createdb -p ${POSTGRES_PORT} --encoding=UTF8 --template=template0 ${POSTGRES_DB}"
+
+
+        # Restore data
+        su - postgres -c "psql -p ${POSTGRES_PORT} -d $POSTGRES_DB < $DUMP_FILE"
+        #configure_db
+
+
+        rm -f "$DUMP_FILE"
+        echo "Database $POSTGRES_DB converted to UTF8 and permissions set."
+    fi
+}
+
+

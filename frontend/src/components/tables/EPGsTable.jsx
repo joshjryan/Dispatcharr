@@ -552,8 +552,7 @@ const EPGsTable = () => {
             padding: 0,
             // gap: 1,
           }}
-        >
-        </Box>
+        ></Box>
       </Paper>
 
       <Box
@@ -590,14 +589,15 @@ const EPGsTable = () => {
 
 Name: ${epgToDelete.name}
 Source Type: ${epgToDelete.source_type}
-${epgToDelete.url
-                  ? `URL: ${epgToDelete.url}`
-                  : epgToDelete.api_key
-                    ? `API Key: ${epgToDelete.api_key}`
-                    : epgToDelete.file_path
-                      ? `File Path: ${epgToDelete.file_path}`
-                      : ''
-                }
+${
+  epgToDelete.url
+    ? `URL: ${epgToDelete.url}`
+    : epgToDelete.api_key
+      ? `API Key: ${epgToDelete.api_key}`
+      : epgToDelete.file_path
+        ? `File Path: ${epgToDelete.file_path}`
+        : ''
+}
 
 This will remove all related program information and channel associations.
 This action cannot be undone.`}

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import useChannelsStore from '../../store/channels';
+import useLogosStore from '../../store/logos';
 import { notifications } from '@mantine/notifications';
 import API from '../../api';
 import ChannelForm from '../forms/Channel';
@@ -44,12 +45,15 @@ import {
   Stack,
   Select,
   NumberInput,
+  Tooltip,
 } from '@mantine/core';
 import { getCoreRowModel, flexRender } from '@tanstack/react-table';
 import './table.css';
 import useChannelsTableStore from '../../store/channelsTable';
 import ChannelTableStreams from './ChannelTableStreams';
+import LazyLogo from '../LazyLogo';
 import useLocalStorage from '../../hooks/useLocalStorage';
+import useEPGsStore from '../../store/epgs';
 import { CustomTable, useTable } from './CustomTable';
 import ChannelsTableOnboarding from './ChannelsTable/ChannelsTableOnboarding';
 import ChannelTableHeader from './ChannelsTable/ChannelTableHeader';
@@ -214,11 +218,16 @@ const ChannelRowActions = React.memo(
   }
 );
 
-const ChannelsTable = ({ }) => {
+const ChannelsTable = ({}) => {
+  // EPG data lookup
+  const tvgsById = useEPGsStore((s) => s.tvgsById);
+  const epgs = useEPGsStore((s) => s.epgs);
   const theme = useMantineTheme();
   const channelGroups = useChannelsStore((s) => s.channelGroups);
   const canEditChannelGroup = useChannelsStore((s) => s.canEditChannelGroup);
-  const canDeleteChannelGroup = useChannelsStore((s) => s.canDeleteChannelGroup);
+  const canDeleteChannelGroup = useChannelsStore(
+    (s) => s.canDeleteChannelGroup
+  );
 
   /**
    * STORES
@@ -244,7 +253,7 @@ const ChannelsTable = ({ }) => {
   const channels = useChannelsStore((s) => s.channels);
   const profiles = useChannelsStore((s) => s.profiles);
   const selectedProfileId = useChannelsStore((s) => s.selectedProfileId);
-  const logos = useChannelsStore((s) => s.logos);
+  const logos = useLogosStore((s) => s.logos);
   const [tablePrefs, setTablePrefs] = useLocalStorage('channel-table-prefs', {
     pageSize: 50,
   });
@@ -284,6 +293,7 @@ const ChannelsTable = ({ }) => {
   const [filters, setFilters] = useState({
     name: '',
     channel_group: '',
+    epg: '',
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -300,12 +310,12 @@ const ChannelsTable = ({ }) => {
   const [m3uParams, setM3uParams] = useState({
     cachedlogos: true,
     direct: false,
-    tvg_id_source: 'channel_number'
+    tvg_id_source: 'channel_number',
   });
   const [epgParams, setEpgParams] = useState({
     cachedlogos: true,
     tvg_id_source: 'channel_number',
-    days: 0
+    days: 0,
   });
 
   /**
@@ -317,6 +327,25 @@ const ChannelsTable = ({ }) => {
   const groupOptions = Object.values(channelGroups)
     .filter((group) => activeGroupIds.has(group.id))
     .map((group) => group.name);
+
+  // Get unique EPG sources from active channels
+  const activeEPGSources = new Set();
+  let hasUnlinkedChannels = false;
+  Object.values(channels).forEach((channel) => {
+    if (channel.epg_data_id) {
+      const epgObj = tvgsById[channel.epg_data_id];
+      if (epgObj && epgObj.epg_source) {
+        const epgName = epgs[epgObj.epg_source]?.name || epgObj.epg_source;
+        activeEPGSources.add(epgName);
+      }
+    } else {
+      hasUnlinkedChannels = true;
+    }
+  });
+  const epgOptions = Array.from(activeEPGSources).sort();
+  if (hasUnlinkedChannels) {
+    epgOptions.unshift('No EPG');
+  }
   const debouncedFilters = useDebounce(filters, 500, () => {
     setPagination({
       ...pagination,
@@ -342,7 +371,17 @@ const ChannelsTable = ({ }) => {
 
     // Apply debounced filters
     Object.entries(filters).forEach(([key, value]) => {
-      if (value) params.append(key, value);
+      if (value) {
+        if (Array.isArray(value)) {
+          // Convert null values to "null" string for URL parameter
+          const processedValue = value
+            .map((v) => (v === null ? 'null' : v))
+            .join(',');
+          params.append(key, processedValue);
+        } else {
+          params.append(key, value);
+        }
+      }
     });
 
     const [results, ids] = await Promise.all([
@@ -377,10 +416,25 @@ const ChannelsTable = ({ }) => {
     }));
   };
 
+  const handleEPGChange = (value) => {
+    // Convert "No EPG" to null for natural filtering
+    const processedValue = value
+      ? value.map((v) => (v === 'No EPG' ? null : v))
+      : '';
+    setFilters((prev) => ({
+      ...prev,
+      epg: processedValue,
+    }));
+  };
+
   const editChannel = async (ch = null) => {
     // Use table's selected state instead of store state to avoid stale selections
     const currentSelection = table ? table.selectedTableIds : [];
-    console.log('editChannel called with:', { ch, currentSelection, tableExists: !!table });
+    console.log('editChannel called with:', {
+      ch,
+      currentSelection,
+      tableExists: !!table,
+    });
 
     if (currentSelection.length > 1) {
       setChannelBatchModalOpen(true);
@@ -391,7 +445,7 @@ const ChannelsTable = ({ }) => {
         const selectedId = currentSelection[0];
 
         // Use table data since that's what's currently displayed
-        channelToEdit = data.find(d => d.id === selectedId);
+        channelToEdit = data.find((d) => d.id === selectedId);
       }
       setChannel(channelToEdit);
       setChannelModalOpen(true);
@@ -536,7 +590,8 @@ const ChannelsTable = ({ }) => {
     const params = new URLSearchParams();
     if (!m3uParams.cachedlogos) params.append('cachedlogos', 'false');
     if (m3uParams.direct) params.append('direct', 'true');
-    if (m3uParams.tvg_id_source !== 'channel_number') params.append('tvg_id_source', m3uParams.tvg_id_source);
+    if (m3uParams.tvg_id_source !== 'channel_number')
+      params.append('tvg_id_source', m3uParams.tvg_id_source);
 
     const baseUrl = m3uUrl;
     return params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
@@ -545,7 +600,8 @@ const ChannelsTable = ({ }) => {
   const buildEPGUrl = () => {
     const params = new URLSearchParams();
     if (!epgParams.cachedlogos) params.append('cachedlogos', 'false');
-    if (epgParams.tvg_id_source !== 'channel_number') params.append('tvg_id_source', epgParams.tvg_id_source);
+    if (epgParams.tvg_id_source !== 'channel_number')
+      params.append('tvg_id_source', epgParams.tvg_id_source);
     if (epgParams.days > 0) params.append('days', epgParams.days.toString());
 
     const baseUrl = epgUrl;
@@ -556,7 +612,9 @@ const ChannelsTable = ({ }) => {
     const success = await copyToClipboard(buildM3UUrl());
     notifications.show({
       title: success ? 'M3U URL Copied!' : 'Copy Failed',
-      message: success ? 'The M3U URL has been copied to your clipboard.' : 'Failed to copy M3U URL to clipboard',
+      message: success
+        ? 'The M3U URL has been copied to your clipboard.'
+        : 'Failed to copy M3U URL to clipboard',
       color: success ? 'green' : 'red',
     });
   };
@@ -565,7 +623,9 @@ const ChannelsTable = ({ }) => {
     const success = await copyToClipboard(buildEPGUrl());
     notifications.show({
       title: success ? 'EPG URL Copied!' : 'Copy Failed',
-      message: success ? 'The EPG URL has been copied to your clipboard.' : 'Failed to copy EPG URL to clipboard',
+      message: success
+        ? 'The EPG URL has been copied to your clipboard.'
+        : 'Failed to copy EPG URL to clipboard',
       color: success ? 'green' : 'red',
     });
   };
@@ -574,7 +634,9 @@ const ChannelsTable = ({ }) => {
     const success = await copyToClipboard(hdhrUrl);
     notifications.show({
       title: success ? 'HDHR URL Copied!' : 'Copy Failed',
-      message: success ? 'The HDHR URL has been copied to your clipboard.' : 'Failed to copy HDHR URL to clipboard',
+      message: success
+        ? 'The HDHR URL has been copied to your clipboard.'
+        : 'Failed to copy HDHR URL to clipboard',
       color: success ? 'green' : 'red',
     });
   };
@@ -690,6 +752,50 @@ const ChannelsTable = ({ }) => {
         ),
       },
       {
+        id: 'epg',
+        header: 'EPG',
+        accessorKey: 'epg_data_id',
+        cell: ({ getValue }) => {
+          const epgDataId = getValue();
+          const epgObj = epgDataId ? tvgsById[epgDataId] : null;
+          const epgName =
+            epgObj && epgObj.epg_source
+              ? epgs[epgObj.epg_source]?.name || epgObj.epg_source
+              : null;
+          const epgDataName = epgObj?.name;
+          const tvgId = epgObj?.tvg_id;
+          const tooltip = epgObj
+            ? `${epgName ? `EPG Name: ${epgName}\n` : ''}${epgDataName ? `TVG Name: ${epgDataName}\n` : ''}${tvgId ? `TVG-ID: ${tvgId}` : ''}`.trim()
+            : '';
+          return (
+            <Box
+              style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {epgObj && epgName ? (
+                <Tooltip
+                  label={
+                    <span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>
+                  }
+                  withArrow
+                  position="top"
+                >
+                  <span>{epgName}</span>
+                </Tooltip>
+              ) : epgObj ? (
+                <span>{epgObj.name}</span>
+              ) : (
+                <span style={{ color: '#888' }}>Not linked</span>
+              )}
+            </Box>
+          );
+        },
+        size: 120,
+      },
+      {
         id: 'channel_group',
         accessorFn: (row) =>
           channelGroups[row.channel_group_id]
@@ -706,6 +812,7 @@ const ChannelsTable = ({ }) => {
             {getValue()}
           </Box>
         ),
+        size: 175,
       },
       {
         id: 'logo',
@@ -717,18 +824,11 @@ const ChannelsTable = ({ }) => {
         header: '',
         cell: ({ getValue }) => {
           const logoId = getValue();
-          let src = logo; // Default fallback
-
-          if (logoId && logos[logoId]) {
-            // Try to use cache_url if available, otherwise construct it from the ID
-            src =
-              logos[logoId].cache_url || `/api/channels/logos/${logoId}/cache/`;
-          }
 
           return (
             <Center style={{ width: '100%' }}>
-              <img
-                src={src}
+              <LazyLogo
+                logoId={logoId}
                 alt="logo"
                 style={{ maxHeight: 18, maxWidth: 55 }}
               />
@@ -767,6 +867,20 @@ const ChannelsTable = ({ }) => {
     }
 
     switch (header.id) {
+      case 'epg':
+        return (
+          <MultiSelect
+            placeholder="EPG"
+            variant="unstyled"
+            data={epgOptions}
+            size="xs"
+            searchable
+            clearable
+            onClick={stopPropagation}
+            onChange={handleEPGChange}
+            style={{ width: '100%' }}
+          />
+        );
       case 'enabled':
         return (
           <Center style={{ width: '100%' }}>
@@ -858,6 +972,7 @@ const ChannelsTable = ({ }) => {
       channel_number: renderHeaderCell,
       channel_group: renderHeaderCell,
       enabled: renderHeaderCell,
+      epg: renderHeaderCell,
     },
     getRowStyles: (row) => {
       const hasStreams =
@@ -865,8 +980,8 @@ const ChannelsTable = ({ }) => {
       return hasStreams
         ? {} // Default style for channels with streams
         : {
-          className: 'no-streams-row', // Add a class instead of background color
-        };
+            className: 'no-streams-row', // Add a class instead of background color
+          };
     },
   });
 
@@ -914,7 +1029,13 @@ const ChannelsTable = ({ }) => {
               Links:
             </Text>
             <Group gap={5} style={{ paddingLeft: 10 }}>
-              <Popover withArrow shadow="md" zIndex={1000} position="bottom-start" withinPortal>
+              <Popover
+                withArrow
+                shadow="md"
+                zIndex={1000}
+                position="bottom-start"
+                withinPortal
+              >
                 <Popover.Target>
                   <Button
                     leftSection={<Tv2 size={18} />}
@@ -936,7 +1057,7 @@ const ChannelsTable = ({ }) => {
                     style={{
                       minWidth: 250,
                       maxWidth: 'min(400px, 80vw)',
-                      width: 'max-content'
+                      width: 'max-content',
                     }}
                   >
                     <TextInput value={hdhrUrl} size="small" readOnly />
@@ -951,7 +1072,13 @@ const ChannelsTable = ({ }) => {
                   </Group>
                 </Popover.Dropdown>
               </Popover>
-              <Popover withArrow shadow="md" zIndex={1000} position="bottom-start" withinPortal>
+              <Popover
+                withArrow
+                shadow="md"
+                zIndex={1000}
+                position="bottom-start"
+                withinPortal
+              >
                 <Popover.Target>
                   <Button
                     leftSection={<ScreenShare size={18} />}
@@ -972,7 +1099,7 @@ const ChannelsTable = ({ }) => {
                     style={{
                       minWidth: 300,
                       maxWidth: 'min(500px, 90vw)',
-                      width: 'max-content'
+                      width: 'max-content',
                     }}
                     onClick={stopPropagation}
                     onMouseDown={stopPropagation}
@@ -992,47 +1119,60 @@ const ChannelsTable = ({ }) => {
                           <Copy size="16" />
                         </ActionIcon>
                       }
-                    /><Group justify="space-between">
+                    />
+                    <Group justify="space-between">
                       <Text size="sm">Use cached logos</Text>
                       <Switch
                         size="sm"
                         checked={m3uParams.cachedlogos}
-                        onChange={(event) => setM3uParams(prev => ({
-                          ...prev,
-                          cachedlogos: event.target.checked
-                        }))}
+                        onChange={(event) =>
+                          setM3uParams((prev) => ({
+                            ...prev,
+                            cachedlogos: event.target.checked,
+                          }))
+                        }
                       />
                     </Group>
-
                     <Group justify="space-between">
                       <Text size="sm">Direct stream URLs</Text>
                       <Switch
                         size="sm"
                         checked={m3uParams.direct}
-                        onChange={(event) => setM3uParams(prev => ({
-                          ...prev,
-                          direct: event.target.checked
-                        }))}
+                        onChange={(event) =>
+                          setM3uParams((prev) => ({
+                            ...prev,
+                            direct: event.target.checked,
+                          }))
+                        }
                       />
-                    </Group>                    <Select
+                    </Group>{' '}
+                    <Select
                       label="TVG-ID Source"
                       size="xs"
                       value={m3uParams.tvg_id_source}
-                      onChange={(value) => setM3uParams(prev => ({
-                        ...prev,
-                        tvg_id_source: value
-                      }))}
+                      onChange={(value) =>
+                        setM3uParams((prev) => ({
+                          ...prev,
+                          tvg_id_source: value,
+                        }))
+                      }
                       comboboxProps={{ withinPortal: false }}
                       data={[
                         { value: 'channel_number', label: 'Channel Number' },
                         { value: 'tvg_id', label: 'TVG-ID' },
-                        { value: 'gracenote', label: 'Gracenote Station ID' }
+                        { value: 'gracenote', label: 'Gracenote Station ID' },
                       ]}
                     />
                   </Stack>
                 </Popover.Dropdown>
               </Popover>
-              <Popover withArrow shadow="md" zIndex={1000} position="bottom-start" withinPortal>
+              <Popover
+                withArrow
+                shadow="md"
+                zIndex={1000}
+                position="bottom-start"
+                withinPortal
+              >
                 <Popover.Target>
                   <Button
                     leftSection={<Scroll size={18} />}
@@ -1054,7 +1194,7 @@ const ChannelsTable = ({ }) => {
                     style={{
                       minWidth: 300,
                       maxWidth: 'min(450px, 85vw)',
-                      width: 'max-content'
+                      width: 'max-content',
                     }}
                     onClick={stopPropagation}
                     onMouseDown={stopPropagation}
@@ -1080,25 +1220,29 @@ const ChannelsTable = ({ }) => {
                       <Switch
                         size="sm"
                         checked={epgParams.cachedlogos}
-                        onChange={(event) => setEpgParams(prev => ({
-                          ...prev,
-                          cachedlogos: event.target.checked
-                        }))}
+                        onChange={(event) =>
+                          setEpgParams((prev) => ({
+                            ...prev,
+                            cachedlogos: event.target.checked,
+                          }))
+                        }
                       />
                     </Group>
                     <Select
                       label="TVG-ID Source"
                       size="xs"
                       value={epgParams.tvg_id_source}
-                      onChange={(value) => setEpgParams(prev => ({
-                        ...prev,
-                        tvg_id_source: value
-                      }))}
+                      onChange={(value) =>
+                        setEpgParams((prev) => ({
+                          ...prev,
+                          tvg_id_source: value,
+                        }))
+                      }
                       comboboxProps={{ withinPortal: false }}
                       data={[
                         { value: 'channel_number', label: 'Channel Number' },
                         { value: 'tvg_id', label: 'TVG-ID' },
-                        { value: 'gracenote', label: 'Gracenote Station ID' }
+                        { value: 'gracenote', label: 'Gracenote Station ID' },
                       ]}
                     />
                     <NumberInput
@@ -1107,10 +1251,12 @@ const ChannelsTable = ({ }) => {
                       min={0}
                       max={365}
                       value={epgParams.days}
-                      onChange={(value) => setEpgParams(prev => ({
-                        ...prev,
-                        days: value || 0
-                      }))}
+                      onChange={(value) =>
+                        setEpgParams((prev) => ({
+                          ...prev,
+                          days: value || 0,
+                        }))
+                      }
                     />
                   </Stack>
                 </Popover.Dropdown>

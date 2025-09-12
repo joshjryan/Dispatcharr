@@ -44,7 +44,7 @@ const User = ({ user = null, isOpen, onClose }) => {
       username: !values.username
         ? 'Username is required'
         : values.user_level == USER_LEVELS.STREAMER &&
-          !values.username.match(/^[a-z0-9]+$/i)
+            !values.username.match(/^[a-z0-9]+$/i)
           ? 'Streamer username must be alphanumeric'
           : null,
       password:
@@ -74,15 +74,13 @@ const User = ({ user = null, isOpen, onClose }) => {
   const onSubmit = async () => {
     const values = form.getValues();
 
-    const { ...customProps } = JSON.parse(
-      user?.custom_properties || '{}'
-    );
+    const customProps = user?.custom_properties || {};
 
     // Always save xc_password, even if it's empty (to allow clearing)
     customProps.xc_password = values.xc_password || '';
     delete values.xc_password;
 
-    values.custom_properties = JSON.stringify(customProps);
+    values.custom_properties = customProps;
 
     // If 'All' is included, clear this and we assume access to all channels
     if (values.channel_profiles.includes('0')) {
@@ -114,7 +112,7 @@ const User = ({ user = null, isOpen, onClose }) => {
 
   useEffect(() => {
     if (user?.id) {
-      const customProps = JSON.parse(user.custom_properties || '{}');
+      const customProps = user.custom_properties || {};
 
       form.setValues({
         username: user.username,

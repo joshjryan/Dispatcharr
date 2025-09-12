@@ -21,7 +21,14 @@ const ChannelsPage = () => {
   }
 
   return (
-    <div style={{ height: '100vh', width: '100%', display: 'flex', overflowX: 'auto' }}>
+    <div
+      style={{
+        height: '100vh',
+        width: '100%',
+        display: 'flex',
+        overflowX: 'auto',
+      }}
+    >
       <Allotment
         defaultSizes={[50, 50]}
         style={{ height: '100%', width: '100%', minWidth: '600px' }}

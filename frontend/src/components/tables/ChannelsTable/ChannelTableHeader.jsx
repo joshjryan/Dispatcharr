@@ -108,7 +108,8 @@ const ChannelTableHeader = ({
   const [channelNumAssignmentStart, setChannelNumAssignmentStart] = useState(1);
   const [assignNumbersModalOpen, setAssignNumbersModalOpen] = useState(false);
   const [groupManagerOpen, setGroupManagerOpen] = useState(false);
-  const [confirmDeleteProfileOpen, setConfirmDeleteProfileOpen] = useState(false);
+  const [confirmDeleteProfileOpen, setConfirmDeleteProfileOpen] =
+    useState(false);
   const [profileToDelete, setProfileToDelete] = useState(null);
 
   const profiles = useChannelsStore((s) => s.profiles);

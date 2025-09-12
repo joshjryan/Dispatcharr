@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { notifications } from '@mantine/notifications';
 import useChannelsStore from './store/channels';
+import useLogosStore from './store/logos';
 import usePlaylistsStore from './store/playlists';
 import useEPGsStore from './store/epgs';
 import { Box, Button, Stack, Alert, Group } from '@mantine/core';
@@ -16,7 +17,7 @@ import API from './api';
 import useSettingsStore from './store/settings';
 import useAuthStore from './store/auth';
 
-export const WebsocketContext = createContext([false, () => { }, null]);
+export const WebsocketContext = createContext([false, () => {}, null]);
 
 export const WebsocketProvider = ({ children }) => {
   const [isReady, setIsReady] = useState(false);
@@ -169,6 +170,60 @@ export const WebsocketProvider = ({ children }) => {
 
           // Handle standard message format for other event types
           switch (parsedEvent.data?.type) {
+            case 'comskip_status': {
+              const rid = parsedEvent.data.recording_id;
+              const id = `comskip-${rid}`;
+              const status = parsedEvent.data.status;
+              const title = parsedEvent.data.title || 'Recording';
+              if (status === 'started') {
+                notifications.show({
+                  id,
+                  title: 'Removing commercials',
+                  message: `Processing ${title}...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Commercials removed',
+                  message: `${title} — kept ${parsedEvent.data.segments_kept} segments`,
+                  color: 'green.5',
+                  loading: false,
+                  autoClose: 4000,
+                });
+                try {
+                  await useChannelsStore.getState().fetchRecordings();
+                } catch {}
+              } else if (status === 'skipped') {
+                notifications.update({
+                  id,
+                  title: 'No commercials to remove',
+                  message: parsedEvent.data.reason || '',
+                  color: 'teal',
+                  loading: false,
+                  autoClose: 3000,
+                });
+                try {
+                  await useChannelsStore.getState().fetchRecordings();
+                } catch {}
+              } else if (status === 'error') {
+                notifications.update({
+                  id,
+                  title: 'Comskip failed',
+                  message: parsedEvent.data.reason || 'Unknown error',
+                  color: 'red',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                try {
+                  await useChannelsStore.getState().fetchRecordings();
+                } catch {}
+              }
+              break;
+            }
             case 'epg_file':
               fetchEPGs();
               notifications.show({
@@ -214,7 +269,10 @@ export const WebsocketProvider = ({ children }) => {
                   ) {
                     updateData.updated_at = new Date().toISOString();
                     // Log successful completion for debugging
-                    console.log('M3U refresh completed successfully:', updateData);
+                    console.log(
+                      'M3U refresh completed successfully:',
+                      updateData
+                    );
                   }
 
                   updatePlaylist(updateData);
@@ -224,7 +282,9 @@ export const WebsocketProvider = ({ children }) => {
                   // Log when playlist can't be found for debugging purposes
                   console.warn(
                     `Received update for unknown playlist ID: ${parsedEvent.data.account}`,
-                    Array.isArray(playlists) ? 'playlists is array' : 'playlists is object',
+                    Array.isArray(playlists)
+                      ? 'playlists is array'
+                      : 'playlists is object',
                     Object.keys(playlists).length
                   );
                 }
@@ -277,11 +337,32 @@ export const WebsocketProvider = ({ children }) => {
               );
               break;
 
+            case 'recording_updated':
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on update:', e);
+              }
+              break;
+
+            case 'recordings_refreshed':
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on refreshed:', e);
+              }
+              break;
+
             case 'recording_started':
               notifications.show({
                 title: 'Recording started!',
                 message: `Started recording channel ${parsedEvent.data.channel}`,
               });
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on start:', e);
+              }
               break;
 
             case 'recording_ended':
@@ -289,6 +370,11 @@ export const WebsocketProvider = ({ children }) => {
                 title: 'Recording finished!',
                 message: `Stopped recording channel ${parsedEvent.data.channel}`,
               });
+              try {
+                await useChannelsStore.getState().fetchRecordings();
+              } catch (e) {
+                console.warn('Failed to refresh recordings on end:', e);
+              }
               break;
 
             case 'epg_fetch_error':
@@ -374,6 +460,18 @@ export const WebsocketProvider = ({ children }) => {
               }
               break;
 
+            case 'epg_sources_changed':
+              // A plugin or backend process signaled that the EPG sources changed
+              try {
+                await fetchEPGs();
+              } catch (e) {
+                console.warn(
+                  'Failed to refresh EPG sources after change notification:',
+                  e
+                );
+              }
+              break;
+
             case 'stream_rehash':
               // Handle stream rehash progress updates
               if (parsedEvent.data.action === 'starting') {
@@ -427,6 +525,28 @@ export const WebsocketProvider = ({ children }) => {
                 autoClose: 5000,
               });
               fetchLogos();
+              break;
+
+            case 'account_info_refresh_success':
+              notifications.show({
+                title: 'Account Info Refreshed',
+                message: `Successfully updated account information for ${parsedEvent.data.profile_name}`,
+                color: 'green',
+                autoClose: 4000,
+              });
+              // Trigger refresh of playlists to update the UI
+              fetchPlaylists();
+              break;
+
+            case 'account_info_refresh_error':
+              notifications.show({
+                title: 'Account Info Refresh Failed',
+                message:
+                  parsedEvent.data.error ||
+                  'Failed to refresh account information',
+                color: 'red',
+                autoClose: 8000,
+              });
               break;
 
             default:
@@ -499,7 +619,7 @@ export const WebsocketProvider = ({ children }) => {
   const setProfilePreview = usePlaylistsStore((s) => s.setProfilePreview);
   const fetchEPGData = useEPGsStore((s) => s.fetchEPGData);
   const fetchEPGs = useEPGsStore((s) => s.fetchEPGs);
-  const fetchLogos = useChannelsStore((s) => s.fetchLogos);
+  const fetchLogos = useLogosStore((s) => s.fetchAllLogos);
   const fetchChannelProfiles = useChannelsStore((s) => s.fetchChannelProfiles);
 
   const ret = useMemo(() => {

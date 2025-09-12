@@ -7,6 +7,7 @@ import useEPGsStore from './epgs';
 import useStreamProfilesStore from './streamProfiles';
 import useUserAgentsStore from './userAgents';
 import useUsersStore from './users';
+import useLogosStore from './logos';
 import API from '../api';
 import { USER_LEVELS } from '../constants';
 
@@ -46,7 +47,7 @@ const useAuthStore = create((set, get) => ({
     await useSettingsStore.getState().fetchSettings();
 
     try {
-      // Only after settings are loaded, fetch the dependent data
+      // Only after settings are loaded, fetch the essential data
       await Promise.all([
         useChannelsStore.getState().fetchChannels(),
         useChannelsStore.getState().fetchChannelGroups(),
@@ -54,7 +55,6 @@ const useAuthStore = create((set, get) => ({
         usePlaylistsStore.getState().fetchPlaylists(),
         useEPGsStore.getState().fetchEPGs(),
         useEPGsStore.getState().fetchEPGData(),
-        useChannelsStore.getState().fetchLogos(),
         useStreamProfilesStore.getState().fetchProfiles(),
         useUserAgentsStore.getState().fetchUserAgents(),
       ]);
@@ -105,6 +105,8 @@ const useAuthStore = create((set, get) => ({
         localStorage.setItem('accessToken', response.access);
         localStorage.setItem('refreshToken', response.refresh);
         localStorage.setItem('tokenExpiration', expiration);
+
+        // Don't start background loading here - let it happen after app initialization
       }
     } catch (error) {
       console.error('Login failed:', error);

@@ -3,6 +3,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
 import API from '../api';
 import useChannelsStore from '../store/channels';
+import useLogosStore from '../store/logos';
 import logo from '../images/logo.png';
 import useVideoStore from '../store/useVideoStore'; // NEW import
 import { notifications } from '@mantine/notifications';
@@ -20,10 +21,14 @@ import {
   ActionIcon,
   Tooltip,
   Transition,
+  Modal,
+  Stack,
+  useMantineTheme,
 } from '@mantine/core';
 import { Search, X, Clock, Video, Calendar, Play } from 'lucide-react';
 import './guide.css';
 import useEPGsStore from '../store/epgs';
+import useLocalStorage from '../hooks/useLocalStorage';
 
 /** Layout constants */
 const CHANNEL_WIDTH = 120; // Width of the channel/logo column
@@ -34,11 +39,12 @@ const MINUTE_INCREMENT = 15; // For positioning programs every 15 min
 const MINUTE_BLOCK_WIDTH = HOUR_WIDTH / (60 / MINUTE_INCREMENT);
 
 export default function TVChannelGuide({ startDate, endDate }) {
+  const theme = useMantineTheme();
   const channels = useChannelsStore((s) => s.channels);
   const recordings = useChannelsStore((s) => s.recordings);
   const channelGroups = useChannelsStore((s) => s.channelGroups);
   const profiles = useChannelsStore((s) => s.profiles);
-  const logos = useChannelsStore((s) => s.logos);
+  const logos = useLogosStore((s) => s.logos);
 
   const tvgsById = useEPGsStore((s) => s.tvgsById);
 
@@ -48,6 +54,11 @@ export default function TVChannelGuide({ startDate, endDate }) {
   const [now, setNow] = useState(dayjs());
   const [expandedProgramId, setExpandedProgramId] = useState(null); // Track expanded program
   const [recordingForProgram, setRecordingForProgram] = useState(null);
+  const [recordChoiceOpen, setRecordChoiceOpen] = useState(false);
+  const [recordChoiceProgram, setRecordChoiceProgram] = useState(null);
+  const [existingRuleMode, setExistingRuleMode] = useState(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [initialScrollComplete, setInitialScrollComplete] = useState(false);
 
@@ -79,8 +90,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
       console.log(`Received ${fetched.length} programs`);
 
       // Include ALL channels, sorted by channel number - don't filter by EPG data
-      const sortedChannels = Object.values(channels)
-        .sort((a, b) => (a.channel_number || Infinity) - (b.channel_number || Infinity));
+      const sortedChannels = Object.values(channels).sort(
+        (a, b) =>
+          (a.channel_number || Infinity) - (b.channel_number || Infinity)
+      );
 
       console.log(`Using all ${sortedChannels.length} available channels`);
 
@@ -196,7 +209,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
       return time.format('dddd');
     } else {
       // Beyond a week, show month and day
-      return time.format('MMM D');
+      return time.format(dateFormat);
     }
   };
 
@@ -278,17 +291,62 @@ export default function TVChannelGuide({ startDate, endDate }) {
     );
   }
 
-  const record = async (program) => {
+  const openRecordChoice = async (program) => {
+    setRecordChoiceProgram(program);
+    setRecordChoiceOpen(true);
+    try {
+      const rules = await API.listSeriesRules();
+      // Only treat as existing if the rule matches this specific show's title (or has no title constraint)
+      const rule = (rules || []).find(
+        (r) => String(r.tvg_id) === String(program.tvg_id) && (!r.title || r.title === program.title)
+      );
+      setExistingRuleMode(rule ? rule.mode : null);
+    } catch {}
+    // Also detect if this program already has a scheduled recording
+    try {
+      const rec = (recordings || []).find((r) => r?.custom_properties?.program?.id == program.id);
+      setRecordingForProgram(rec || null);
+    } catch {}
+  };
+
+  const recordOne = async (program) => {
     const channel = findChannelByTvgId(program.tvg_id);
     await API.createRecording({
       channel: `${channel.id}`,
       start_time: program.start_time,
       end_time: program.end_time,
-      custom_properties: JSON.stringify({
-        program,
-      }),
+      custom_properties: { program },
     });
     notifications.show({ title: 'Recording scheduled' });
+  };
+
+  const saveSeriesRule = async (program, mode) => {
+    await API.createSeriesRule({ tvg_id: program.tvg_id, mode, title: program.title });
+    await API.evaluateSeriesRules(program.tvg_id);
+    // Refresh recordings so icons and DVR reflect new schedules
+    try {
+      await useChannelsStore.getState().fetchRecordings();
+    } catch (e) {
+      console.warn('Failed to refresh recordings after saving series rule', e);
+    }
+    notifications.show({ title: mode === 'new' ? 'Record new episodes' : 'Record all episodes' });
+  };
+
+  const openRules = async () => {
+    setRulesOpen(true);
+    try {
+      const r = await API.listSeriesRules();
+      setRules(r);
+    } catch (e) {
+      // handled by API
+    }
+  };
+
+  const deleteAllUpcoming = async () => {
+    const ok = window.confirm('Delete ALL upcoming recordings?');
+    if (!ok) return;
+    await API.deleteAllUpcomingRecordings();
+    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
   };
 
   // The “Watch Now” click => show floating video
@@ -349,7 +407,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     // Check if this program has a recording
     const programRecording = recordings.find((recording) => {
       if (recording.custom_properties) {
-        const customProps = JSON.parse(recording.custom_properties);
+        const customProps = recording.custom_properties || {};
         if (customProps.program && customProps.program.id == program.id) {
           return true;
         }
@@ -509,7 +567,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     // Check if we have a recording for this program
     const recording = recordings.find((recording) => {
       if (recording.custom_properties) {
-        const customProps = JSON.parse(recording.custom_properties);
+        const customProps = recording.custom_properties || {};
         if (customProps.program && customProps.program.id == program.id) {
           return recording;
         }
@@ -521,7 +579,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     const isLive = now.isAfter(programStart) && now.isBefore(programEnd);
 
     // Determine if the program has ended
-    const isPast = now.isAfter(programEnd);    // Check if this program is expanded
+    const isPast = now.isAfter(programEnd); // Check if this program is expanded
     const isExpanded = expandedProgramId === program.id;
 
     // Set the height based on expanded state
@@ -636,9 +694,11 @@ export default function TVChannelGuide({ startDate, endDate }) {
                 overflow: 'hidden',
               }}
             >
-              {programStart.format('h:mma')} - {programEnd.format('h:mma')}
+              {programStart.format(timeFormat)} -{' '}
+              {programEnd.format(timeFormat)}
             </Text>
-          </Box>          {/* Description is always shown but expands when row is expanded */}
+          </Box>{' '}
+          {/* Description is always shown but expands when row is expanded */}
           {program.description && (
             <Box
               style={{
@@ -661,13 +721,12 @@ export default function TVChannelGuide({ startDate, endDate }) {
               </Text>
             </Box>
           )}
-
           {/* Expanded content */}
           {isExpanded && (
             <Box style={{ marginTop: 'auto' }}>
               <Flex gap="md" justify="flex-end" mt={8}>
-                {/* Only show Record button if not already recording AND not in the past */}
-                {!recording && !isPast && (
+                {/* Always show Record for not-past; it opens options (schedule/remove) */}
+                {!isPast && (
                   <Button
                     leftSection={<Calendar size={14} />}
                     variant="filled"
@@ -675,7 +734,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
                     size="xs"
                     onClick={(e) => {
                       e.stopPropagation();
-                      record(program);
+                      openRecordChoice(program);
                     }}
                   >
                     Record
@@ -766,6 +825,12 @@ export default function TVChannelGuide({ startDate, endDate }) {
     setSelectedProfileId(value || 'all');
   };
 
+  // Handle date-time formats
+  const [timeFormatSetting] = useLocalStorage('time-format', '12h');
+  const [dateFormatSetting] = useLocalStorage('date-format', 'mdy');
+  const timeFormat = timeFormatSetting === '12h' ? 'h:mm A' : 'HH:mm';
+  const dateFormat = dateFormatSetting === 'mdy' ? 'MMMM D' : 'D MMMM';
+
   return (
     <Box
       className="tv-guide"
@@ -797,7 +862,9 @@ export default function TVChannelGuide({ startDate, endDate }) {
             TV Guide
           </Title>
           <Flex align="center" gap="md">
-            <Text>{now.format('dddd, MMMM D, YYYY • h:mm A')}</Text>
+            <Text>
+              {now.format(`dddd, ${dateFormat}, YYYY • ${timeFormat}`)}
+            </Text>
             <Tooltip label="Jump to current time">
               <ActionIcon
                 onClick={scrollToNow}
@@ -855,10 +922,23 @@ export default function TVChannelGuide({ startDate, endDate }) {
           {(searchQuery !== '' ||
             selectedGroupId !== 'all' ||
             selectedProfileId !== 'all') && (
-              <Button variant="subtle" onClick={clearFilters} size="sm">
-                Clear Filters
-              </Button>
-            )}
+            <Button variant="subtle" onClick={clearFilters} size="sm">
+              Clear Filters
+            </Button>
+          )}
+
+          <Button
+            variant="filled"
+            size="sm"
+            onClick={openRules}
+            style={{
+              backgroundColor: '#245043',
+              border: '1px solid #3BA882',
+              color: '#FFFFFF',
+            }}
+          >
+            Series Rules
+          </Button>
 
           <Text size="sm" color="dimmed">
             {filteredChannels.length}{' '}
@@ -925,100 +1005,102 @@ export default function TVChannelGuide({ startDate, endDate }) {
                   borderBottom: '1px solid #27272A',
                   width: hourTimeline.length * HOUR_WIDTH,
                 }}
-              >                {hourTimeline.map((hourData) => {
-                const { time, isNewDay } = hourData;
+              >
+                {' '}
+                {hourTimeline.map((hourData) => {
+                  const { time, isNewDay } = hourData;
 
-                return (
-                  <Box
-                    key={time.format()}
-                    style={{
-                      width: HOUR_WIDTH,
-                      height: '40px',
-                      position: 'relative',
-                      color: '#a0aec0',
-                      borderRight: '1px solid #8DAFAA',
-                      cursor: 'pointer',
-                      borderLeft: isNewDay ? '2px solid #3BA882' : 'none', // Highlight day boundaries
-                      backgroundColor: isNewDay ? '#1E2A27' : '#1B2421', // Subtle background for new days
-                    }}
-                    onClick={(e) => handleTimeClick(time, e)}
-                  >
-                    {/* Remove the special day label for new days since we'll show day for all hours */}
-
-                    {/* Position time label at the left border of each hour block */}
-                    <Text
-                      size="sm"
+                  return (
+                    <Box
+                      key={time.format()}
                       style={{
-                        position: 'absolute',
-                        top: '8px', // Consistent positioning for all hours
-                        left: '4px',
-                        transform: 'none',
-                        borderRadius: '2px',
-                        lineHeight: 1.2,
-                        textAlign: 'left',
+                        width: HOUR_WIDTH,
+                        height: '40px',
+                        position: 'relative',
+                        color: '#a0aec0',
+                        borderRight: '1px solid #8DAFAA',
+                        cursor: 'pointer',
+                        borderLeft: isNewDay ? '2px solid #3BA882' : 'none', // Highlight day boundaries
+                        backgroundColor: isNewDay ? '#1E2A27' : '#1B2421', // Subtle background for new days
                       }}
+                      onClick={(e) => handleTimeClick(time, e)}
                     >
-                      {/* Show day above time for every hour using the same format */}
+                      {/* Remove the special day label for new days since we'll show day for all hours */}
+
+                      {/* Position time label at the left border of each hour block */}
                       <Text
-                        span
-                        size="xs"
+                        size="sm"
                         style={{
-                          display: 'block',
-                          opacity: 0.7,
-                          fontWeight: isNewDay ? 600 : 400, // Still emphasize day transitions
-                          color: isNewDay ? '#3BA882' : undefined,
+                          position: 'absolute',
+                          top: '8px', // Consistent positioning for all hours
+                          left: '4px',
+                          transform: 'none',
+                          borderRadius: '2px',
+                          lineHeight: 1.2,
+                          textAlign: 'left',
                         }}
                       >
-                        {formatDayLabel(time)}{' '}
-                        {/* Use same formatDayLabel function for all hours */}
-                      </Text>
-                      {time.format('h:mm')}
-                      <Text span size="xs" ml={1} opacity={0.7}>
-                        {time.format('A')}
-                      </Text>
-                    </Text>
-
-                    {/* Hour boundary marker - more visible */}
-                    <Box
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: '1px',
-                        backgroundColor: '#27272A',
-                        zIndex: 10,
-                      }}
-                    />
-
-                    {/* Quarter hour tick marks */}
-                    <Box
-                      style={{
-                        position: 'absolute',
-                        bottom: 0,
-                        width: '100%',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        padding: '0 1px',
-                      }}
-                    >
-                      {[15, 30, 45].map((minute) => (
-                        <Box
-                          key={minute}
+                        {/* Show day above time for every hour using the same format */}
+                        <Text
+                          span
+                          size="xs"
                           style={{
-                            width: '1px',
-                            height: '8px',
-                            backgroundColor: '#718096',
-                            position: 'absolute',
-                            bottom: 0,
-                            left: `${(minute / 60) * 100}%`,
+                            display: 'block',
+                            opacity: 0.7,
+                            fontWeight: isNewDay ? 600 : 400, // Still emphasize day transitions
+                            color: isNewDay ? '#3BA882' : undefined,
                           }}
-                        />
-                      ))}
+                        >
+                          {formatDayLabel(time)}{' '}
+                          {/* Use same formatDayLabel function for all hours */}
+                        </Text>
+                        {time.format(timeFormat)}
+                        <Text span size="xs" ml={1} opacity={0.7}>
+                          {/*time.format('A')*/}
+                        </Text>
+                      </Text>
+
+                      {/* Hour boundary marker - more visible */}
+                      <Box
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: '1px',
+                          backgroundColor: '#27272A',
+                          zIndex: 10,
+                        }}
+                      />
+
+                      {/* Quarter hour tick marks */}
+                      <Box
+                        style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          width: '100%',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          padding: '0 1px',
+                        }}
+                      >
+                        {[15, 30, 45].map((minute) => (
+                          <Box
+                            key={minute}
+                            style={{
+                              width: '1px',
+                              height: '8px',
+                              backgroundColor: '#718096',
+                              position: 'absolute',
+                              bottom: 0,
+                              left: `${(minute / 60) * 100}%`,
+                            }}
+                          />
+                        ))}
+                      </Box>
                     </Box>
-                  </Box>
-                );
-              })}
+                  );
+                })}
               </Box>
             </Box>
           </Box>
@@ -1214,7 +1296,9 @@ export default function TVChannelGuide({ startDate, endDate }) {
                     >
                       {channelPrograms.length > 0 ? (
                         channelPrograms.map((program) => (
-                          <div key={`${channel.id}-${program.id}-${program.start_time}`}>
+                          <div
+                            key={`${channel.id}-${program.id}-${program.start_time}`}
+                          >
                             {renderProgram(program, start)}
                           </div>
                         ))
@@ -1222,7 +1306,9 @@ export default function TVChannelGuide({ startDate, endDate }) {
                         // Simple placeholder for channels with no program data - 2 hour blocks
                         <>
                           {/* Generate repeating placeholder blocks every 2 hours across the timeline */}
-                          {Array.from({ length: Math.ceil(hourTimeline.length / 2) }).map((_, index) => (
+                          {Array.from({
+                            length: Math.ceil(hourTimeline.length / 2),
+                          }).map((_, index) => (
                             <Box
                               key={`placeholder-${channel.id}-${index}`}
                               style={{
@@ -1279,7 +1365,92 @@ export default function TVChannelGuide({ startDate, endDate }) {
         </Box>
       </Box>
 
-      {/* Modal removed since we're using expanded rows instead */}
+      {/* Record choice modal */}
+      {recordChoiceOpen && recordChoiceProgram && (
+        <Modal
+          opened={recordChoiceOpen}
+          onClose={() => setRecordChoiceOpen(false)}
+          title={`Record: ${recordChoiceProgram.title}`}
+          centered
+          radius="md"
+          zIndex={9999}
+          overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
+          styles={{
+            content: { backgroundColor: '#18181B', color: 'white' },
+            header: { backgroundColor: '#18181B', color: 'white' },
+            title: { color: 'white' },
+          }}
+        >
+          <Flex direction="column" gap="sm">
+            <Button onClick={() => { recordOne(recordChoiceProgram); setRecordChoiceOpen(false); }}>Just this one</Button>
+            <Button variant="light" onClick={() => { saveSeriesRule(recordChoiceProgram, 'all'); setRecordChoiceOpen(false); }}>Every episode</Button>
+            <Button variant="light" onClick={() => { saveSeriesRule(recordChoiceProgram, 'new'); setRecordChoiceOpen(false); }}>New episodes only</Button>
+            {recordingForProgram && (
+              <>
+                <Button color="orange" variant="light" onClick={async () => {
+                  try { await API.deleteRecording(recordingForProgram.id); } catch {}
+                  try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                  setRecordChoiceOpen(false);
+                }}>Remove this recording</Button>
+                <Button color="red" variant="light" onClick={async () => {
+                  try {
+                    await API.bulkRemoveSeriesRecordings({ tvg_id: recordChoiceProgram.tvg_id, title: recordChoiceProgram.title, scope: 'title' });
+                  } catch {}
+                  try { await API.deleteSeriesRule(recordChoiceProgram.tvg_id); } catch {}
+                  try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                  setRecordChoiceOpen(false);
+                }}>Remove this series (scheduled)</Button>
+              </>
+            )}
+            {existingRuleMode && (
+              <Button color="red" variant="subtle" onClick={async () => { await API.deleteSeriesRule(recordChoiceProgram.tvg_id); setExistingRuleMode(null); setRecordChoiceOpen(false); }}>Remove series rule ({existingRuleMode})</Button>
+            )}
+          </Flex>
+        </Modal>
+      )}
+
+      {/* Series rules modal */}
+      {rulesOpen && (
+        <Modal
+          opened={rulesOpen}
+          onClose={() => setRulesOpen(false)}
+          title="Series Recording Rules"
+          centered
+          radius="md"
+          zIndex={9999}
+          overlayProps={{ color: '#000', backgroundOpacity: 0.55, blur: 0 }}
+          styles={{
+            content: { backgroundColor: '#18181B', color: 'white' },
+            header: { backgroundColor: '#18181B', color: 'white' },
+            title: { color: 'white' },
+          }}
+        >
+          <Stack gap="sm">
+            {(!rules || rules.length === 0) && (
+              <Text size="sm" c="dimmed">No series rules configured</Text>
+            )}
+            {rules && rules.map((r) => (
+              <Flex key={`${r.tvg_id}-${r.mode}`} justify="space-between" align="center">
+                <Text size="sm">{r.title || r.tvg_id} — {r.mode === 'new' ? 'New episodes' : 'Every episode'}</Text>
+                <Group gap="xs">
+                  <Button size="xs" variant="subtle" onClick={async () => {
+                    await API.evaluateSeriesRules(r.tvg_id);
+                    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                    notifications.show({ title: 'Evaluated', message: 'Checked for episodes' });
+                  }}>Evaluate Now</Button>
+                  <Button size="xs" variant="light" color="orange" onClick={async () => {
+                    await API.bulkRemoveSeriesRecordings({ tvg_id: r.tvg_id, title: r.title, scope: 'title' });
+                    try { await API.deleteSeriesRule(r.tvg_id); } catch {}
+                    try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+                    const updated = await API.listSeriesRules();
+                    setRules(updated);
+                  }}>Remove this series (scheduled)</Button>
+                </Group>
+              </Flex>
+            ))}
+          </Stack>
+        </Modal>
+      )}
     </Box>
   );
 }

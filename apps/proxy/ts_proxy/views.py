@@ -28,6 +28,7 @@ from apps.accounts.permissions import (
 from .constants import ChannelState, EventType, StreamType, ChannelMetadataField
 from .config_helper import ConfigHelper
 from .services.channel_service import ChannelService
+from core.utils import send_websocket_update
 from .url_utils import (
     generate_stream_url,
     transform_url,
@@ -467,9 +468,7 @@ def stream_xc(request, username, password, channel_id):
     extension = pathlib.Path(channel_id).suffix
     channel_id = pathlib.Path(channel_id).stem
 
-    custom_properties = (
-        json.loads(user.custom_properties) if user.custom_properties else {}
-    )
+    custom_properties = user.custom_properties or {}
 
     if "xc_password" not in custom_properties:
         return Response({"error": "Invalid credentials"}, status=401)
@@ -634,6 +633,18 @@ def channel_status(request, channel_id=None):
 
                 if cursor == 0:
                     break
+
+            # Send WebSocket update with the stats
+            # Format it the same way the original Celery task did
+            send_websocket_update(
+                "updates",
+                "update",
+                {
+                    "success": True,
+                    "type": "channel_stats",
+                    "stats": json.dumps({'channels': all_channels, 'count': len(all_channels)})
+                }
+            )
 
             return JsonResponse({"channels": all_channels, "count": len(all_channels)})
 

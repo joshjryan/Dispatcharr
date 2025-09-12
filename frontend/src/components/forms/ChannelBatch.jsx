@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import useChannelsStore from '../../store/channels';
 import API from '../../api';
 import useStreamProfilesStore from '../../store/streamProfiles';
@@ -20,6 +20,9 @@ import {
   Tooltip,
   UnstyledButton,
   Center,
+  Divider,
+  Checkbox,
+  Paper,
 } from '@mantine/core';
 import { ListOrdered, SquarePlus, SquareX, X } from 'lucide-react';
 import { FixedSizeList as List } from 'react-window';
@@ -39,6 +42,8 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const [channelGroupModelOpen, setChannelGroupModalOpen] = useState(false);
   const [selectedChannelGroup, setSelectedChannelGroup] = useState('-1');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [regexFind, setRegexFind] = useState('');
+  const [regexReplace, setRegexReplace] = useState('');
 
   const [groupPopoverOpened, setGroupPopoverOpened] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
@@ -58,7 +63,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
 
     const values = {
       ...form.getValues(),
-    };    // Handle channel group ID - convert to integer if it exists
+    }; // Handle channel group ID - convert to integer if it exists
     if (selectedChannelGroup && selectedChannelGroup !== '-1') {
       values.channel_group_id = parseInt(selectedChannelGroup);
     } else {
@@ -68,7 +73,10 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     // Handle stream profile ID - convert special values
     if (!values.stream_profile_id || values.stream_profile_id === '-1') {
       delete values.stream_profile_id;
-    } else if (values.stream_profile_id === '0' || values.stream_profile_id === 0) {
+    } else if (
+      values.stream_profile_id === '0' ||
+      values.stream_profile_id === 0
+    ) {
       values.stream_profile_id = null; // Convert "use default" to null
     }
 
@@ -80,11 +88,43 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     delete values.channel_group;
 
     try {
-      await API.updateChannels(channelIds, values);
+      const applyRegex = regexFind.trim().length > 0;
+
+      if (applyRegex) {
+        // Build per-channel updates to apply unique names via regex
+        let flags = 'g';
+        let re;
+        try {
+          re = new RegExp(regexFind, flags);
+        } catch (e) {
+          console.error('Invalid regex:', e);
+          setIsSubmitting(false);
+          return;
+        }
+
+        const channelsMap = useChannelsStore.getState().channels;
+        const updates = channelIds.map((id) => {
+          const ch = channelsMap[id];
+          const currentName = ch?.name ?? '';
+          const newName = currentName.replace(re, regexReplace ?? '');
+          const update = { id };
+          if (newName !== currentName && newName.trim().length > 0) {
+            update.name = newName;
+          }
+          // Merge base values (group/profile/user_level) if present
+          Object.assign(update, values);
+          return update;
+        });
+
+        await API.bulkUpdateChannels(updates);
+      } else {
+        await API.updateChannels(channelIds, values);
+      }
+
       // Refresh both the channels table data and the main channels store
       await Promise.all([
         API.requeryChannels(),
-        useChannelsStore.getState().fetchChannels()
+        useChannelsStore.getState().fetchChannels(),
       ]);
       onClose();
     } catch (error) {
@@ -131,7 +171,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     { id: '-1', name: '(no change)' },
     ...groupOptions.filter((group) =>
       group.name.toLowerCase().includes(groupFilter.toLowerCase())
-    )
+    ),
   ];
 
   if (!isOpen) {
@@ -143,7 +183,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       <Modal
         opened={isOpen}
         onClose={onClose}
-        size="xs"
+        size={"lg"}
         title={
           <Group gap="5">
             <ListOrdered size="20" />
@@ -155,6 +195,35 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
         <form onSubmit={form.onSubmit(onSubmit)}>
           <Group justify="space-between" align="top">
             <Stack gap="5" style={{ flex: 1 }}>
+              <Paper withBorder p="xs" radius="md">
+                <Group justify="space-between" align="center" mb={6}>
+                  <Text size="sm" fw={600}>Channel Name</Text>
+                </Group>
+                <Group align="end" gap="xs" wrap="nowrap">
+                  <TextInput
+                    size="xs"
+                    label="Find (Regex)"
+                    placeholder="e.g. ^(.*) HD$"
+                    value={regexFind}
+                    onChange={(e) => setRegexFind(e.currentTarget.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <TextInput
+                    size="xs"
+                    label="Replace"
+                    placeholder="e.g. $1"
+                    value={regexReplace}
+                    onChange={(e) => setRegexReplace(e.currentTarget.value)}
+                    style={{ flex: 1 }}
+                  />
+                </Group>
+                <RegexPreview
+                  channelIds={channelIds}
+                  find={regexFind}
+                  replace={regexReplace}
+                />
+              </Paper>
+
               <Popover
                 opened={groupPopoverOpened}
                 onChange={setGroupPopoverOpened}
@@ -172,8 +241,10 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                       key={form.key('channel_group')}
                       onClick={() => setGroupPopoverOpened(true)}
                       size="xs"
-                      style={{ flex: 1 }} rightSection={
-                        form.getValues().channel_group && form.getValues().channel_group !== '(no change)' && (
+                      style={{ flex: 1 }}
+                      rightSection={
+                        form.getValues().channel_group &&
+                        form.getValues().channel_group !== '(no change)' && (
                           <ActionIcon
                             size="xs"
                             variant="subtle"
@@ -282,7 +353,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                 key={form.key('stream_profile_id')}
                 data={[
                   { value: '-1', label: '(no change)' },
-                  { value: '0', label: '(use default)' }
+                  { value: '0', label: '(use default)' },
                 ].concat(
                   streamProfiles.map((option) => ({
                     value: `${option.id}`,
@@ -330,3 +401,57 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
 };
 
 export default ChannelBatchForm;
+
+// Lightweight inline preview component to visualize rename results for a subset
+const RegexPreview = ({ channelIds, find, replace}) => {
+  const channelsMap = useChannelsStore((s) => s.channels);
+  const previewItems = useMemo(() => {
+    const items = [];
+    if (!find) return items;
+    let flags = 'g';
+    let re;
+    try {
+      re = new RegExp(find, flags);
+    } catch (e) {
+      return [{ before: 'Invalid regex', after: '' }];
+    }
+    for (let i = 0; i < Math.min(channelIds.length, 25); i++) {
+      const id = channelIds[i];
+      const before = channelsMap[id]?.name ?? '';
+      const after = before.replace(re, replace ?? '');
+      if (before !== after) {
+        items.push({ before, after });
+      }
+    }
+    return items;
+  }, [channelIds, channelsMap, find, replace]);
+
+  if (!find) return null;
+
+  return (
+    <Box mt={8}>
+      <Text size="xs" c="dimmed" mb={4}>
+        Preview (first {Math.min(channelIds.length, 25)} of {channelIds.length} selected)
+      </Text>
+      <ScrollArea h={120} offsetScrollbars>
+        <Stack gap={4}>
+          {previewItems.length === 0 ? (
+            <Text size="xs" c="dimmed">No changes with current pattern.</Text>
+          ) : (
+            previewItems.map((row, idx) => (
+              <Group key={idx} gap={8} wrap="nowrap" align="center">
+                <Text size="xs" style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {row.before}
+                </Text>
+                <Text size="xs" c="gray.6">→</Text>
+                <Text size="xs" style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {row.after}
+                </Text>
+              </Group>
+            ))
+          )}
+        </Stack>
+      </ScrollArea>
+    </Box>
+  );
+};

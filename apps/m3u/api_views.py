@@ -21,6 +21,7 @@ from .models import M3UAccount, M3UFilter, ServerGroup, M3UAccountProfile
 from core.models import UserAgent
 from apps.channels.models import ChannelGroupM3UAccount
 from core.serializers import UserAgentSerializer
+from apps.vod.models import M3UVODCategoryRelation
 
 from .serializers import (
     M3UAccountSerializer,
@@ -29,9 +30,8 @@ from .serializers import (
     M3UAccountProfileSerializer,
 )
 
-from .tasks import refresh_single_m3u_account, refresh_m3u_accounts
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
+from .tasks import refresh_single_m3u_account, refresh_m3u_accounts, refresh_account_info
+import json
 
 
 class M3UAccountViewSet(viewsets.ModelViewSet):
@@ -78,15 +78,30 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
         # Now call super().create() to create the instance
         response = super().create(request, *args, **kwargs)
 
-        print(response.data.get("account_type"))
-        if response.data.get("account_type") == M3UAccount.Types.XC:
-            refresh_m3u_groups(response.data.get("id"))
+        account_type = response.data.get("account_type")
+        account_id = response.data.get("id")
+
+        if account_type == M3UAccount.Types.XC:
+            refresh_m3u_groups(account_id)
+
+            # Check if VOD is enabled
+            enable_vod = request.data.get("enable_vod", False)
+            if enable_vod:
+                from apps.vod.tasks import refresh_categories
+
+                refresh_categories(account_id)
 
         # After the instance is created, return the response
         return response
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
+        old_vod_enabled = False
+
+        # Check current VOD setting
+        if instance.custom_properties:
+            custom_props = instance.custom_properties or {}
+            old_vod_enabled = custom_props.get("enable_vod", False)
 
         # Handle file upload first, if any
         file_path = None
@@ -122,6 +137,18 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
         # Now call super().update() to update the instance
         response = super().update(request, *args, **kwargs)
 
+        # Check if VOD setting changed and trigger refresh if needed
+        new_vod_enabled = request.data.get("enable_vod", old_vod_enabled)
+
+        if (
+            instance.account_type == M3UAccount.Types.XC
+            and not old_vod_enabled
+            and new_vod_enabled
+        ):
+            from apps.vod.tasks import refresh_vod_content
+
+            refresh_vod_content.delay(instance.id)
+
         # After the instance is updated, return the response
         return response
 
@@ -143,11 +170,49 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
         # Continue with regular partial update
         return super().partial_update(request, *args, **kwargs)
 
+    @action(detail=True, methods=["post"], url_path="refresh-vod")
+    def refresh_vod(self, request, pk=None):
+        """Trigger VOD content refresh for XtreamCodes accounts"""
+        account = self.get_object()
+
+        if account.account_type != M3UAccount.Types.XC:
+            return Response(
+                {"error": "VOD refresh is only available for XtreamCodes accounts"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if VOD is enabled
+        vod_enabled = False
+        if account.custom_properties:
+            custom_props = account.custom_properties or {}
+            vod_enabled = custom_props.get("enable_vod", False)
+
+        if not vod_enabled:
+            return Response(
+                {"error": "VOD is not enabled for this account"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from apps.vod.tasks import refresh_vod_content
+
+            refresh_vod_content.delay(account.id)
+            return Response(
+                {"message": f"VOD refresh initiated for account {account.name}"},
+                status=status.HTTP_202_ACCEPTED,
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to initiate VOD refresh: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
     @action(detail=True, methods=["patch"], url_path="group-settings")
     def update_group_settings(self, request, pk=None):
         """Update auto channel sync settings for M3U account groups"""
         account = self.get_object()
         group_settings = request.data.get("group_settings", [])
+        category_settings = request.data.get("category_settings", [])
 
         try:
             for setting in group_settings:
@@ -165,11 +230,22 @@ class M3UAccountViewSet(viewsets.ModelViewSet):
                             "enabled": enabled,
                             "auto_channel_sync": auto_sync,
                             "auto_sync_channel_start": sync_start,
-                            "custom_properties": (
-                                custom_properties
-                                if isinstance(custom_properties, str)
-                                else json.dumps(custom_properties)
-                            ),
+                            "custom_properties": custom_properties,
+                        },
+                    )
+
+            for setting in category_settings:
+                category_id = setting.get("id")
+                enabled = setting.get("enabled", True)
+                custom_properties = setting.get("custom_properties", {})
+
+                if category_id:
+                    M3UVODCategoryRelation.objects.update_or_create(
+                        category_id=category_id,
+                        m3u_account=account,
+                        defaults={
+                            "enabled": enabled,
+                            "custom_properties": custom_properties,
                         },
                     )
 
@@ -270,6 +346,54 @@ class RefreshSingleM3UAPIView(APIView):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+
+class RefreshAccountInfoAPIView(APIView):
+    """Triggers account info refresh for a single M3U account"""
+
+    def get_permissions(self):
+        try:
+            return [
+                perm() for perm in permission_classes_by_method[self.request.method]
+            ]
+        except KeyError:
+            return [Authenticated()]
+
+    @swagger_auto_schema(
+        operation_description="Triggers a refresh of account information for a specific M3U profile",
+        responses={202: "Account info refresh initiated", 400: "Profile not found or not XtreamCodes"},
+    )
+    def post(self, request, profile_id, format=None):
+        try:
+            from .models import M3UAccountProfile
+            profile = M3UAccountProfile.objects.get(id=profile_id)
+            account = profile.m3u_account
+
+            if account.account_type != M3UAccount.Types.XC:
+                return Response(
+                    {
+                        "success": False,
+                        "error": "Account info refresh is only available for XtreamCodes accounts",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            refresh_account_info.delay(profile_id)
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Account info refresh initiated for profile {profile.name}.",
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+        except M3UAccountProfile.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Profile not found",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
 
 class UserAgentViewSet(viewsets.ModelViewSet):

@@ -80,16 +80,21 @@ const useEPGsStore = create((set) => ({
           speed: data.speed,
           elapsed_time: data.elapsed_time,
           time_remaining: data.time_remaining,
-          status: data.status || 'in_progress'
-        }
+          status: data.status || 'in_progress',
+        },
       };
 
       // Set the EPG source status based on the update
       // First prioritize explicit status values from the backend
-      const sourceStatus = data.status ? data.status // Use explicit status if provided
-        : data.action === "downloading" ? "fetching"
-          : data.action === "parsing_channels" || data.action === "parsing_programs" ? "parsing"
-            : data.progress === 100 ? "success" // Mark as success when progress is 100%
+      const sourceStatus = data.status
+        ? data.status // Use explicit status if provided
+        : data.action === 'downloading'
+          ? 'fetching'
+          : data.action === 'parsing_channels' ||
+              data.action === 'parsing_programs'
+            ? 'parsing'
+            : data.progress === 100
+              ? 'success' // Mark as success when progress is 100%
               : state.epgs[data.source]?.status || 'idle';
 
       // Create a new epgs object with the updated source status
@@ -98,13 +103,16 @@ const useEPGsStore = create((set) => ({
         [data.source]: {
           ...state.epgs[data.source],
           status: sourceStatus,
-          last_message: data.status === 'error' ? (data.error || 'Unknown error') : state.epgs[data.source]?.last_message
-        }
+          last_message:
+            data.status === 'error'
+              ? data.error || 'Unknown error'
+              : state.epgs[data.source]?.last_message,
+        },
       };
 
       return {
         refreshProgress: newRefreshProgress,
-        epgs: newEpgs
+        epgs: newEpgs,
       };
     }),
 }));

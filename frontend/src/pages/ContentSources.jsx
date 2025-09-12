@@ -8,7 +8,8 @@ const M3UPage = () => {
   const isLoading = useUserAgentsStore((state) => state.isLoading);
   const error = useUserAgentsStore((state) => state.error);
   if (isLoading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error}</div>; return (
+  if (error) return <div>Error: {error}</div>;
+  return (
     <Stack
       style={{
         padding: 10,

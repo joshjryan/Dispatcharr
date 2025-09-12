@@ -27,6 +27,7 @@ import usePlaylistsStore from '../../store/playlists';
 import { notifications } from '@mantine/notifications';
 import { isNotEmpty, useForm } from '@mantine/form';
 import useEPGsStore from '../../store/epgs';
+import useVODStore from '../../store/useVODStore';
 import M3UFilters from './M3UFilters';
 
 const M3U = ({
@@ -41,6 +42,7 @@ const M3U = ({
   const fetchChannelGroups = useChannelsStore((s) => s.fetchChannelGroups);
   const fetchPlaylists = usePlaylistsStore((s) => s.fetchPlaylists);
   const fetchEPGs = useEPGsStore((s) => s.fetchEPGs);
+  const fetchCategories = useVODStore((s) => s.fetchCategories);
 
   const [playlist, setPlaylist] = useState(null);
   const [file, setFile] = useState(null);
@@ -64,6 +66,8 @@ const M3U = ({
       username: '',
       password: '',
       stale_stream_days: 7,
+      priority: 0,
+      enable_vod: false,
     },
 
     validate: {
@@ -92,6 +96,11 @@ const M3U = ({
           m3uAccount.stale_stream_days !== null
             ? m3uAccount.stale_stream_days
             : 7,
+        priority:
+          m3uAccount.priority !== undefined && m3uAccount.priority !== null
+            ? m3uAccount.priority
+            : 0,
+        enable_vod: m3uAccount.enable_vod || false,
       });
 
       if (m3uAccount.account_type == 'XC') {
@@ -164,6 +173,12 @@ const M3U = ({
 
       const updatedPlaylist = await API.getPlaylist(newPlaylist.id);
       await Promise.all([fetchChannelGroups(), fetchPlaylists(), fetchEPGs()]);
+
+      // If this is an XC account with VOD enabled, also fetch VOD categories
+      if (values.account_type === 'XC' && values.enable_vod) {
+        fetchCategories();
+      }
+
       console.log('opening group options');
       setPlaylist(updatedPlaylist);
       setGroupFilterModalOpen(true);
@@ -272,6 +287,19 @@ const M3U = ({
                     </Group>
                   )}
 
+                  <Group justify="space-between">
+                    <Box>Enable VOD Scanning</Box>
+                    <Switch
+                      id="enable_vod"
+                      name="enable_vod"
+                      description="Scan and import VOD content (movies/series) from this Xtream account"
+                      key={form.key('enable_vod')}
+                      {...form.getInputProps('enable_vod', {
+                        type: 'checkbox',
+                      })}
+                    />
+                  </Group>
+
                   <TextInput
                     id="username"
                     name="username"
@@ -351,6 +379,15 @@ const M3U = ({
                 {...form.getInputProps('stale_stream_days')}
               />
 
+              <NumberInput
+                min={0}
+                max={999}
+                label="VOD Priority"
+                description="Priority for VOD provider selection (higher numbers = higher priority). Used when multiple providers offer the same content."
+                {...form.getInputProps('priority')}
+                key={form.key('priority')}
+              />
+
               <Checkbox
                 label="Is Active"
                 description="Enable or disable this M3U account"
@@ -374,7 +411,16 @@ const M3U = ({
                   variant="filled"
                   // color={theme.custom.colors.buttonPrimary}
                   size="sm"
-                  onClick={() => setGroupFilterModalOpen(true)}
+                  onClick={() => {
+                    // If this is an XC account with VOD enabled, fetch VOD categories
+                    if (
+                      m3uAccount?.account_type === 'XC' &&
+                      m3uAccount?.enable_vod
+                    ) {
+                      fetchCategories();
+                    }
+                    setGroupFilterModalOpen(true);
+                  }}
                 >
                   Groups
                 </Button>

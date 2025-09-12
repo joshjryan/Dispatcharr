@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import useChannelsStore from '../../store/channels';
@@ -8,6 +8,8 @@ import useStreamsStore from '../../store/streams';
 import ChannelGroupForm from './ChannelGroup';
 import usePlaylistsStore from '../../store/playlists';
 import logo from '../../images/logo.png';
+import { useChannelLogoSelection } from '../../hooks/useSmartLogos';
+import LazyLogo from '../LazyLogo';
 import {
   Box,
   Button,
@@ -48,8 +50,16 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
   const channelGroups = useChannelsStore((s) => s.channelGroups);
   const canEditChannelGroup = useChannelsStore((s) => s.canEditChannelGroup);
 
-  const logos = useChannelsStore((s) => s.logos);
-  const fetchLogos = useChannelsStore((s) => s.fetchLogos);
+  const {
+    logos,
+    ensureLogosLoaded,
+    isLoading: logosLoading,
+  } = useChannelLogoSelection();
+
+  // Ensure logos are loaded when component mounts
+  useEffect(() => {
+    ensureLogosLoaded();
+  }, [ensureLogosLoaded]);
   const streams = useStreamsStore((state) => state.streams);
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
   const playlists = usePlaylistsStore((s) => s.playlists);
@@ -65,7 +75,6 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
   const [selectedEPG, setSelectedEPG] = useState('');
   const [tvgFilter, setTvgFilter] = useState('');
   const [logoFilter, setLogoFilter] = useState('');
-  const [logoOptions, setLogoOptions] = useState([]);
 
   const [groupPopoverOpened, setGroupPopoverOpened] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
@@ -100,7 +109,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
       try {
         const retval = await API.uploadLogo(file);
-        await fetchLogos();
+        // Note: API.uploadLogo already adds the logo to the store, no need to fetch
         setLogoPreview(retval.cache_url);
         formik.setFieldValue('logo_id', retval.id);
       } catch (error) {
@@ -193,10 +202,10 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
       formik.resetForm();
       API.requeryChannels();
-      
+
       // Refresh channel profiles to update the membership information
       useChannelsStore.getState().fetchChannelProfiles();
-      
+
       setSubmitting(false);
       setTvgFilter('');
       setLogoFilter('');
@@ -236,17 +245,11 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     }
   }, [channel, tvgsById, channelGroups]);
 
-  useEffect(() => {
-    setLogoOptions([{ id: '0', name: 'Default' }].concat(Object.values(logos)));
-  }, [logos]);
-
-  const renderLogoOption = ({ option, checked }) => {
-    return (
-      <Center style={{ width: '100%' }}>
-        <img src={logos[option.value].cache_url} width="30" />
-      </Center>
-    );
-  };
+  // Memoize logo options to prevent infinite re-renders during background loading
+  const logoOptions = useMemo(() => {
+    const options = [{ id: '0', name: 'Default' }].concat(Object.values(logos));
+    return options;
+  }, [logos]); // Only depend on logos object
 
   // Update the handler for when channel group modal is closed
   const handleChannelGroupModalClose = (newGroup) => {
@@ -449,7 +452,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
               <Select
                 label="User Level Access"
-                data={Object.entries(USER_LEVELS).map(([label, value]) => {
+                data={Object.entries(USER_LEVELS).map(([, value]) => {
                   return {
                     label: USER_LEVEL_LABELS[value],
                     value: `${value}`,
@@ -471,7 +474,16 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
               <Group justify="space-between">
                 <Popover
                   opened={logoPopoverOpened}
-                  onChange={setLogoPopoverOpened}
+                  onChange={(opened) => {
+                    setLogoPopoverOpened(opened);
+                    // Load all logos when popover is opened
+                    if (opened) {
+                      console.log(
+                        'Popover opened, calling ensureLogosLoaded...'
+                      );
+                      ensureLogosLoaded();
+                    }
+                  }}
                   // position="bottom-start"
                   withArrow
                 >
@@ -482,7 +494,12 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                       label="Logo"
                       readOnly
                       value={logos[formik.values.logo_id]?.name || 'Default'}
-                      onClick={() => setLogoPopoverOpened(true)}
+                      onClick={() => {
+                        console.log(
+                          'Logo input clicked, setting popover opened to true'
+                        );
+                        setLogoPopoverOpened(true);
+                      }}
                       size="xs"
                     />
                   </Popover.Target>
@@ -498,45 +515,95 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                         mb="xs"
                         size="xs"
                       />
+                      {logosLoading && (
+                        <Text size="xs" c="dimmed">
+                          Loading...
+                        </Text>
+                      )}
                     </Group>
 
                     <ScrollArea style={{ height: 200 }}>
-                      <List
-                        height={200} // Set max height for visible items
-                        itemCount={filteredLogos.length}
-                        itemSize={20} // Adjust row height for each item
-                        style={{ width: '100%' }}
-                        ref={logoListRef}
-                      >
-                        {({ index, style }) => (
-                          <div style={style}>
-                            <Center>
-                              <img
-                                src={filteredLogos[index].cache_url || logo}
-                                height="20"
-                                style={{ maxWidth: 80 }}
-                                onClick={() => {
-                                  formik.setFieldValue(
-                                    'logo_id',
-                                    filteredLogos[index].id
-                                  );
-                                }}
-                              />
-                            </Center>
-                          </div>
-                        )}
-                      </List>
+                      {filteredLogos.length === 0 ? (
+                        <Center style={{ height: 200 }}>
+                          <Text size="sm" c="dimmed">
+                            {logoFilter
+                              ? 'No logos match your filter'
+                              : 'No logos available'}
+                          </Text>
+                        </Center>
+                      ) : (
+                        <List
+                          height={200} // Set max height for visible items
+                          itemCount={filteredLogos.length}
+                          itemSize={55} // Increased row height for logo + text
+                          style={{ width: '100%' }}
+                          ref={logoListRef}
+                        >
+                          {({ index, style }) => (
+                            <div
+                              style={{
+                                ...style,
+                                cursor: 'pointer',
+                                padding: '5px',
+                                borderRadius: '4px',
+                              }}
+                              onClick={() => {
+                                formik.setFieldValue(
+                                  'logo_id',
+                                  filteredLogos[index].id
+                                );
+                                setLogoPopoverOpened(false);
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor =
+                                  'rgb(68, 68, 68)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor =
+                                  'transparent';
+                              }}
+                            >
+                              <Center
+                                style={{ flexDirection: 'column', gap: '2px' }}
+                              >
+                                <img
+                                  src={filteredLogos[index].cache_url || logo}
+                                  height="30"
+                                  style={{ maxWidth: 80, objectFit: 'contain' }}
+                                  alt={filteredLogos[index].name || 'Logo'}
+                                  onError={(e) => {
+                                    // Fallback to default logo if image fails to load
+                                    if (e.target.src !== logo) {
+                                      e.target.src = logo;
+                                    }
+                                  }}
+                                />
+                                <Text
+                                  size="xs"
+                                  c="dimmed"
+                                  ta="center"
+                                  style={{
+                                    maxWidth: 80,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {filteredLogos[index].name || 'Default'}
+                                </Text>
+                              </Center>
+                            </div>
+                          )}
+                        </List>
+                      )}
                     </ScrollArea>
                   </Popover.Dropdown>
                 </Popover>
 
-                <img
-                  src={
-                    logos[formik.values.logo_id]
-                      ? logos[formik.values.logo_id].cache_url
-                      : logo
-                  }
-                  height="40"
+                <LazyLogo
+                  logoId={formik.values.logo_id}
+                  alt="channel logo"
+                  style={{ height: 40 }}
                 />
               </Group>
 
@@ -642,11 +709,20 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                       </Group>
                     }
                     readOnly
-                    value={
-                      formik.values.epg_data_id
-                        ? tvgsById[formik.values.epg_data_id].name
-                        : 'Dummy'
-                    }
+                    value={(() => {
+                      const tvg = tvgsById[formik.values.epg_data_id];
+                      const epgSource = tvg && epgs[tvg.epg_source];
+                      const tvgLabel = tvg ? tvg.name || tvg.id : '';
+                      if (epgSource && tvgLabel) {
+                        return `${epgSource.name} - ${tvgLabel}`;
+                      } else if (tvgLabel) {
+                        return tvgLabel;
+                      } else if (formik.values.name) {
+                        return formik.values.name;
+                      } else {
+                        return 'Dummy';
+                      }
+                    })()}
                     onClick={() => setEpgPopoverOpened(true)}
                     size="xs"
                     rightSection={
@@ -720,11 +796,21 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                                   'epg_data_id',
                                   filteredTvgs[index].id
                                 );
+                                // Also update selectedEPG to match the EPG source of the selected tvg
+                                if (filteredTvgs[index].epg_source) {
+                                  setSelectedEPG(
+                                    `${filteredTvgs[index].epg_source}`
+                                  );
+                                }
                               }
                               setEpgPopoverOpened(false);
                             }}
                           >
-                            {filteredTvgs[index].tvg_id}
+                            {filteredTvgs[index].name &&
+                            filteredTvgs[index].tvg_id
+                              ? `${filteredTvgs[index].name} (${filteredTvgs[index].tvg_id})`
+                              : filteredTvgs[index].name ||
+                                filteredTvgs[index].tvg_id}
                           </Button>
                         </div>
                       )}

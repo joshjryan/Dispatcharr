@@ -38,7 +38,10 @@ const ChannelGroup = ({ channelGroup = null, isOpen, onClose }) => {
     let newGroup;
 
     if (channelGroup) {
-      newGroup = await API.updateChannelGroup({ id: channelGroup.id, ...values });
+      newGroup = await API.updateChannelGroup({
+        id: channelGroup.id,
+        ...values,
+      });
     } else {
       newGroup = await API.addChannelGroup(values);
     }

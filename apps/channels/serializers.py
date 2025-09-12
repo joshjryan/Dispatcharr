@@ -1,3 +1,4 @@
+import json
 from rest_framework import serializers
 from .models import (
     Stream,
@@ -60,19 +61,81 @@ class LogoSerializer(serializers.ModelSerializer):
         return reverse("api:channels:logo-cache", args=[obj.id])
 
     def get_channel_count(self, obj):
-        """Get the number of channels using this logo"""
-        return obj.channels.count()
+        """Get the number of channels, movies, and series using this logo"""
+        channel_count = obj.channels.count()
+
+        # Safely get movie count
+        try:
+            movie_count = obj.movie.count() if hasattr(obj, 'movie') else 0
+        except AttributeError:
+            movie_count = 0
+
+        # Safely get series count
+        try:
+            series_count = obj.series.count() if hasattr(obj, 'series') else 0
+        except AttributeError:
+            series_count = 0
+
+        return channel_count + movie_count + series_count
 
     def get_is_used(self, obj):
-        """Check if this logo is used by any channels"""
-        return obj.channels.exists()
+        """Check if this logo is used by any channels, movies, or series"""
+        # Check if used by channels
+        if obj.channels.exists():
+            return True
+
+        # Check if used by movies (handle case where VOD app might not be available)
+        try:
+            if hasattr(obj, 'movie') and obj.movie.exists():
+                return True
+        except AttributeError:
+            pass
+
+        # Check if used by series (handle case where VOD app might not be available)
+        try:
+            if hasattr(obj, 'series') and obj.series.exists():
+                return True
+        except AttributeError:
+            pass
+
+        return False
 
     def get_channel_names(self, obj):
-        """Get the names of channels using this logo (limited to first 5)"""
+        """Get the names of channels, movies, and series using this logo (limited to first 5)"""
+        names = []
+
+        # Get channel names
         channels = obj.channels.all()[:5]
-        names = [channel.name for channel in channels]
-        if obj.channels.count() > 5:
-            names.append(f"...and {obj.channels.count() - 5} more")
+        for channel in channels:
+            names.append(f"Channel: {channel.name}")
+
+        # Get movie names (only if we haven't reached limit)
+        if len(names) < 5:
+            try:
+                if hasattr(obj, 'movie'):
+                    remaining_slots = 5 - len(names)
+                    movies = obj.movie.all()[:remaining_slots]
+                    for movie in movies:
+                        names.append(f"Movie: {movie.name}")
+            except AttributeError:
+                pass
+
+        # Get series names (only if we haven't reached limit)
+        if len(names) < 5:
+            try:
+                if hasattr(obj, 'series'):
+                    remaining_slots = 5 - len(names)
+                    series = obj.series.all()[:remaining_slots]
+                    for series_item in series:
+                        names.append(f"Series: {series_item.name}")
+            except AttributeError:
+                pass
+
+        # Calculate total count for "more" message
+        total_count = self.get_channel_count(obj)
+        if total_count > 5:
+            names.append(f"...and {total_count - 5} more")
+
         return names
 
 
@@ -134,16 +197,49 @@ class StreamSerializer(serializers.ModelSerializer):
         return fields
 
 
+class ChannelGroupM3UAccountSerializer(serializers.ModelSerializer):
+    m3u_accounts = serializers.IntegerField(source="m3u_accounts.id", read_only=True)
+    enabled = serializers.BooleanField()
+    auto_channel_sync = serializers.BooleanField(default=False)
+    auto_sync_channel_start = serializers.FloatField(allow_null=True, required=False)
+    custom_properties = serializers.JSONField(required=False)
+
+    class Meta:
+        model = ChannelGroupM3UAccount
+        fields = ["m3u_accounts", "channel_group", "enabled", "auto_channel_sync", "auto_sync_channel_start", "custom_properties"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        custom_props = instance.custom_properties or {}
+
+        return data
+
+    def to_internal_value(self, data):
+        # Accept both dict and JSON string for custom_properties (for backward compatibility)
+        val = data.get("custom_properties")
+        if isinstance(val, str):
+            try:
+                data["custom_properties"] = json.loads(val)
+            except Exception:
+                pass
+
+        return super().to_internal_value(data)
+
 #
 # Channel Group
 #
 class ChannelGroupSerializer(serializers.ModelSerializer):
     channel_count = serializers.IntegerField(read_only=True)
     m3u_account_count = serializers.IntegerField(read_only=True)
+    m3u_accounts = ChannelGroupM3UAccountSerializer(
+        many=True,
+        read_only=True
+    )
 
     class Meta:
         model = ChannelGroup
-        fields = ["id", "name", "channel_count", "m3u_account_count"]
+        fields = ["id", "name", "channel_count", "m3u_account_count", "m3u_accounts"]
 
 
 class ChannelProfileSerializer(serializers.ModelSerializer):
@@ -347,40 +443,6 @@ class ChannelSerializer(serializers.ModelSerializer):
         return None
 
 
-class ChannelGroupM3UAccountSerializer(serializers.ModelSerializer):
-    enabled = serializers.BooleanField()
-    auto_channel_sync = serializers.BooleanField(default=False)
-    auto_sync_channel_start = serializers.FloatField(allow_null=True, required=False)
-    custom_properties = serializers.JSONField(required=False)
-
-    class Meta:
-        model = ChannelGroupM3UAccount
-        fields = ["id", "channel_group", "enabled", "auto_channel_sync", "auto_sync_channel_start", "custom_properties"]
-
-    def to_representation(self, instance):
-        ret = super().to_representation(instance)
-        # Ensure custom_properties is always a dict or None
-        val = ret.get("custom_properties")
-        if isinstance(val, str):
-            import json
-            try:
-                ret["custom_properties"] = json.loads(val)
-            except Exception:
-                ret["custom_properties"] = None
-        return ret
-
-    def to_internal_value(self, data):
-        # Accept both dict and JSON string for custom_properties
-        val = data.get("custom_properties")
-        if isinstance(val, str):
-            import json
-            try:
-                data["custom_properties"] = json.loads(val)
-            except Exception:
-                pass
-        return super().to_internal_value(data)
-
-
 class RecordingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Recording
@@ -388,8 +450,40 @@ class RecordingSerializer(serializers.ModelSerializer):
         read_only_fields = ["task_id"]
 
     def validate(self, data):
+        from core.models import CoreSettings
         start_time = data.get("start_time")
         end_time = data.get("end_time")
+
+        # If this is an EPG-based recording (program provided), apply global pre/post offsets
+        try:
+            cp = data.get("custom_properties") or {}
+            is_epg_based = isinstance(cp, dict) and isinstance(cp.get("program"), (dict,))
+        except Exception:
+            is_epg_based = False
+
+        if is_epg_based and start_time and end_time:
+            try:
+                pre_min = int(CoreSettings.get_dvr_pre_offset_minutes())
+            except Exception:
+                pre_min = 0
+            try:
+                post_min = int(CoreSettings.get_dvr_post_offset_minutes())
+            except Exception:
+                post_min = 0
+            from datetime import timedelta
+            try:
+                if pre_min and pre_min > 0:
+                    start_time = start_time - timedelta(minutes=pre_min)
+            except Exception:
+                pass
+            try:
+                if post_min and post_min > 0:
+                    end_time = end_time + timedelta(minutes=post_min)
+            except Exception:
+                pass
+            # write back adjusted times so scheduling uses them
+            data["start_time"] = start_time
+            data["end_time"] = end_time
 
         now = timezone.now()  # timezone-aware current time
 

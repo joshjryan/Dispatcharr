@@ -118,6 +118,10 @@ postgres_pid=$(su - postgres -c "$PG_BINDIR/pg_ctl -D ${POSTGRES_DIR} status" | 
 echo "✅ Postgres started with PID $postgres_pid"
 pids+=("$postgres_pid")
 
+# Ensure database encoding is UTF8
+. /app/docker/init/02-postgres.sh
+ensure_utf8_encoding
+
 if [[ "$DISPATCHARR_ENV" = "dev" ]]; then
     . /app/docker/init/99-init-dev.sh
     echo "Starting frontend dev environment"

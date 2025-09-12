@@ -29,6 +29,7 @@ class M3UAccount(models.Model):
         max_length=255, unique=True, help_text="Unique name for this M3U account"
     )
     server_url = models.URLField(
+        max_length=1000,
         blank=True,
         null=True,
         help_text="The base URL of the M3U server (optional if a file is uploaded)",
@@ -85,7 +86,7 @@ class M3UAccount(models.Model):
     account_type = models.CharField(choices=Types.choices, default=Types.STADNARD)
     username = models.CharField(max_length=255, null=True, blank=True)
     password = models.CharField(max_length=255, null=True, blank=True)
-    custom_properties = models.TextField(null=True, blank=True)
+    custom_properties = models.JSONField(default=dict, blank=True, null=True)
     refresh_interval = models.IntegerField(default=0)
     refresh_task = models.ForeignKey(
         PeriodicTask, on_delete=models.SET_NULL, null=True, blank=True
@@ -93,6 +94,10 @@ class M3UAccount(models.Model):
     stale_stream_days = models.PositiveIntegerField(
         default=7,
         help_text="Number of days after which a stream will be removed if not seen in the M3U source.",
+    )
+    priority = models.PositiveIntegerField(
+        default=0,
+        help_text="Priority for VOD provider selection (higher numbers = higher priority). Used when multiple providers offer the same content.",
     )
 
     def __str__(self):
@@ -180,7 +185,7 @@ class M3UFilter(models.Model):
         help_text="If True, matching items are excluded; if False, only matches are included.",
     )
     order = models.PositiveIntegerField(default=0)
-    custom_properties = models.TextField(null=True, blank=True)
+    custom_properties = models.JSONField(default=dict, blank=True, null=True)
 
     def applies_to(self, stream_name, group_name):
         target = group_name if self.filter_type == "group" else stream_name
@@ -258,6 +263,12 @@ class M3UAccountProfile(models.Model):
         max_length=255,
     )
     current_viewers = models.PositiveIntegerField(default=0)
+    custom_properties = models.JSONField(
+        default=dict, 
+        blank=True, 
+        null=True, 
+        help_text="Custom properties for storing account information from provider (e.g., XC account details, expiration dates)"
+    )
 
     class Meta:
         constraints = [
@@ -268,6 +279,70 @@ class M3UAccountProfile(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.m3u_account.name})"
+
+    def get_account_expiration(self):
+        """Get account expiration date from custom properties if available"""
+        if not self.custom_properties:
+            return None
+        
+        user_info = self.custom_properties.get('user_info', {})
+        exp_date = user_info.get('exp_date')
+        
+        if exp_date:
+            try:
+                from datetime import datetime
+                # XC exp_date is typically a Unix timestamp
+                if isinstance(exp_date, (int, float)):
+                    return datetime.fromtimestamp(exp_date)
+                elif isinstance(exp_date, str):
+                    # Try to parse as timestamp first, then as ISO date
+                    try:
+                        return datetime.fromtimestamp(float(exp_date))
+                    except ValueError:
+                        return datetime.fromisoformat(exp_date)
+            except (ValueError, TypeError):
+                pass
+        
+        return None
+
+    def get_account_status(self):
+        """Get account status from custom properties if available"""
+        if not self.custom_properties:
+            return None
+        
+        user_info = self.custom_properties.get('user_info', {})
+        return user_info.get('status')
+
+    def get_max_connections(self):
+        """Get maximum connections from custom properties if available"""
+        if not self.custom_properties:
+            return None
+        
+        user_info = self.custom_properties.get('user_info', {})
+        return user_info.get('max_connections')
+
+    def get_active_connections(self):
+        """Get active connections from custom properties if available"""
+        if not self.custom_properties:
+            return None
+        
+        user_info = self.custom_properties.get('user_info', {})
+        return user_info.get('active_cons')
+
+    def get_last_refresh(self):
+        """Get last refresh timestamp from custom properties if available"""
+        if not self.custom_properties:
+            return None
+        
+        last_refresh = self.custom_properties.get('last_refresh')
+        if last_refresh:
+            try:
+                from datetime import datetime
+                return datetime.fromisoformat(last_refresh)
+            except (ValueError, TypeError):
+                pass
+        
+        return None
 
 
 @receiver(models.signals.post_save, sender=M3UAccount)

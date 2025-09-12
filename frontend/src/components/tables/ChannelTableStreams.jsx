@@ -1,7 +1,13 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import API from '../../api';
 import { copyToClipboard } from '../../utils';
-import { GripHorizontal, SquareMinus, ChevronDown, ChevronRight, Eye } from 'lucide-react';
+import {
+  GripHorizontal,
+  SquareMinus,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+} from 'lucide-react';
 import {
   Box,
   ActionIcon,
@@ -14,7 +20,6 @@ import {
   Tooltip,
   Collapse,
   Button,
-
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -178,23 +183,49 @@ const ChannelStreams = ({ channel, isExpanded }) => {
 
   // Helper function to categorize stream stats
   const categorizeStreamStats = (stats) => {
-    if (!stats) return { basic: {}, video: {}, audio: {}, technical: {}, other: {} };
+    if (!stats)
+      return { basic: {}, video: {}, audio: {}, technical: {}, other: {} };
 
     const categories = {
       basic: {},
       video: {},
       audio: {},
       technical: {},
-      other: {}
+      other: {},
     };
 
     // Define which stats go in which category
     const categoryMapping = {
-      basic: ['resolution', 'video_codec', 'source_fps', 'audio_codec', 'audio_channels'],
-      video: ['video_bitrate', 'pixel_format', 'width', 'height', 'aspect_ratio', 'frame_rate'],
-      audio: ['audio_bitrate', 'sample_rate', 'audio_format', 'audio_channels_layout'],
-      technical: ['stream_type', 'container_format', 'duration', 'file_size', 'ffmpeg_output_bitrate', 'input_bitrate'],
-      other: [] // Will catch anything not categorized above
+      basic: [
+        'resolution',
+        'video_codec',
+        'source_fps',
+        'audio_codec',
+        'audio_channels',
+      ],
+      video: [
+        'video_bitrate',
+        'pixel_format',
+        'width',
+        'height',
+        'aspect_ratio',
+        'frame_rate',
+      ],
+      audio: [
+        'audio_bitrate',
+        'sample_rate',
+        'audio_format',
+        'audio_channels_layout',
+      ],
+      technical: [
+        'stream_type',
+        'container_format',
+        'duration',
+        'file_size',
+        'ffmpeg_output_bitrate',
+        'input_bitrate',
+      ],
+      other: [], // Will catch anything not categorized above
     };
 
     // Categorize each stat
@@ -238,7 +269,8 @@ const ChannelStreams = ({ channel, isExpanded }) => {
         if (typeof value === 'number') {
           if (value < 1024) return `${value} B`;
           if (value < 1024 * 1024) return `${(value / 1024).toFixed(2)} KB`;
-          if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+          if (value < 1024 * 1024 * 1024)
+            return `${(value / (1024 * 1024)).toFixed(2)} MB`;
           return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
         }
         return value;
@@ -269,7 +301,10 @@ const ChannelStreams = ({ channel, isExpanded }) => {
           {Object.entries(stats).map(([key, value]) => (
             <Tooltip key={key} label={`${key}: ${formatStatValue(key, value)}`}>
               <Badge size="xs" variant="light" color="gray">
-                {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}: {formatStatValue(key, value)}
+                {key
+                  .replace(/_/g, ' ')
+                  .replace(/\b\w/g, (l) => l.toUpperCase())}
+                : {formatStatValue(key, value)}
               </Badge>
             </Tooltip>
           ))}
@@ -304,19 +339,23 @@ const ChannelStreams = ({ channel, isExpanded }) => {
           accessorKey: 'name',
           cell: ({ row }) => {
             const stream = row.original;
-            const playlistName = playlists[stream.m3u_account]?.name || 'Unknown';
-            const accountName = m3uAccountsMap[stream.m3u_account] || playlistName;
+            const playlistName =
+              playlists[stream.m3u_account]?.name || 'Unknown';
+            const accountName =
+              m3uAccountsMap[stream.m3u_account] || playlistName;
 
             // Categorize stream stats
             const categorizedStats = categorizeStreamStats(stream.stream_stats);
-            const hasAdvancedStats = Object.values(categorizedStats).some(category =>
-              Object.keys(category).length > 0
+            const hasAdvancedStats = Object.values(categorizedStats).some(
+              (category) => Object.keys(category).length > 0
             );
 
             return (
               <Box>
                 <Group gap="xs" align="center">
-                  <Text fw={500} size="sm">{stream.name}</Text>
+                  <Text fw={500} size="sm">
+                    {stream.name}
+                  </Text>
                   <Badge size="xs" variant="light" color="teal">
                     {accountName}
                   </Badge>
@@ -338,7 +377,9 @@ const ChannelStreams = ({ channel, isExpanded }) => {
                             const success = await copyToClipboard(stream.url);
                             notifications.show({
                               title: success ? 'URL Copied' : 'Copy Failed',
-                              message: success ? 'Stream URL copied to clipboard' : 'Failed to copy URL to clipboard',
+                              message: success
+                                ? 'Stream URL copied to clipboard'
+                                : 'Failed to copy URL to clipboard',
                               color: success ? 'green' : 'red',
                             });
                           }}
@@ -351,7 +392,9 @@ const ChannelStreams = ({ channel, isExpanded }) => {
                           size="xs"
                           color="blue"
                           variant="light"
-                          onClick={() => handleWatchStream(stream.stream_hash || stream.id)}
+                          onClick={() =>
+                            handleWatchStream(stream.stream_hash || stream.id)
+                          }
                           style={{ marginLeft: 2 }}
                         >
                           <Eye size={16} />
@@ -365,16 +408,26 @@ const ChannelStreams = ({ channel, isExpanded }) => {
                 {stream.stream_stats && (
                   <Group gap="xs" mt={4} align="center">
                     {/* Video Information */}
-                    {(stream.stream_stats.video_codec || stream.stream_stats.resolution || stream.stream_stats.video_bitrate || stream.stream_stats.source_fps) && (
+                    {(stream.stream_stats.video_codec ||
+                      stream.stream_stats.resolution ||
+                      stream.stream_stats.video_bitrate ||
+                      stream.stream_stats.source_fps) && (
                       <>
-                        <Text size="xs" c="dimmed" fw={500}>Video:</Text>
+                        <Text size="xs" c="dimmed" fw={500}>
+                          Video:
+                        </Text>
                         {stream.stream_stats.resolution && (
                           <Badge size="xs" variant="light" color="red">
                             {stream.stream_stats.resolution}
                           </Badge>
                         )}
                         {stream.stream_stats.video_bitrate && (
-                          <Badge size="xs" variant="light" color="orange" style={{ textTransform: 'none' }}>
+                          <Badge
+                            size="xs"
+                            variant="light"
+                            color="orange"
+                            style={{ textTransform: 'none' }}
+                          >
                             {stream.stream_stats.video_bitrate} kbps
                           </Badge>
                         )}
@@ -392,9 +445,12 @@ const ChannelStreams = ({ channel, isExpanded }) => {
                     )}
 
                     {/* Audio Information */}
-                    {(stream.stream_stats.audio_codec || stream.stream_stats.audio_channels) && (
+                    {(stream.stream_stats.audio_codec ||
+                      stream.stream_stats.audio_channels) && (
                       <>
-                        <Text size="xs" c="dimmed" fw={500}>Audio:</Text>
+                        <Text size="xs" c="dimmed" fw={500}>
+                          Audio:
+                        </Text>
                         {stream.stream_stats.audio_channels && (
                           <Badge size="xs" variant="light" color="pink">
                             {stream.stream_stats.audio_channels}
@@ -409,11 +465,18 @@ const ChannelStreams = ({ channel, isExpanded }) => {
                     )}
 
                     {/* Output Bitrate */}
-                    {(stream.stream_stats.ffmpeg_output_bitrate) && (
+                    {stream.stream_stats.ffmpeg_output_bitrate && (
                       <>
-                        <Text size="xs" c="dimmed" fw={500}>Output Bitrate:</Text>
+                        <Text size="xs" c="dimmed" fw={500}>
+                          Output Bitrate:
+                        </Text>
                         {stream.stream_stats.ffmpeg_output_bitrate && (
-                          <Badge size="xs" variant="light" color="orange" style={{ textTransform: 'none' }}>
+                          <Badge
+                            size="xs"
+                            variant="light"
+                            color="orange"
+                            style={{ textTransform: 'none' }}
+                          >
                             {stream.stream_stats.ffmpeg_output_bitrate} kbps
                           </Badge>
                         )}
@@ -428,27 +491,47 @@ const ChannelStreams = ({ channel, isExpanded }) => {
                     <Button
                       variant="subtle"
                       size="xs"
-                      leftSection={expandedAdvancedStats.has(stream.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      leftSection={
+                        expandedAdvancedStats.has(stream.id) ? (
+                          <ChevronDown size={12} />
+                        ) : (
+                          <ChevronRight size={12} />
+                        )
+                      }
                       onClick={() => toggleAdvancedStats(stream.id)}
                       c="dimmed"
                     >
-                      {expandedAdvancedStats.has(stream.id) ? 'Hide' : 'Show'} Advanced Stats
+                      {expandedAdvancedStats.has(stream.id) ? 'Hide' : 'Show'}{' '}
+                      Advanced Stats
                     </Button>
                   </Group>
                 )}
 
                 {/* Advanced Stats (expandable) */}
                 <Collapse in={expandedAdvancedStats.has(stream.id)}>
-                  <Box mt="sm" p="xs" style={{ backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '4px' }}>
+                  <Box
+                    mt="sm"
+                    p="xs"
+                    style={{
+                      backgroundColor: 'rgba(0,0,0,0.1)',
+                      borderRadius: '4px',
+                    }}
+                  >
                     {renderStatsCategory('Video', categorizedStats.video)}
                     {renderStatsCategory('Audio', categorizedStats.audio)}
-                    {renderStatsCategory('Technical', categorizedStats.technical)}
+                    {renderStatsCategory(
+                      'Technical',
+                      categorizedStats.technical
+                    )}
                     {renderStatsCategory('Other', categorizedStats.other)}
 
                     {/* Show when stats were last updated */}
                     {stream.stream_stats_updated_at && (
                       <Text size="xs" c="dimmed" mt="xs">
-                        Last updated: {new Date(stream.stream_stats_updated_at).toLocaleString()}
+                        Last updated:{' '}
+                        {new Date(
+                          stream.stream_stats_updated_at
+                        ).toLocaleString()}
                       </Text>
                     )}
                   </Box>

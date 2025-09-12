@@ -322,3 +322,25 @@ export const REGION_CHOICES = [
   { value: 'zm', label: 'ZM' },
   { value: 'zw', label: 'ZW' },
 ];
+
+export const VOD_TYPES = {
+  MOVIE: 'movie',
+  EPISODE: 'episode'
+};
+
+export const VOD_FILTERS = {
+  ALL: 'all',
+  MOVIES: 'movies',
+  SERIES: 'series'
+};
+
+export const VOD_SORT_OPTIONS = [
+  { value: 'name', label: 'Name' },
+  { value: 'year', label: 'Year' },
+  { value: 'created_at', label: 'Date Added' },
+  { value: 'rating', label: 'Rating' }
+];
+
+export const CONTAINER_EXTENSIONS = [
+  'mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'ts', 'mpg'
+];

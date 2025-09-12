@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.shortcuts import get_object_or_404, get_list_or_404
@@ -39,13 +39,15 @@ from .serializers import (
     ChannelProfileSerializer,
     RecordingSerializer,
 )
-from .tasks import match_epg_channels
+from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from apps.epg.models import EPGData
+from apps.vod.models import Movie, Series
 from django.db.models import Q
 from django.http import StreamingHttpResponse, FileResponse, Http404
+from django.utils import timezone
 import mimetypes
 
 from rest_framework.pagination import PageNumberPagination
@@ -195,7 +197,7 @@ class ChannelGroupViewSet(viewsets.ModelViewSet):
         from django.db.models import Count
         return ChannelGroup.objects.annotate(
             channel_count=Count('channels', distinct=True),
-            m3u_account_count=Count('m3u_account', distinct=True)
+            m3u_account_count=Count('m3u_accounts', distinct=True)
         )
 
     def update(self, request, *args, **kwargs):
@@ -237,7 +239,7 @@ class ChannelGroupViewSet(viewsets.ModelViewSet):
         # Find groups with no channels and no M3U account associations
         unused_groups = ChannelGroup.objects.annotate(
             channel_count=Count('channels', distinct=True),
-            m3u_account_count=Count('m3u_account', distinct=True)
+            m3u_account_count=Count('m3u_accounts', distinct=True)
         ).filter(
             channel_count=0,
             m3u_account_count=0
@@ -291,17 +293,42 @@ class ChannelPagination(PageNumberPagination):
         return super().paginate_queryset(queryset, request, view)
 
 
+class EPGFilter(django_filters.Filter):
+    """
+    Filter channels by EPG source name or null (unlinked).
+    """
+    def filter(self, queryset, value):
+        if not value:
+            return queryset
+
+        # Split comma-separated values
+        values = [v.strip() for v in value.split(',')]
+        query = Q()
+
+        for val in values:
+            if val == 'null':
+                # Filter for channels with no EPG data
+                query |= Q(epg_data__isnull=True)
+            else:
+                # Filter for channels with specific EPG source name
+                query |= Q(epg_data__epg_source__name__icontains=val)
+
+        return queryset.filter(query)
+
+
 class ChannelFilter(django_filters.FilterSet):
     name = django_filters.CharFilter(lookup_expr="icontains")
-    channel_group_name = OrInFilter(
+    channel_group = OrInFilter(
         field_name="channel_group__name", lookup_expr="icontains"
     )
+    epg = EPGFilter()
 
     class Meta:
         model = Channel
         fields = [
             "name",
-            "channel_group_name",
+            "channel_group",
+            "epg",
         ]
 
 
@@ -536,9 +563,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
             name = stream.name
 
         # Check if client provided a channel_number; if not, auto-assign one.
-        stream_custom_props = (
-            json.loads(stream.custom_properties) if stream.custom_properties else {}
-        )
+        stream_custom_props = stream.custom_properties or {}
 
         channel_number = None
         if "tvg-chno" in stream_custom_props:
@@ -733,9 +758,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
             channel_group = stream.channel_group
 
-            stream_custom_props = (
-                json.loads(stream.custom_properties) if stream.custom_properties else {}
-            )
+            stream_custom_props = stream.custom_properties or {}
 
             channel_number = None
             if "tvg-chno" in stream_custom_props:
@@ -1206,7 +1229,7 @@ class CleanupUnusedLogosAPIView(APIView):
             return [Authenticated()]
 
     @swagger_auto_schema(
-        operation_description="Delete all logos that are not used by any channels",
+        operation_description="Delete all logos that are not used by any channels, movies, or series",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
@@ -1220,10 +1243,24 @@ class CleanupUnusedLogosAPIView(APIView):
         responses={200: "Cleanup completed"},
     )
     def post(self, request):
-        """Delete all logos with no channel associations"""
+        """Delete all logos with no channel, movie, or series associations"""
         delete_files = request.data.get("delete_files", False)
 
-        unused_logos = Logo.objects.filter(channels__isnull=True)
+        # Find logos that are not used by channels, movies, or series
+        filter_conditions = Q(channels__isnull=True)
+
+        # Add VOD conditions if models are available
+        try:
+            filter_conditions &= Q(movie__isnull=True)
+        except:
+            pass
+
+        try:
+            filter_conditions &= Q(series__isnull=True)
+        except:
+            pass
+
+        unused_logos = Logo.objects.filter(filter_conditions)
         deleted_count = unused_logos.count()
         logo_names = list(unused_logos.values_list('name', flat=True))
         local_files_deleted = 0
@@ -1259,10 +1296,24 @@ class CleanupUnusedLogosAPIView(APIView):
         })
 
 
+class LogoPagination(PageNumberPagination):
+    page_size = 50  # Default page size to match frontend default
+    page_size_query_param = "page_size"  # Allow clients to specify page size
+    max_page_size = 1000  # Prevent excessive page sizes
+
+    def paginate_queryset(self, queryset, request, view=None):
+        # Check if pagination should be disabled for specific requests
+        if request.query_params.get('no_pagination') == 'true':
+            return None  # disables pagination, returns full queryset
+
+        return super().paginate_queryset(queryset, request, view)
+
+
 class LogoViewSet(viewsets.ModelViewSet):
     queryset = Logo.objects.all()
     serializer_class = LogoSerializer
-    parser_classes = (MultiPartParser, FormParser)
+    pagination_class = LogoPagination
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def get_permissions(self):
         if self.action in ["upload"]:
@@ -1278,14 +1329,84 @@ class LogoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Optimize queryset with prefetch and add filtering"""
+        # Start with basic prefetch for channels
         queryset = Logo.objects.prefetch_related('channels').order_by('name')
 
-        # Filter by usage
+        # Try to prefetch VOD relations if available
+        try:
+            queryset = queryset.prefetch_related('movie', 'series')
+        except:
+            # VOD app might not be available, continue without VOD prefetch
+            pass
+
+        # Filter by specific IDs
+        ids = self.request.query_params.getlist('ids')
+        if ids:
+            try:
+                # Convert string IDs to integers and filter
+                id_list = [int(id_str) for id_str in ids if id_str.isdigit()]
+                if id_list:
+                    queryset = queryset.filter(id__in=id_list)
+            except (ValueError, TypeError):
+                pass  # Invalid IDs, return empty queryset
+                queryset = Logo.objects.none()
+
+        # Filter by usage - now includes VOD content
         used_filter = self.request.query_params.get('used', None)
         if used_filter == 'true':
-            queryset = queryset.filter(channels__isnull=False).distinct()
+            # Logo is used if it has any channels, movies, or series
+            filter_conditions = Q(channels__isnull=False)
+
+            # Add VOD conditions if models are available
+            try:
+                filter_conditions |= Q(movie__isnull=False)
+            except:
+                pass
+
+            try:
+                filter_conditions |= Q(series__isnull=False)
+            except:
+                pass
+
+            queryset = queryset.filter(filter_conditions).distinct()
+
         elif used_filter == 'false':
-            queryset = queryset.filter(channels__isnull=True)
+            # Logo is unused if it has no channels, movies, or series
+            filter_conditions = Q(channels__isnull=True)
+
+            # Add VOD conditions if models are available
+            try:
+                filter_conditions &= Q(movie__isnull=True)
+            except:
+                pass
+
+            try:
+                filter_conditions &= Q(series__isnull=True)
+            except:
+                pass
+
+            queryset = queryset.filter(filter_conditions)
+
+        # Filter for channel assignment (unused + channel-used, exclude VOD-only)
+        channel_assignable = self.request.query_params.get('channel_assignable', None)
+        if channel_assignable == 'true':
+            # Include logos that are either:
+            # 1. Completely unused, OR
+            # 2. Used by channels (but may also be used by VOD)
+            # Exclude logos that are ONLY used by VOD content
+
+            unused_condition = Q(channels__isnull=True)
+            channel_used_condition = Q(channels__isnull=False)
+
+            # Add VOD conditions if models are available
+            try:
+                unused_condition &= Q(movie__isnull=True) & Q(series__isnull=True)
+            except:
+                pass
+
+            # Combine: unused OR used by channels
+            filter_conditions = unused_condition | channel_used_condition
+            queryset = queryset.filter(filter_conditions).distinct()
 
         # Filter by name
         name_filter = self.request.query_params.get('name', None)
@@ -1370,15 +1491,21 @@ class LogoViewSet(viewsets.ModelViewSet):
             if redis_client:
                 # Use the same key format as the file scanner
                 redis_key = f"processed_file:{file_path}"
-                redis_client.setex(redis_key, 60 * 60 * 24 * 3, "api_upload")  # 3 day TTL
-                logger.debug(f"Marked uploaded logo file as processed in Redis: {file_path}")
+                # Store the actual file modification time to match the file scanner's expectation
+                file_mtime = os.path.getmtime(file_path)
+                redis_client.setex(redis_key, 60 * 60 * 24 * 3, str(file_mtime))  # 3 day TTL
+                logger.debug(f"Marked uploaded logo file as processed in Redis: {file_path} (mtime: {file_mtime})")
         except Exception as e:
             logger.warning(f"Failed to mark logo file as processed in Redis: {e}")
+
+        # Get custom name from request data, fallback to filename
+        custom_name = request.data.get('name', '').strip()
+        logo_name = custom_name if custom_name else file_name
 
         logo, _ = Logo.objects.get_or_create(
             url=file_path,
             defaults={
-                "name": file_name,
+                "name": logo_name,
             },
         )
 
@@ -1575,7 +1702,299 @@ class RecordingViewSet(viewsets.ModelViewSet):
     serializer_class = RecordingSerializer
 
     def get_permissions(self):
+        # Allow unauthenticated playback of recording files (like other streaming endpoints)
+        if getattr(self, 'action', None) == 'file':
+            return [AllowAny()]
         try:
             return [perm() for perm in permission_classes_by_action[self.action]]
         except KeyError:
             return [Authenticated()]
+
+    @action(detail=True, methods=["post"], url_path="comskip")
+    def comskip(self, request, pk=None):
+        """Trigger comskip processing for this recording."""
+        from .tasks import comskip_process_recording
+        rec = get_object_or_404(Recording, pk=pk)
+        try:
+            comskip_process_recording.delay(rec.id)
+            return Response({"success": True, "queued": True})
+        except Exception as e:
+            return Response({"success": False, "error": str(e)}, status=400)
+
+    @action(detail=True, methods=["get"], url_path="file")
+    def file(self, request, pk=None):
+        """Stream a recorded file with HTTP Range support for seeking."""
+        recording = get_object_or_404(Recording, pk=pk)
+        cp = recording.custom_properties or {}
+        file_path = cp.get("file_path")
+        file_name = cp.get("file_name") or "recording"
+
+        if not file_path or not os.path.exists(file_path):
+            raise Http404("Recording file not found")
+
+        # Guess content type
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".mp4":
+            content_type = "video/mp4"
+        elif ext == ".mkv":
+            content_type = "video/x-matroska"
+        else:
+            content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+
+        file_size = os.path.getsize(file_path)
+        range_header = request.META.get("HTTP_RANGE", "").strip()
+
+        def file_iterator(path, start=0, end=None, chunk_size=8192):
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = (end - start + 1) if end is not None else None
+                while True:
+                    if remaining is not None and remaining <= 0:
+                        break
+                    bytes_to_read = min(chunk_size, remaining) if remaining is not None else chunk_size
+                    data = f.read(bytes_to_read)
+                    if not data:
+                        break
+                    if remaining is not None:
+                        remaining -= len(data)
+                    yield data
+
+        if range_header and range_header.startswith("bytes="):
+            # Parse Range header
+            try:
+                range_spec = range_header.split("=", 1)[1]
+                start_str, end_str = range_spec.split("-", 1)
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else file_size - 1
+                start = max(0, start)
+                end = min(file_size - 1, end)
+                length = end - start + 1
+
+                resp = StreamingHttpResponse(
+                    file_iterator(file_path, start, end),
+                    status=206,
+                    content_type=content_type,
+                )
+                resp["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+                resp["Content-Length"] = str(length)
+                resp["Accept-Ranges"] = "bytes"
+                resp["Content-Disposition"] = f"inline; filename=\"{file_name}\""
+                return resp
+            except Exception:
+                # Fall back to full file if parsing fails
+                pass
+
+        # Full file response
+        response = FileResponse(open(file_path, "rb"), content_type=content_type)
+        response["Content-Length"] = str(file_size)
+        response["Accept-Ranges"] = "bytes"
+        response["Content-Disposition"] = f"inline; filename=\"{file_name}\""
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete the Recording and ensure any active DVR client connection is closed.
+
+        Also removes the associated file(s) from disk if present.
+        """
+        instance = self.get_object()
+
+        # Attempt to close the DVR client connection for this channel if active
+        try:
+            channel_uuid = str(instance.channel.uuid)
+            # Lazy imports to avoid module overhead if proxy isn't used
+            from core.utils import RedisClient
+            from apps.proxy.ts_proxy.redis_keys import RedisKeys
+            from apps.proxy.ts_proxy.services.channel_service import ChannelService
+
+            r = RedisClient.get_client()
+            if r:
+                client_set_key = RedisKeys.clients(channel_uuid)
+                client_ids = r.smembers(client_set_key) or []
+                stopped = 0
+                for raw_id in client_ids:
+                    try:
+                        cid = raw_id.decode("utf-8") if isinstance(raw_id, (bytes, bytearray)) else str(raw_id)
+                        meta_key = RedisKeys.client_metadata(channel_uuid, cid)
+                        ua = r.hget(meta_key, "user_agent")
+                        ua_s = ua.decode("utf-8") if isinstance(ua, (bytes, bytearray)) else (ua or "")
+                        # Identify DVR recording client by its user agent
+                        if ua_s and "Dispatcharr-DVR" in ua_s:
+                            try:
+                                ChannelService.stop_client(channel_uuid, cid)
+                                stopped += 1
+                            except Exception as inner_e:
+                                logger.debug(f"Failed to stop DVR client {cid} for channel {channel_uuid}: {inner_e}")
+                    except Exception as inner:
+                        logger.debug(f"Error while checking client metadata: {inner}")
+                if stopped:
+                    logger.info(f"Stopped {stopped} DVR client(s) for channel {channel_uuid} due to recording cancellation")
+                # If no clients remain after stopping DVR clients, proactively stop the channel
+                try:
+                    remaining = r.scard(client_set_key) or 0
+                except Exception:
+                    remaining = 0
+                if remaining == 0:
+                    try:
+                        ChannelService.stop_channel(channel_uuid)
+                        logger.info(f"Stopped channel {channel_uuid} (no clients remain)")
+                    except Exception as sc_e:
+                        logger.debug(f"Unable to stop channel {channel_uuid}: {sc_e}")
+        except Exception as e:
+            logger.debug(f"Unable to stop DVR clients for cancelled recording: {e}")
+
+        # Capture paths before deletion
+        cp = instance.custom_properties or {}
+        file_path = cp.get("file_path")
+        temp_ts_path = cp.get("_temp_file_path")
+
+        # Perform DB delete first, then try to remove files
+        response = super().destroy(request, *args, **kwargs)
+
+        # Notify frontends to refresh recordings
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed"})
+        except Exception:
+            pass
+
+        library_dir = '/app/data'
+        allowed_roots = ['/data/', library_dir.rstrip('/') + '/']
+
+        def _safe_remove(path: str):
+            if not path or not isinstance(path, str):
+                return
+            try:
+                if any(path.startswith(root) for root in allowed_roots) and os.path.exists(path):
+                    os.remove(path)
+                    logger.info(f"Deleted recording artifact: {path}")
+            except Exception as ex:
+                logger.warning(f"Failed to delete recording artifact {path}: {ex}")
+
+        _safe_remove(file_path)
+        _safe_remove(temp_ts_path)
+
+        return response
+
+
+class BulkDeleteUpcomingRecordingsAPIView(APIView):
+    """Delete all upcoming (future) recordings."""
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def post(self, request):
+        now = timezone.now()
+        qs = Recording.objects.filter(start_time__gt=now)
+        removed = qs.count()
+        qs.delete()
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed", "removed": removed})
+        except Exception:
+            pass
+        return Response({"success": True, "removed": removed})
+
+
+class SeriesRulesAPIView(APIView):
+    """Manage DVR series recording rules (list/add)."""
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def get(self, request):
+        return Response({"rules": CoreSettings.get_dvr_series_rules()})
+
+    def post(self, request):
+        data = request.data or {}
+        tvg_id = str(data.get("tvg_id") or "").strip()
+        mode = (data.get("mode") or "all").lower()
+        title = data.get("title") or ""
+        if mode not in ("all", "new"):
+            return Response({"error": "mode must be 'all' or 'new'"}, status=status.HTTP_400_BAD_REQUEST)
+        if not tvg_id:
+            return Response({"error": "tvg_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        rules = CoreSettings.get_dvr_series_rules()
+        # Upsert by tvg_id
+        existing = next((r for r in rules if str(r.get("tvg_id")) == tvg_id), None)
+        if existing:
+            existing.update({"mode": mode, "title": title})
+        else:
+            rules.append({"tvg_id": tvg_id, "mode": mode, "title": title})
+        CoreSettings.set_dvr_series_rules(rules)
+        # Evaluate immediately for this tvg_id (async)
+        try:
+            evaluate_series_rules.delay(tvg_id)
+        except Exception:
+            pass
+        return Response({"success": True, "rules": rules})
+
+
+class DeleteSeriesRuleAPIView(APIView):
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def delete(self, request, tvg_id):
+        tvg_id = str(tvg_id)
+        rules = [r for r in CoreSettings.get_dvr_series_rules() if str(r.get("tvg_id")) != tvg_id]
+        CoreSettings.set_dvr_series_rules(rules)
+        return Response({"success": True, "rules": rules})
+
+
+class EvaluateSeriesRulesAPIView(APIView):
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def post(self, request):
+        tvg_id = request.data.get("tvg_id")
+        # Run synchronously so UI sees results immediately
+        result = evaluate_series_rules_impl(str(tvg_id)) if tvg_id else evaluate_series_rules_impl()
+        return Response({"success": True, **result})
+
+
+class BulkRemoveSeriesRecordingsAPIView(APIView):
+    """Bulk remove scheduled recordings for a series rule.
+
+    POST body:
+      - tvg_id: required (EPG channel id)
+      - title: optional (series title)
+      - scope: 'title' (default) or 'channel'
+    """
+    def get_permissions(self):
+        try:
+            return [perm() for perm in permission_classes_by_method[self.request.method]]
+        except KeyError:
+            return [Authenticated()]
+
+    def post(self, request):
+        from django.utils import timezone
+        tvg_id = str(request.data.get("tvg_id") or "").strip()
+        title = request.data.get("title")
+        scope = (request.data.get("scope") or "title").lower()
+        if not tvg_id:
+            return Response({"error": "tvg_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = Recording.objects.filter(
+            start_time__gte=timezone.now(),
+            custom_properties__program__tvg_id=tvg_id,
+        )
+        if scope == "title" and title:
+            qs = qs.filter(custom_properties__program__title=title)
+
+        count = qs.count()
+        qs.delete()
+        try:
+            from core.utils import send_websocket_update
+            send_websocket_update('updates', 'update', {"success": True, "type": "recordings_refreshed", "removed": count})
+        except Exception:
+            pass
+        return Response({"success": True, "removed": count})

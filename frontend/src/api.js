@@ -1,6 +1,7 @@
 // src/api.js (updated)
 import useAuthStore from './store/auth';
 import useChannelsStore from './store/channels';
+import useLogosStore from './store/logos';
 import useUserAgentsStore from './store/userAgents';
 import usePlaylistsStore from './store/playlists';
 import useEPGsStore from './store/epgs';
@@ -455,6 +456,23 @@ export default class API {
     }
   }
 
+  // Bulk update with per-channel payloads (e.g., regex renames)
+  static async bulkUpdateChannels(updates) {
+    try {
+      const response = await request(
+        `${host}/api/channels/channels/edit/bulk/`,
+        {
+          method: 'PATCH',
+          body: updates,
+        }
+      );
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to update channels', e);
+    }
+  }
+
   static async setChannelEPG(channelId, epgDataId) {
     try {
       const response = await request(
@@ -734,13 +752,20 @@ export default class API {
     }
   }
 
-  static async updateM3UGroupSettings(playlistId, groupSettings) {
+  static async updateM3UGroupSettings(
+    playlistId,
+    groupSettings = [],
+    categorySettings = []
+  ) {
     try {
       const response = await request(
         `${host}/api/m3u/accounts/${playlistId}/group-settings/`,
         {
           method: 'PATCH',
-          body: { group_settings: groupSettings },
+          body: {
+            group_settings: groupSettings,
+            category_settings: categorySettings,
+          },
         }
       );
       // Fetch the updated playlist and update the store
@@ -753,10 +778,6 @@ export default class API {
   }
 
   static async addPlaylist(values) {
-    if (values.custom_properties) {
-      values.custom_properties = JSON.stringify(values.custom_properties);
-    }
-
     try {
       let body = null;
       if (values.file) {
@@ -792,7 +813,6 @@ export default class API {
       errorNotification('Failed to refresh M3U account', e);
     }
   }
-
   static async refreshAllPlaylist() {
     try {
       const response = await request(`${host}/api/m3u/refresh/`, {
@@ -802,6 +822,19 @@ export default class API {
       return response;
     } catch (e) {
       errorNotification('Failed to refresh all M3U accounts', e);
+    }
+  }
+  static async refreshVODContent(accountId) {
+    try {
+      const response = await request(
+        `${host}/api/m3u/accounts/${accountId}/refresh-vod/`,
+        {
+          method: 'POST',
+        }
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to refresh VOD content', e);
     }
   }
 
@@ -1112,6 +1145,22 @@ export default class API {
     }
   }
 
+  static async refreshAccountInfo(profileId) {
+    try {
+      const response = await request(`${host}/api/m3u/refresh-account-info/${profileId}/`, {
+        method: 'POST',
+      });
+      return response;
+    } catch (e) {
+      // If it's a structured error response, return it instead of throwing
+      if (e.body && typeof e.body === 'object') {
+        return e.body;
+      }
+      errorNotification(`Failed to refresh account info for profile ${profileId}`, e);
+      throw e;
+    }
+  }
+
   static async addM3UFilter(accountId, values) {
     try {
       const response = await request(
@@ -1186,6 +1235,94 @@ export default class API {
     }
   }
 
+  // Plugins API
+  static async getPlugins() {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/`);
+      return response.plugins || [];
+    } catch (e) {
+      errorNotification('Failed to retrieve plugins', e);
+    }
+  }
+
+  static async reloadPlugins() {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/reload/`, {
+        method: 'POST',
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to reload plugins', e);
+    }
+  }
+
+  static async importPlugin(file) {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const response = await request(`${host}/api/plugins/plugins/import/`, {
+        method: 'POST',
+        body: form,
+      });
+      return response;
+    } catch (e) {
+      // Show only the concise error message for plugin import
+      const msg = (e?.body && (e.body.error || e.body.detail)) || e?.message || 'Failed to import plugin';
+      notifications.show({ title: 'Import failed', message: msg, color: 'red' });
+      throw e;
+    }
+  }
+
+  static async deletePlugin(key) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/delete/`, {
+        method: 'DELETE',
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to delete plugin', e);
+    }
+  }
+
+  static async updatePluginSettings(key, settings) {
+    try {
+      const response = await request(
+        `${host}/api/plugins/plugins/${key}/settings/`,
+        {
+          method: 'POST',
+          body: { settings },
+        }
+      );
+      return response?.settings || {};
+    } catch (e) {
+      errorNotification('Failed to update plugin settings', e);
+    }
+  }
+
+  static async runPluginAction(key, action, params = {}) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/run/`, {
+        method: 'POST',
+        body: { action, params },
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to run plugin action', e);
+    }
+  }
+
+  static async setPluginEnabled(key, enabled) {
+    try {
+      const response = await request(`${host}/api/plugins/plugins/${key}/enabled/`, {
+        method: 'POST',
+        body: { enabled },
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to update plugin enabled state', e);
+    }
+  }
+
   static async checkSetting(values) {
     const { id, ...payload } = values;
 
@@ -1218,6 +1355,19 @@ export default class API {
     }
   }
 
+  static async createSetting(values) {
+    try {
+      const response = await request(`${host}/api/core/settings/`, {
+        method: 'POST',
+        body: values,
+      });
+      useSettingsStore.getState().updateSetting(response);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to create setting', e);
+    }
+  }
+
   static async getChannelStats(uuid = null) {
     try {
       const response = await request(`${host}/proxy/ts/status`);
@@ -1225,6 +1375,16 @@ export default class API {
       return response;
     } catch (e) {
       errorNotification('Failed to retrieve channel stats', e);
+    }
+  }
+
+  static async getVODStats() {
+    try {
+      const response = await request(`${host}/proxy/vod/stats/`);
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve VOD stats', e);
     }
   }
 
@@ -1271,6 +1431,16 @@ export default class API {
     }
   }
 
+  static async fetchActiveChannelStats() {
+    try {
+      const response = await request(`${host}/proxy/ts/status`);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to fetch active channel stats', e);
+      throw e;
+    }
+  }
+
   static async getLogos(params = {}) {
     try {
       const queryParams = new URLSearchParams(params);
@@ -1284,20 +1454,63 @@ export default class API {
     }
   }
 
+  static async getLogosByIds(logoIds) {
+    try {
+      if (!logoIds || logoIds.length === 0) return [];
+
+      const params = new URLSearchParams();
+      logoIds.forEach(id => params.append('ids', id));
+      // Disable pagination for ID-based queries to get all matching logos
+      params.append('no_pagination', 'true');
+
+      const response = await request(
+        `${host}/api/channels/logos/?${params.toString()}`
+      );
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve logos by IDs', e);
+      return [];
+    }
+  }
+
   static async fetchLogos() {
     try {
       const response = await this.getLogos();
-      useChannelsStore.getState().setLogos(response);
+      useLogosStore.getState().setLogos(response);
       return response;
     } catch (e) {
       errorNotification('Failed to fetch logos', e);
     }
   }
 
-  static async uploadLogo(file) {
+  static async fetchUsedLogos() {
+    try {
+      const response = await useLogosStore.getState().fetchUsedLogos();
+      return response;
+    } catch (e) {
+      errorNotification('Failed to fetch used logos', e);
+    }
+  }
+
+  static async fetchLogosByIds(logoIds) {
+    try {
+      const response = await useLogosStore.getState().fetchLogosByIds(logoIds);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to fetch logos by IDs', e);
+    }
+  }
+
+  static async uploadLogo(file, name = null) {
     try {
       const formData = new FormData();
       formData.append('file', file);
+
+      // Add custom name if provided
+      if (name && name.trim()) {
+        formData.append('name', name.trim());
+      }
 
       // Add timeout handling for file uploads
       const controller = new AbortController();
@@ -1331,7 +1544,7 @@ export default class API {
       }
 
       const result = await response.json();
-      useChannelsStore.getState().addLogo(result);
+      useLogosStore.getState().addLogo(result);
       return result;
     } catch (e) {
       if (e.name === 'AbortError') {
@@ -1359,7 +1572,7 @@ export default class API {
         body: formData,
       });
 
-      useChannelsStore.getState().addLogo(response);
+      useLogosStore.getState().addLogo(response);
 
       return response;
     } catch (e) {
@@ -1374,7 +1587,7 @@ export default class API {
         body: values, // This will be converted to JSON in the request function
       });
 
-      useChannelsStore.getState().updateLogo(response);
+      useLogosStore.getState().updateLogo(response);
 
       return response;
     } catch (e) {
@@ -1394,7 +1607,7 @@ export default class API {
         method: 'DELETE',
       });
 
-      useChannelsStore.getState().removeLogo(id);
+      useLogosStore.getState().removeLogo(id);
 
       return true;
     } catch (e) {
@@ -1416,7 +1629,7 @@ export default class API {
 
       // Remove multiple logos from store
       ids.forEach((id) => {
-        useChannelsStore.getState().removeLogo(id);
+        useLogosStore.getState().removeLogo(id);
       });
 
       return true;
@@ -1569,13 +1782,99 @@ export default class API {
 
   static async deleteRecording(id) {
     try {
-      await request(`${host}/api/channels/recordings/${id}/`, {
-        method: 'DELETE',
-      });
-
-      useChannelsStore.getState().fetchRecordings();
+      await request(`${host}/api/channels/recordings/${id}/`, { method: 'DELETE' });
+      // Optimistically remove locally for instant UI update
+      try { useChannelsStore.getState().removeRecording(id); } catch {}
     } catch (e) {
       errorNotification(`Failed to delete recording ${id}`, e);
+    }
+  }
+
+  static async runComskip(recordingId) {
+    try {
+      const resp = await request(`${host}/api/channels/recordings/${recordingId}/comskip/`, {
+        method: 'POST',
+      });
+      // Refresh recordings list to reflect comskip status when done later
+      // This endpoint just queues the task; the websocket/refresh will update eventually
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to run comskip', e);
+      throw e;
+    }
+  }
+
+  // DVR Series Rules
+  static async listSeriesRules() {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/`);
+      return resp?.rules || [];
+    } catch (e) {
+      errorNotification('Failed to load series rules', e);
+      return [];
+    }
+  }
+
+  static async createSeriesRule(values) {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/`, {
+        method: 'POST',
+        body: values,
+      });
+      notifications.show({ title: 'Series rule saved' });
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to save series rule', e);
+      throw e;
+    }
+  }
+
+  static async deleteSeriesRule(tvgId) {
+    try {
+      await request(`${host}/api/channels/series-rules/${tvgId}/`, { method: 'DELETE' });
+      notifications.show({ title: 'Series rule removed' });
+    } catch (e) {
+      errorNotification('Failed to remove series rule', e);
+      throw e;
+    }
+  }
+
+  static async deleteAllUpcomingRecordings() {
+    try {
+      const resp = await request(`${host}/api/channels/recordings/bulk-delete-upcoming/`, {
+        method: 'POST',
+      });
+      notifications.show({ title: `Removed ${resp.removed || 0} upcoming` });
+      useChannelsStore.getState().fetchRecordings();
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to delete upcoming recordings', e);
+      throw e;
+    }
+  }
+
+  static async evaluateSeriesRules(tvgId = null) {
+    try {
+      await request(`${host}/api/channels/series-rules/evaluate/`, {
+        method: 'POST',
+        body: tvgId ? { tvg_id: tvgId } : {},
+      });
+    } catch (e) {
+      errorNotification('Failed to evaluate series rules', e);
+    }
+  }
+
+  static async bulkRemoveSeriesRecordings({ tvg_id, title = null, scope = 'title' }) {
+    try {
+      const resp = await request(`${host}/api/channels/series-rules/bulk-remove/`, {
+        method: 'POST',
+        body: { tvg_id, title, scope },
+      });
+      notifications.show({ title: `Removed ${resp.removed || 0} scheduled` });
+      return resp;
+    } catch (e) {
+      errorNotification('Failed to bulk-remove scheduled recordings', e);
+      throw e;
     }
   }
 
@@ -1733,6 +2032,107 @@ export default class API {
       return response.results || response;
     } catch (e) {
       errorNotification('Failed to retrieve streams by IDs', e);
+    }
+  }
+
+  // VOD Methods
+  static async getMovies(params = new URLSearchParams()) {
+    try {
+      const response = await request(
+        `${host}/api/vod/movies/?${params.toString()}`
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve movies', e);
+    }
+  }
+
+  static async getSeries(params = new URLSearchParams()) {
+    try {
+      const response = await request(
+        `${host}/api/vod/series/?${params.toString()}`
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve series', e);
+    }
+  }
+
+  static async getMovieDetails(movieId) {
+    try {
+      const response = await request(`${host}/api/vod/movies/${movieId}/`);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve movie details', e);
+    }
+  }
+
+  static async getMovieProviderInfo(movieId) {
+    try {
+      const response = await request(
+        `${host}/api/vod/movies/${movieId}/provider-info/`
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve movie provider info', e);
+    }
+  }
+
+  static async getMovieProviders(movieId) {
+    try {
+      const response = await request(
+        `${host}/api/vod/movies/${movieId}/providers/`
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve movie providers', e);
+    }
+  }
+
+  static async getSeriesProviders(seriesId) {
+    try {
+      const response = await request(
+        `${host}/api/vod/series/${seriesId}/providers/`
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve series providers', e);
+    }
+  }
+
+  static async getVODCategories() {
+    try {
+      const response = await request(`${host}/api/vod/categories/`);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve VOD categories', e);
+    }
+  }
+
+  static async getSeriesInfo(seriesId) {
+    try {
+      // Call the provider-info endpoint that includes episodes
+      const response = await request(
+        `${host}/api/vod/series/${seriesId}/provider-info/?include_episodes=true`
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve series info', e);
+    }
+  }
+
+  static async updateVODPosition(vodUuid, clientId, position) {
+    try {
+      const response = await request(
+        `${host}/proxy/vod/stream/${vodUuid}/position/`,
+        {
+          method: 'POST',
+          body: { client_id: clientId, position },
+        }
+      );
+      return response;
+    } catch (e) {
+      errorNotification('Failed to update playback position', e);
     }
   }
 }

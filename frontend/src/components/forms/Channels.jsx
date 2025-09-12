@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import useChannelsStore from '../../store/channels';
 import API from '../../api';
 import useStreamProfilesStore from '../../store/streamProfiles';
 import useStreamsStore from '../../store/streams';
+import { useChannelLogoSelection } from '../../hooks/useSmartLogos';
+import LazyLogo from '../LazyLogo';
 import ChannelGroupForm from './ChannelGroup';
 import usePlaylistsStore from '../../store/playlists';
 import logo from '../../images/logo.png';
@@ -45,8 +47,7 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
   const groupListRef = useRef(null);
 
   const channelGroups = useChannelsStore((s) => s.channelGroups);
-  const logos = useChannelsStore((s) => s.logos);
-  const fetchLogos = useChannelsStore((s) => s.fetchLogos);
+  const { logos, ensureLogosLoaded } = useChannelLogoSelection();
   const streams = useStreamsStore((state) => state.streams);
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
   const playlists = usePlaylistsStore((s) => s.playlists);
@@ -62,7 +63,6 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
   const [selectedEPG, setSelectedEPG] = useState('');
   const [tvgFilter, setTvgFilter] = useState('');
   const [logoFilter, setLogoFilter] = useState('');
-  const [logoOptions, setLogoOptions] = useState([]);
 
   const [groupPopoverOpened, setGroupPopoverOpened] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
@@ -97,7 +97,7 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
 
       try {
         const retval = await API.uploadLogo(file);
-        await fetchLogos();
+        // Note: API.uploadLogo already adds the logo to the store, no need to fetch
         setLogoPreview(retval.cache_url);
         formik.setFieldValue('logo_id', retval.id);
       } catch (error) {
@@ -189,10 +189,10 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
 
       formik.resetForm();
       API.requeryChannels();
-      
+
       // Refresh channel profiles to update the membership information
       useChannelsStore.getState().fetchChannelProfiles();
-      
+
       setSubmitting(false);
       setTvgFilter('');
       setLogoFilter('');
@@ -231,9 +231,10 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
     }
   }, [channel, tvgsById, channelGroups]);
 
-  useEffect(() => {
-    setLogoOptions([{ id: '0', name: 'Default' }].concat(Object.values(logos)));
-  }, [logos]);
+  // Memoize logo options to prevent infinite re-renders during background loading
+  const logoOptions = useMemo(() => {
+    return [{ id: '0', name: 'Default' }].concat(Object.values(logos));
+  }, [logos]); // Only depend on logos object
 
   const renderLogoOption = ({ option, checked }) => {
     return (
@@ -448,7 +449,12 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
             <Group justify="space-between">
               <Popover
                 opened={logoPopoverOpened}
-                onChange={setLogoPopoverOpened}
+                onChange={(opened) => {
+                  setLogoPopoverOpened(opened);
+                  if (opened) {
+                    ensureLogosLoaded();
+                  }
+                }}
                 // position="bottom-start"
                 withArrow
               >
@@ -507,13 +513,10 @@ const ChannelsForm = ({ channel = null, isOpen, onClose }) => {
                 </Popover.Dropdown>
               </Popover>
 
-              <img
-                src={
-                  logos[formik.values.logo_id]
-                    ? logos[formik.values.logo_id].cache_url
-                    : logo
-                }
-                height="40"
+              <LazyLogo
+                logoId={formik.values.logo_id}
+                alt="channel logo"
+                style={{ height: 40 }}
               />
             </Group>
 

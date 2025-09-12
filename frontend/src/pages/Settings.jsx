@@ -59,6 +59,8 @@ const SettingsPage = () => {
 
   // UI / local storage settings
   const [tableSize, setTableSize] = useLocalStorage('table-size', 'default');
+  const [timeFormat, setTimeFormat] = useLocalStorage('time-format', '12h');
+  const [dateFormat, setDateFormat] = useLocalStorage('date-format', 'mdy');
 
   const regionChoices = REGION_CHOICES;
 
@@ -70,6 +72,13 @@ const SettingsPage = () => {
       'preferred-region': '',
       'auto-import-mapped-files': true,
       'm3u-hash-key': [],
+      'dvr-tv-template': '',
+      'dvr-movie-template': '',
+      'dvr-tv-fallback-template': '',
+      'dvr-movie-fallback-template': '',
+      'dvr-comskip-enabled': false,
+      'dvr-pre-offset-minutes': 0,
+      'dvr-post-offset-minutes': 0,
     },
 
     validate: {
@@ -129,6 +138,11 @@ const SettingsPage = () => {
             case 'm3u-hash-key':
               val = value.value.split(',');
               break;
+            case 'dvr-pre-offset-minutes':
+            case 'dvr-post-offset-minutes':
+              val = Number.parseInt(value.value || '0', 10);
+              if (Number.isNaN(val)) val = 0;
+              break;
             default:
               val = value.value;
               break;
@@ -169,8 +183,13 @@ const SettingsPage = () => {
     let m3uHashKeyChanged = false;
 
     for (const settingKey in values) {
-      // If the user changed the setting's value from what's in the DB:
-      if (String(values[settingKey]) !== String(settings[settingKey].value)) {
+      // Only compare against existing value if the setting exists
+      const existing = settings[settingKey];
+      if (!existing) {
+        // Create new setting on save
+        changedSettings[settingKey] = `${values[settingKey]}`;
+      } else if (String(values[settingKey]) !== String(existing.value)) {
+        // If the user changed the setting's value from what's in the DB:
         changedSettings[settingKey] = `${values[settingKey]}`;
 
         // Check if M3U hash key was changed
@@ -187,12 +206,21 @@ const SettingsPage = () => {
       return;
     }
 
-    // Update each changed setting in the backend
+    // Update each changed setting in the backend (create if missing)
     for (const updatedKey in changedSettings) {
-      await API.updateSetting({
-        ...settings[updatedKey],
-        value: changedSettings[updatedKey],
-      });
+      const existing = settings[updatedKey];
+      if (existing && existing.id) {
+        await API.updateSetting({
+          ...existing,
+          value: changedSettings[updatedKey],
+        });
+      } else {
+        await API.createSetting({
+          key: updatedKey,
+          name: updatedKey.replace(/-/g, ' '),
+          value: changedSettings[updatedKey],
+        });
+      }
     }
   };
 
@@ -264,6 +292,12 @@ const SettingsPage = () => {
     switch (name) {
       case 'table-size':
         setTableSize(value);
+        break;
+      case 'time-format':
+        setTimeFormat(value);
+        break;
+      case 'date-format':
+        setDateFormat(value);
         break;
     }
   };
@@ -360,11 +394,165 @@ const SettingsPage = () => {
                   },
                 ]}
               />
+              <Select
+                label="Time format"
+                value={timeFormat}
+                onChange={(val) => onUISettingsChange('time-format', val)}
+                data={[
+                  {
+                    value: '12h',
+                    label: '12h hour time',
+                  },
+                  {
+                    value: '24h',
+                    label: '24 hour time',
+                  },
+                ]}
+              />
+              <Select
+                label="Date format"
+                value={dateFormat}
+                onChange={(val) => onUISettingsChange('date-format', val)}
+                data={[
+                  {
+                    value: 'mdy',
+                    label: 'MM/DD/YYYY',
+                  },
+                  {
+                    value: 'dmy',
+                    label: 'DD/MM/YYYY',
+                  },
+                ]}
+              />
             </Accordion.Panel>
           </Accordion.Item>
 
           {authUser.user_level == USER_LEVELS.ADMIN && (
             <>
+              <Accordion.Item value="dvr-settings">
+                <Accordion.Control>DVR</Accordion.Control>
+                <Accordion.Panel>
+                  <form onSubmit={form.onSubmit(onSubmit)}>
+                    <Stack gap="sm">
+                      <Switch
+                        label="Enable Comskip (remove commercials after recording)"
+                        {...form.getInputProps('dvr-comskip-enabled', {
+                          type: 'checkbox',
+                        })}
+                        key={form.key('dvr-comskip-enabled')}
+                        id={
+                          settings['dvr-comskip-enabled']?.id ||
+                          'dvr-comskip-enabled'
+                        }
+                        name={
+                          settings['dvr-comskip-enabled']?.key ||
+                          'dvr-comskip-enabled'
+                        }
+                      />
+                      <NumberInput
+                        label="Start early (minutes)"
+                        description="Begin recording this many minutes before the scheduled start."
+                        min={0}
+                        step={1}
+                        {...form.getInputProps('dvr-pre-offset-minutes')}
+                        key={form.key('dvr-pre-offset-minutes')}
+                        id={
+                          settings['dvr-pre-offset-minutes']?.id ||
+                          'dvr-pre-offset-minutes'
+                        }
+                        name={
+                          settings['dvr-pre-offset-minutes']?.key ||
+                          'dvr-pre-offset-minutes'
+                        }
+                      />
+                      <NumberInput
+                        label="End late (minutes)"
+                        description="Continue recording this many minutes after the scheduled end."
+                        min={0}
+                        step={1}
+                        {...form.getInputProps('dvr-post-offset-minutes')}
+                        key={form.key('dvr-post-offset-minutes')}
+                        id={
+                          settings['dvr-post-offset-minutes']?.id ||
+                          'dvr-post-offset-minutes'
+                        }
+                        name={
+                          settings['dvr-post-offset-minutes']?.key ||
+                          'dvr-post-offset-minutes'
+                        }
+                      />
+                      <TextInput
+                        label="TV Path Template"
+                        description="Supports {show}, {season}, {episode}, {sub_title}, {channel}, {year}, {start}, {end}. Use format specifiers like {season:02d}. Relative paths are under your library dir."
+                        placeholder="Recordings/TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
+                        {...form.getInputProps('dvr-tv-template')}
+                        key={form.key('dvr-tv-template')}
+                        id={
+                          settings['dvr-tv-template']?.id || 'dvr-tv-template'
+                        }
+                        name={
+                          settings['dvr-tv-template']?.key || 'dvr-tv-template'
+                        }
+                      />
+                      <TextInput
+                        label="TV Fallback Template"
+                        description="Template used when an episode has no season/episode. Supports {show}, {start}, {end}, {channel}, {year}."
+                        placeholder="Recordings/TV_Shows/{show}/{start}.mkv"
+                        {...form.getInputProps('dvr-tv-fallback-template')}
+                        key={form.key('dvr-tv-fallback-template')}
+                        id={
+                          settings['dvr-tv-fallback-template']?.id ||
+                          'dvr-tv-fallback-template'
+                        }
+                        name={
+                          settings['dvr-tv-fallback-template']?.key ||
+                          'dvr-tv-fallback-template'
+                        }
+                      />
+                      <TextInput
+                        label="Movie Path Template"
+                        description="Supports {title}, {year}, {channel}, {start}, {end}. Relative paths are under your library dir."
+                        placeholder="Recordings/Movies/{title} ({year}).mkv"
+                        {...form.getInputProps('dvr-movie-template')}
+                        key={form.key('dvr-movie-template')}
+                        id={
+                          settings['dvr-movie-template']?.id ||
+                          'dvr-movie-template'
+                        }
+                        name={
+                          settings['dvr-movie-template']?.key ||
+                          'dvr-movie-template'
+                        }
+                      />
+                      <TextInput
+                        label="Movie Fallback Template"
+                        description="Template used when movie metadata is incomplete. Supports {start}, {end}, {channel}."
+                        placeholder="Recordings/Movies/{start}.mkv"
+                        {...form.getInputProps('dvr-movie-fallback-template')}
+                        key={form.key('dvr-movie-fallback-template')}
+                        id={
+                          settings['dvr-movie-fallback-template']?.id ||
+                          'dvr-movie-fallback-template'
+                        }
+                        name={
+                          settings['dvr-movie-fallback-template']?.key ||
+                          'dvr-movie-fallback-template'
+                        }
+                      />
+                      <Flex
+                        mih={50}
+                        gap="xs"
+                        justify="flex-end"
+                        align="flex-end"
+                      >
+                        <Button type="submit" variant="default">
+                          Save
+                        </Button>
+                      </Flex>
+                    </Stack>
+                  </form>
+                </Accordion.Panel>
+              </Accordion.Item>
               <Accordion.Item value="stream-settings">
                 <Accordion.Control>Stream Settings</Accordion.Control>
                 <Accordion.Panel>
@@ -390,7 +578,6 @@ const SettingsPage = () => {
                         label: option.name,
                       }))}
                     />
-
                     <Select
                       searchable
                       {...form.getInputProps('default-stream-profile')}
@@ -417,16 +604,13 @@ const SettingsPage = () => {
                       {...form.getInputProps('preferred-region')}
                       key={form.key('preferred-region')}
                       id={
-                        settings['preferred-region']?.id ||
-                        'preferred-region'
+                        settings['preferred-region']?.id || 'preferred-region'
                       }
                       name={
-                        settings['preferred-region']?.key ||
-                        'preferred-region'
+                        settings['preferred-region']?.key || 'preferred-region'
                       }
                       label={
-                        settings['preferred-region']?.name ||
-                        'Preferred Region'
+                        settings['preferred-region']?.name || 'Preferred Region'
                       }
                       data={regionChoices.map((r) => ({
                         label: r.label,
@@ -434,10 +618,7 @@ const SettingsPage = () => {
                       }))}
                     />
 
-                    <Group
-                      justify="space-between"
-                      style={{ paddingTop: 5 }}
-                    >
+                    <Group justify="space-between" style={{ paddingTop: 5 }}>
                       <Text size="sm" fw={500}>
                         Auto-Import Mapped Files
                       </Text>
@@ -534,9 +715,7 @@ const SettingsPage = () => {
                 </Accordion.Control>
                 <Accordion.Panel>
                   <form
-                    onSubmit={networkAccessForm.onSubmit(
-                      onNetworkAccessSubmit
-                    )}
+                    onSubmit={networkAccessForm.onSubmit(onNetworkAccessSubmit)}
                   >
                     <Stack gap="sm">
                       {networkAccessSaved && (
@@ -591,9 +770,7 @@ const SettingsPage = () => {
                 </Accordion.Control>
                 <Accordion.Panel>
                   <form
-                    onSubmit={proxySettingsForm.onSubmit(
-                      onProxySettingsSubmit
-                    )}
+                    onSubmit={proxySettingsForm.onSubmit(onProxySettingsSubmit)}
                   >
                     <Stack gap="sm">
                       {proxySettingsSaved && (
@@ -610,7 +787,7 @@ const SettingsPage = () => {
                             'buffering_timeout',
                             'redis_chunk_ttl',
                             'channel_shutdown_delay',
-                            'channel_init_grace_period'
+                            'channel_init_grace_period',
                           ].includes(key);
 
                           const isFloatField = key === 'buffering_speed';
@@ -623,9 +800,15 @@ const SettingsPage = () => {
                                 {...proxySettingsForm.getInputProps(key)}
                                 description={config.description || null}
                                 min={0}
-                                max={key === 'buffering_timeout' ? 300 :
-                                  key === 'redis_chunk_ttl' ? 3600 :
-                                    key === 'channel_shutdown_delay' ? 300 : 60}
+                                max={
+                                  key === 'buffering_timeout'
+                                    ? 300
+                                    : key === 'redis_chunk_ttl'
+                                      ? 3600
+                                      : key === 'channel_shutdown_delay'
+                                        ? 300
+                                        : 60
+                                }
                               />
                             );
                           } else if (isFloatField) {
@@ -691,7 +874,11 @@ const SettingsPage = () => {
           setRehashDialogType(null);
         }}
         onConfirm={handleRehashConfirm}
-        title={rehashDialogType === 'save' ? 'Save Settings and Rehash Streams' : 'Confirm Stream Rehash'}
+        title={
+          rehashDialogType === 'save'
+            ? 'Save Settings and Rehash Streams'
+            : 'Confirm Stream Rehash'
+        }
         message={
           <div style={{ whiteSpace: 'pre-line' }}>
             {`Are you sure you want to rehash all streams?
@@ -703,7 +890,9 @@ M3U refreshes will be blocked until this process finishes.
 Please ensure you have time to let this complete before proceeding.`}
           </div>
         }
-        confirmLabel={rehashDialogType === 'save' ? 'Save and Rehash' : 'Start Rehash'}
+        confirmLabel={
+          rehashDialogType === 'save' ? 'Save and Rehash' : 'Start Rehash'
+        }
         cancelLabel="Cancel"
         actionKey="rehash-streams"
         onSuppressChange={suppressWarning}
