@@ -484,7 +484,7 @@ const SettingsPage = () => {
                       <TextInput
                         label="TV Path Template"
                         description="Supports {show}, {season}, {episode}, {sub_title}, {channel}, {year}, {start}, {end}. Use format specifiers like {season:02d}. Relative paths are under your library dir."
-                        placeholder="Recordings/TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
+                        placeholder="TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
                         {...form.getInputProps('dvr-tv-template')}
                         key={form.key('dvr-tv-template')}
                         id={
@@ -497,7 +497,7 @@ const SettingsPage = () => {
                       <TextInput
                         label="TV Fallback Template"
                         description="Template used when an episode has no season/episode. Supports {show}, {start}, {end}, {channel}, {year}."
-                        placeholder="Recordings/TV_Shows/{show}/{start}.mkv"
+                        placeholder="TV_Shows/{show}/{start}.mkv"
                         {...form.getInputProps('dvr-tv-fallback-template')}
                         key={form.key('dvr-tv-fallback-template')}
                         id={
@@ -512,7 +512,7 @@ const SettingsPage = () => {
                       <TextInput
                         label="Movie Path Template"
                         description="Supports {title}, {year}, {channel}, {start}, {end}. Relative paths are under your library dir."
-                        placeholder="Recordings/Movies/{title} ({year}).mkv"
+                        placeholder="Movies/{title} ({year}).mkv"
                         {...form.getInputProps('dvr-movie-template')}
                         key={form.key('dvr-movie-template')}
                         id={
@@ -527,7 +527,7 @@ const SettingsPage = () => {
                       <TextInput
                         label="Movie Fallback Template"
                         description="Template used when movie metadata is incomplete. Supports {start}, {end}, {channel}."
-                        placeholder="Recordings/Movies/{start}.mkv"
+                        placeholder="Movies/{start}.mkv"
                         {...form.getInputProps('dvr-movie-fallback-template')}
                         key={form.key('dvr-movie-fallback-template')}
                         id={

@@ -255,7 +255,7 @@ class CoreSettings(models.Model):
             return cls.objects.get(key=DVR_TV_FALLBACK_TEMPLATE_KEY).value
         except cls.DoesNotExist:
             # default requested by user
-            return "Recordings/TV_Shows/{show}/{start}.mkv"
+            return "TV_Shows/{show}/{start}.mkv"
 
     @classmethod
     def get_dvr_movie_fallback_template(cls):
@@ -263,7 +263,7 @@ class CoreSettings(models.Model):
         try:
             return cls.objects.get(key=DVR_MOVIE_FALLBACK_TEMPLATE_KEY).value
         except cls.DoesNotExist:
-            return "Recordings/Movies/{start}.mkv"
+            return "Movies/{start}.mkv"
 
     @classmethod
     def get_dvr_comskip_enabled(cls):

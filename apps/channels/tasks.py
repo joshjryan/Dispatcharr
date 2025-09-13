@@ -578,8 +578,8 @@ def _build_output_paths(channel, program, start_time, end_time):
     Build (final_path, temp_ts_path, final_filename) using DVR templates.
     """
     from core.models import CoreSettings
-    # Root for DVR recordings: fixed to /app/data inside the container
-    library_root = '/app/data'
+    # Root for DVR recordings: fixed to /data/recordings inside the container
+    library_root = '/data/recordings'
 
     is_movie, season, episode, year, sub_title = _parse_epg_tv_movie_info(program)
     show = _safe_name(program.get('title') if isinstance(program, dict) else channel.name)
@@ -632,7 +632,7 @@ def _build_output_paths(channel, program, start_time, end_time):
     if not is_movie and not rel_path:
         rel_path = f"TV_Shows/{show}/S{season:02d}E{episode:02d}.mkv"
     # Keep any leading folder like 'Recordings/' from the template so users can
-    # structure their library under /app/data as desired.
+    # structure their library under /data as desired.
     if not rel_path.lower().endswith('.mkv'):
         rel_path = f"{rel_path}.mkv"
 
