@@ -178,7 +178,7 @@ const StreamRowActions = ({
   );
 };
 
-const StreamsTable = ({}) => {
+const StreamsTable = () => {
   const theme = useMantineTheme();
 
   /**
