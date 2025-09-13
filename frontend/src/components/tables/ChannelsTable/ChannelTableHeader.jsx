@@ -259,7 +259,7 @@ const ChannelTableHeader = ({
             leftSection={<SquarePlus size={18} />}
             variant="light"
             size="xs"
-            onClick={() => editChannel()}
+            onClick={() => editChannel(null, { forceAdd: true })}
             disabled={authUser.user_level != USER_LEVELS.ADMIN}
             p={5}
             color={theme.tailwind.green[5]}

@@ -433,7 +433,13 @@ const ChannelsTable = ({}) => {
     }));
   };
 
-  const editChannel = async (ch = null) => {
+  const editChannel = async (ch = null, opts = {}) => {
+    // If forceAdd is set, always open a blank form
+    if (opts.forceAdd) {
+      setChannel(null);
+      setChannelModalOpen(true);
+      return;
+    }
     // Use table's selected state instead of store state to avoid stale selections
     const currentSelection = table ? table.selectedTableIds : [];
     console.log('editChannel called with:', {
