@@ -1,7 +1,7 @@
 #!/bin/bash
 
 mkdir -p /data/logos
-mkdir -p /data/recordings
+mkdir -p /data/Recordings
 mkdir -p /data/uploads/m3us
 mkdir -p /data/uploads/epgs
 mkdir -p /data/m3us
