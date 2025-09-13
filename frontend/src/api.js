@@ -323,14 +323,27 @@ export default class API {
   static async addChannel(channel) {
     try {
       let body = null;
+      // Prepare a copy to safely mutate
+      const channelData = { ...channel };
+
+      // Remove channel_number if empty, null, or not a valid number
+      if (
+        channelData.channel_number === '' ||
+        channelData.channel_number === null ||
+        channelData.channel_number === undefined ||
+        (typeof channelData.channel_number === 'string' && channelData.channel_number.trim() === '')
+      ) {
+        delete channelData.channel_number;
+      }
+
       if (channel.logo_file) {
         // Must send FormData for file upload
         body = new FormData();
-        for (const prop in channel) {
-          body.append(prop, channel[prop]);
+        for (const prop in channelData) {
+          body.append(prop, channelData[prop]);
         }
       } else {
-        body = { ...channel };
+        body = { ...channelData };
         delete body.logo_file;
       }
 
