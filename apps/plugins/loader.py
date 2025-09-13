@@ -26,7 +26,7 @@ class LoadedPlugin:
 
 
 class PluginManager:
-    """Singleton manager that discovers and runs plugins from /app/data/plugins."""
+    """Singleton manager that discovers and runs plugins from /data/plugins."""
 
     _instance: Optional["PluginManager"] = None
 
@@ -37,7 +37,7 @@ class PluginManager:
         return cls._instance
 
     def __init__(self) -> None:
-        self.plugins_dir = os.environ.get("DISPATCHARR_PLUGINS_DIR", "/app/data/plugins")
+        self.plugins_dir = os.environ.get("DISPATCHARR_PLUGINS_DIR", "/data/plugins")
         self._registry: Dict[str, LoadedPlugin] = {}
 
         # Ensure plugins directory exists

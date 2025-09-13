@@ -1857,7 +1857,7 @@ class RecordingViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
-        library_dir = '/app/data'
+        library_dir = '/data'
         allowed_roots = ['/data/', library_dir.rstrip('/') + '/']
 
         def _safe_remove(path: str):
