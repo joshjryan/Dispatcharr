@@ -752,6 +752,7 @@ const ChannelsTable = ({}) => {
         accessorKey: 'name',
         size: columnSizing.name || 200,
         minSize: 100,
+        grow: true,
         cell: ({ getValue }) => (
           <Box
             style={{

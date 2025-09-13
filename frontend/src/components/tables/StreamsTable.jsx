@@ -269,6 +269,7 @@ const StreamsTable = () => {
       {
         header: 'Name',
         accessorKey: 'name',
+        grow: true,
         size: columnSizing.name || 200,
         cell: ({ getValue }) => (
           <Box
