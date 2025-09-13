@@ -242,6 +242,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
       formik.resetForm();
       setTvgFilter('');
       setLogoFilter('');
+      setChannelStreams([]); // Ensure streams are cleared when adding a new channel
     }
   }, [channel, tvgsById, channelGroups]);
 
