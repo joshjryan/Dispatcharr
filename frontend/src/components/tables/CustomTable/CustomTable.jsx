@@ -30,9 +30,11 @@ const CustomTable = ({ table }) => {
       className={`divTable table-striped table-size-${tableSize}`}
       style={{
         width: '100%',
+        maxWidth: '100%',
         minWidth: `${minTableWidth}px`,
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
       <CustomTableHeader
