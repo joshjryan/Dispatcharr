@@ -549,6 +549,48 @@ export const WebsocketProvider = ({ children }) => {
               });
               break;
 
+            case 'channels_created':
+              // General notification for channel creation
+              notifications.show({
+                title: 'Channels Created',
+                message: `Successfully created ${parsedEvent.data.count || 'multiple'} channels`,
+                color: 'green',
+                autoClose: 4000,
+              });
+
+              // Refresh the channels table to show new channels
+              try {
+                await useChannelsStore.getState().fetchChannels();
+                console.log('Channels refreshed after bulk creation');
+              } catch (error) {
+                console.error(
+                  'Error refreshing channels after creation:',
+                  error
+                );
+              }
+
+              break;
+
+            case 'bulk_channel_creation_progress':
+              // Handle completion status globally to refresh channels
+              if (parsedEvent.data.status === 'completed') {
+                try {
+                  await API.requeryChannels();
+                  console.log(
+                    'Channels refreshed after bulk creation completion'
+                  );
+                } catch (error) {
+                  console.error(
+                    'Error refreshing channels after bulk completion:',
+                    error
+                  );
+                }
+              }
+
+              // Pass through to individual components for progress updates
+              setVal(parsedEvent);
+              break;
+
             default:
               console.error(
                 `Unknown websocket event type: ${parsedEvent.data?.type}`

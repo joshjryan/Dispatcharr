@@ -570,6 +570,31 @@ export default class API {
     }
   }
 
+  static async createChannelsFromStreamsAsync(streamIds, channelProfileIds = null) {
+    try {
+      const requestBody = {
+        stream_ids: streamIds,
+      };
+
+      if (channelProfileIds !== null) {
+        requestBody.channel_profile_ids = channelProfileIds;
+      }
+
+      const response = await request(
+        `${host}/api/channels/channels/from-stream/bulk-async/`,
+        {
+          method: 'POST',
+          body: requestBody,
+        }
+      );
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to start bulk channel creation task', e);
+      throw e;
+    }
+  }
+
   static async getStreams(ids = null) {
     try {
       const params = new URLSearchParams();

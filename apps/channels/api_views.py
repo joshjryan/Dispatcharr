@@ -202,7 +202,7 @@ class StreamViewSet(viewsets.ModelViewSet):
                 {"error": "ids must be a list of integers"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         streams = Stream.objects.filter(id__in=ids)
         serializer = self.get_serializer(streams, many=True)
         return Response(serializer.data)
@@ -957,6 +957,65 @@ class ChannelViewSet(viewsets.ModelViewSet):
             response_data["errors"] = errors
 
         return Response(response_data, status=status.HTTP_201_CREATED)
+
+    @swagger_auto_schema(
+        method="post",
+        operation_description=(
+            "Asynchronously bulk create channels from stream IDs. "
+            "Returns a task ID to track progress via WebSocket. "
+            "This is the recommended approach for large bulk operations."
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["stream_ids"],
+            properties={
+                "stream_ids": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(type=openapi.TYPE_INTEGER),
+                    description="List of stream IDs to create channels from"
+                ),
+                "channel_profile_ids": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(type=openapi.TYPE_INTEGER),
+                    description="(Optional) Channel profile ID(s) to add the channels to. If not provided, channels are added to all profiles."
+                ),
+            },
+        ),
+        responses={202: "Task started successfully"},
+    )
+    @action(detail=False, methods=["post"], url_path="from-stream/bulk-async")
+    def from_stream_bulk_async(self, request):
+        from .tasks import bulk_create_channels_from_streams
+
+        stream_ids = request.data.get("stream_ids", [])
+        channel_profile_ids = request.data.get("channel_profile_ids")
+
+        if not stream_ids:
+            return Response(
+                {"error": "stream_ids is required and cannot be empty"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(stream_ids, list):
+            return Response(
+                {"error": "stream_ids must be a list of integers"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Normalize channel_profile_ids to array if single ID provided
+        if channel_profile_ids is not None:
+            if not isinstance(channel_profile_ids, list):
+                channel_profile_ids = [channel_profile_ids]
+
+        # Start the async task
+        task = bulk_create_channels_from_streams.delay(stream_ids, channel_profile_ids)
+
+        return Response({
+            "task_id": task.id,
+            "message": f"Bulk channel creation task started for {len(stream_ids)} streams",
+            "stream_count": len(stream_ids),
+            "status": "started"
+        }, status=status.HTTP_202_ACCEPTED)
 
     # ─────────────────────────────────────────────────────────
     # 6) EPG Fuzzy Matching
