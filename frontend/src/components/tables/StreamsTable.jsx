@@ -39,11 +39,16 @@ import {
   UnstyledButton,
   LoadingOverlay,
   Skeleton,
+  Modal,
+  NumberInput,
+  Radio,
+  Checkbox,
 } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import useSettingsStore from '../../store/settings';
 import useVideoStore from '../../store/useVideoStore';
 import useChannelsTableStore from '../../store/channelsTable';
+import useWarningsStore from '../../store/warnings';
 import { CustomTable, useTable } from './CustomTable';
 import useLocalStorage from '../../hooks/useLocalStorage';
 
@@ -197,6 +202,13 @@ const StreamsTable = () => {
   const [sorting, setSorting] = useState([{ id: 'name', desc: '' }]);
   const [selectedStreamIds, setSelectedStreamIds] = useState([]);
 
+  // Channel numbering modal state
+  const [channelNumberingModalOpen, setChannelNumberingModalOpen] =
+    useState(false);
+  const [numberingMode, setNumberingMode] = useState('provider'); // 'provider', 'auto', or 'custom'
+  const [customStartNumber, setCustomStartNumber] = useState(1);
+  const [rememberChoice, setRememberChoice] = useState(false);
+
   // const [allRowsSelected, setAllRowsSelected] = useState(false);
 
   // Add local storage for page size
@@ -248,6 +260,10 @@ const StreamsTable = () => {
   const env_mode = useSettingsStore((s) => s.environment.env_mode);
   const showVideo = useVideoStore((s) => s.showVideo);
   const [tableSize, _] = useLocalStorage('table-size', 'default');
+
+  // Warnings store for "remember choice" functionality
+  const suppressWarning = useWarningsStore((s) => s.suppressWarning);
+  const isWarningSuppressed = useWarningsStore((s) => s.isWarningSuppressed);
 
   const handleSelectClick = (e) => {
     e.stopPropagation();
@@ -419,11 +435,35 @@ const StreamsTable = () => {
     fetchChannelGroups,
   ]);
 
-  // Bulk creation: create channels from selected streams in one API call
   // Bulk creation: create channels from selected streams asynchronously
   const createChannelsFromStreams = async () => {
     if (selectedStreamIds.length === 0) return;
 
+    // Check if user has suppressed the channel numbering dialog
+    const actionKey = 'channel-numbering-choice';
+    if (isWarningSuppressed(actionKey)) {
+      // Use the remembered settings or default to 'provider' mode
+      const savedMode =
+        localStorage.getItem('channel-numbering-mode') || 'provider';
+      const savedStartNumber =
+        localStorage.getItem('channel-numbering-start') || '1';
+
+      const startingChannelNumberValue =
+        savedMode === 'provider'
+          ? null
+          : savedMode === 'auto'
+            ? 0
+            : Number(savedStartNumber);
+
+      await executeChannelCreation(startingChannelNumberValue);
+    } else {
+      // Show the modal to let user choose
+      setChannelNumberingModalOpen(true);
+    }
+  };
+
+  // Separate function to actually execute the channel creation
+  const executeChannelCreation = async (startingChannelNumberValue) => {
     try {
       const selectedChannelProfileId =
         useChannelsStore.getState().selectedProfileId;
@@ -431,7 +471,8 @@ const StreamsTable = () => {
       // Use the async API for all bulk operations
       const response = await API.createChannelsFromStreamsAsync(
         selectedStreamIds,
-        selectedChannelProfileId !== '0' ? [selectedChannelProfileId] : null
+        selectedChannelProfileId !== '0' ? [selectedChannelProfileId] : null,
+        startingChannelNumberValue
       );
 
       console.log(
@@ -444,6 +485,32 @@ const StreamsTable = () => {
       console.error('Error starting bulk channel creation:', error);
       // Error notifications will be handled by WebSocket
     }
+  };
+
+  // Handle confirming the channel numbering modal
+  const handleChannelNumberingConfirm = async () => {
+    // Save the choice if user wants to remember it
+    if (rememberChoice) {
+      suppressWarning('channel-numbering-choice');
+      localStorage.setItem('channel-numbering-mode', numberingMode);
+      if (numberingMode === 'custom') {
+        localStorage.setItem(
+          'channel-numbering-start',
+          customStartNumber.toString()
+        );
+      }
+    }
+
+    // Convert mode to API value
+    const startingChannelNumberValue =
+      numberingMode === 'provider'
+        ? null
+        : numberingMode === 'auto'
+          ? 0
+          : Number(customStartNumber);
+
+    setChannelNumberingModalOpen(false);
+    await executeChannelCreation(startingChannelNumberValue);
   };
 
   const editStream = async (stream = null) => {
@@ -900,6 +967,76 @@ const StreamsTable = () => {
         isOpen={modalOpen}
         onClose={closeStreamForm}
       />
+
+      {/* Channel Numbering Modal */}
+      <Modal
+        opened={channelNumberingModalOpen}
+        onClose={() => setChannelNumberingModalOpen(false)}
+        title="Channel Numbering Options"
+        size="md"
+        centered
+      >
+        <Stack spacing="md">
+          <Text size="sm" c="dimmed">
+            Choose how to assign channel numbers to the{' '}
+            {selectedStreamIds.length} selected streams:
+          </Text>
+
+          <Radio.Group
+            value={numberingMode}
+            onChange={setNumberingMode}
+            label="Numbering Mode"
+          >
+            <Stack mt="xs" spacing="xs">
+              <Radio
+                value="provider"
+                label="Use Provider Numbers"
+                description="Use tvg-chno or channel-number from stream metadata, auto-assign for conflicts"
+              />
+              <Radio
+                value="auto"
+                label="Auto-Assign Sequential"
+                description="Start from the lowest available channel number and increment by 1"
+              />
+              <Radio
+                value="custom"
+                label="Start from Custom Number"
+                description="Start sequential numbering from a specific channel number"
+              />
+            </Stack>
+          </Radio.Group>
+
+          {numberingMode === 'custom' && (
+            <NumberInput
+              label="Starting Channel Number"
+              description="Channel numbers will be assigned starting from this number"
+              value={customStartNumber}
+              onChange={setCustomStartNumber}
+              min={1}
+              max={9999}
+              placeholder="Enter starting number..."
+            />
+          )}
+
+          <Checkbox
+            checked={rememberChoice}
+            onChange={(event) => setRememberChoice(event.currentTarget.checked)}
+            label="Remember this choice and don't ask again"
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="default"
+              onClick={() => setChannelNumberingModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleChannelNumberingConfirm}>
+              Create Channels
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   );
 };

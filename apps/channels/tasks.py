@@ -1604,13 +1604,13 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
     """
     Asynchronously create channels from a list of stream IDs.
     Provides progress updates via WebSocket.
-    
+
     Args:
         stream_ids: List of stream IDs to create channels from
         channel_profile_ids: Optional list of channel profile IDs to assign channels to
         starting_channel_number: Optional starting channel number behavior:
             - None: Use provider channel numbers, then auto-assign from 1
-            - 0: Start with lowest available number and increment by 1 
+            - 0: Start with lowest available number and increment by 1
             - Other number: Use as starting number for auto-assignment
     """
     from apps.channels.models import Stream, Channel, ChannelGroup, ChannelProfile, ChannelProfileMembership, Logo
@@ -1637,7 +1637,7 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
 
         # Gather current used numbers once
         used_numbers = set(Channel.objects.all().values_list("channel_number", flat=True))
-        
+
         # Initialize next_number based on starting_channel_number mode
         if starting_channel_number is None:
             # Mode 1: Use provider numbers when available, auto-assign when not
@@ -1688,7 +1688,7 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
 
                     # Determine channel number based on starting_channel_number mode
                     channel_number = None
-                    
+
                     if starting_channel_number is None:
                         # Mode 1: Use provider numbers when available
                         if "tvg-chno" in stream_custom_props:
@@ -1697,7 +1697,7 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
                             channel_number = float(stream_custom_props["channel-number"])
                         elif "num" in stream_custom_props:
                             channel_number = float(stream_custom_props["num"])
-                    
+
                     # For modes 2 and 3 (starting_channel_number == 0 or specific number),
                     # ignore provider numbers and use sequential assignment
 
