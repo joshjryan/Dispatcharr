@@ -608,30 +608,8 @@ export const WebsocketProvider = ({ children }) => {
                   loading: true,
                 });
               } else if (data.status === 'completed') {
-                // Update to completion state
-                notifications.update({
-                  id: 'bulk-channel-creation-progress',
-                  title: 'Bulk Channel Creation Complete',
-                  message: `Successfully created ${data.created_count || 'multiple'} channels${data.error_count > 0 ? ` (${data.error_count} errors)` : ''}`,
-                  color: 'green.5',
-                  autoClose: 8000, // Auto-close after completion
-                  withCloseButton: true, // Allow manual close
-                  loading: false, // Remove loading indicator
-                });
-
-                // Refresh channels
-                try {
-                  await API.requeryChannels();
-                  await useChannelsStore.getState().fetchChannels();
-                  console.log(
-                    'Channels refreshed after bulk creation completion'
-                  );
-                } catch (error) {
-                  console.error(
-                    'Error refreshing channels after bulk completion:',
-                    error
-                  );
-                }
+                // Hide the progress notification since channels_created will show success
+                notifications.hide('bulk-channel-creation-progress');
               } else if (data.status === 'failed') {
                 // Update to error state
                 notifications.update({
