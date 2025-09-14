@@ -588,40 +588,47 @@ class ChannelViewSet(viewsets.ModelViewSet):
         channel_group = stream.channel_group
 
         name = request.data.get("name")
+
+
         if name is None:
             name = stream.name
 
         # Check if client provided a channel_number; if not, auto-assign one.
         stream_custom_props = stream.custom_properties or {}
-
-        channel_number = None
-        if "tvg-chno" in stream_custom_props:
-            channel_number = float(stream_custom_props["tvg-chno"])
-        elif "channel-number" in stream_custom_props:
-            channel_number = float(stream_custom_props["channel-number"])
-        elif "num" in stream_custom_props:
-            channel_number = float(stream_custom_props["num"])
+        channel_number = request.data.get("channel_number")
 
         if channel_number is None:
-            provided_number = request.data.get("channel_number")
-            if provided_number is None:
-                channel_number = Channel.get_next_available_channel_number()
-            else:
-                try:
-                    channel_number = float(provided_number)
-                except ValueError:
-                    return Response(
-                        {"error": "channel_number must be an integer."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                # If the provided number is already used, return an error.
-                if Channel.objects.filter(channel_number=channel_number).exists():
-                    return Response(
-                        {
-                            "error": f"Channel number {channel_number} is already in use. Please choose a different number."
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+            # Channel number not provided by client, check stream properties or auto-assign
+            if "tvg-chno" in stream_custom_props:
+                channel_number = float(stream_custom_props["tvg-chno"])
+            elif "channel-number" in stream_custom_props:
+                channel_number = float(stream_custom_props["channel-number"])
+            elif "num" in stream_custom_props:
+                channel_number = float(stream_custom_props["num"])
+        elif channel_number == 0:
+            # Special case: 0 means ignore provider numbers and auto-assign
+            channel_number = None
+
+        if channel_number is None:
+            # Still None, auto-assign the next available channel number
+            channel_number = Channel.get_next_available_channel_number()
+
+
+        try:
+            channel_number = float(channel_number)
+        except ValueError:
+            return Response(
+                {"error": "channel_number must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # If the provided number is already used, return an error.
+        if Channel.objects.filter(channel_number=channel_number).exists():
+            return Response(
+                {
+                    "error": f"Channel number {channel_number} is already in use. Please choose a different number."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         # Get the tvc_guide_stationid from custom properties if it exists
         tvc_guide_stationid = None
         if "tvc-guide-stationid" in stream_custom_props:
