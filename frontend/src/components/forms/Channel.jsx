@@ -718,8 +718,6 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                         return `${epgSource.name} - ${tvgLabel}`;
                       } else if (tvgLabel) {
                         return tvgLabel;
-                      } else if (formik.values.name) {
-                        return formik.values.name;
                       } else {
                         return 'Dummy';
                       }
