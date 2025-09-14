@@ -560,6 +560,7 @@ export const WebsocketProvider = ({ children }) => {
 
               // Refresh the channels table to show new channels
               try {
+                await API.requeryChannels();
                 await useChannelsStore.getState().fetchChannels();
                 console.log('Channels refreshed after bulk creation');
               } catch (error) {
@@ -620,6 +621,7 @@ export const WebsocketProvider = ({ children }) => {
 
                 // Refresh channels
                 try {
+                  await API.requeryChannels();
                   await useChannelsStore.getState().fetchChannels();
                   console.log(
                     'Channels refreshed after bulk creation completion'
