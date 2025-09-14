@@ -816,9 +816,8 @@ const ChannelsTable = ({}) => {
             </Box>
           );
         },
-        size: columnSizing.epg || 120,
+        size: columnSizing.epg || 200,
         minSize: 80,
-        maxSize: 200,
       },
       {
         id: 'channel_group',
@@ -839,7 +838,6 @@ const ChannelsTable = ({}) => {
         ),
         size: columnSizing.channel_group || 175,
         minSize: 100,
-        maxSize: 300,
       },
       {
         id: 'logo',
