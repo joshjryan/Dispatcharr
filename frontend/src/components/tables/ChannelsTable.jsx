@@ -778,14 +778,15 @@ const ChannelsTable = ({}) => {
         cell: ({ getValue }) => {
           const epgDataId = getValue();
           const epgObj = epgDataId ? tvgsById[epgDataId] : null;
+          const tvgName = epgObj?.name;
+          const tvgId = epgObj?.tvg_id;
           const epgName =
             epgObj && epgObj.epg_source
               ? epgs[epgObj.epg_source]?.name || epgObj.epg_source
               : null;
-          const epgDataName = epgObj?.name;
-          const tvgId = epgObj?.tvg_id;
+
           const tooltip = epgObj
-            ? `${epgName ? `EPG Name: ${epgName}\n` : ''}${epgDataName ? `TVG Name: ${epgDataName}\n` : ''}${tvgId ? `TVG-ID: ${tvgId}` : ''}`.trim()
+            ? `${epgName ? `EPG Name: ${epgName}\n` : ''}${tvgName ? `TVG Name: ${tvgName}\n` : ''}${tvgId ? `TVG-ID: ${tvgId}` : ''}`.trim()
             : '';
           return (
             <Box
@@ -803,12 +804,14 @@ const ChannelsTable = ({}) => {
                   withArrow
                   position="top"
                 >
-                  <span>{epgName}</span>
+                  <span>
+                    {epgObj.epg_source} - {tvgId}
+                  </span>
                 </Tooltip>
               ) : epgObj ? (
                 <span>{epgObj.name}</span>
               ) : (
-                <span style={{ color: '#888' }}>Not linked</span>
+                <span style={{ color: '#888' }}>Not Assigned</span>
               )}
             </Box>
           );
@@ -901,6 +904,7 @@ const ChannelsTable = ({}) => {
             placeholder="EPG"
             variant="unstyled"
             data={epgOptions}
+            className="table-input-header"
             size="xs"
             searchable
             clearable
@@ -955,6 +959,7 @@ const ChannelsTable = ({}) => {
         return (
           <MultiSelect
             placeholder="Group"
+            className="table-input-header"
             variant="unstyled"
             data={groupOptions}
             size="xs"
