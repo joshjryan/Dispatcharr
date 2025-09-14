@@ -553,7 +553,7 @@ export const WebsocketProvider = ({ children }) => {
               // General notification for channel creation
               notifications.show({
                 title: 'Channels Created',
-                message: `Successfully created ${parsedEvent.data.count || 'multiple'} channels`,
+                message: `Successfully created ${parsedEvent.data.count || 'multiple'} channel(s)`,
                 color: 'green',
                 autoClose: 4000,
               });

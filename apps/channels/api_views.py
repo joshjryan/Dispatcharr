@@ -623,12 +623,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
             )
         # If the provided number is already used, return an error.
         if Channel.objects.filter(channel_number=channel_number).exists():
-            return Response(
-                {
-                    "error": f"Channel number {channel_number} is already in use. Please choose a different number."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            channel_number = Channel.get_next_available_channel_number(channel_number)
         # Get the tvc_guide_stationid from custom properties if it exists
         tvc_guide_stationid = None
         if "tvc-guide-stationid" in stream_custom_props:
