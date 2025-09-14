@@ -1597,3 +1597,303 @@ def prefetch_recording_artwork(recording_id):
     except Exception as e:
         logger.debug(f"prefetch_recording_artwork failed: {e}")
         return f"error: {e}"
+
+
+@shared_task(bind=True)
+def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None, starting_channel_number=None):
+    """
+    Asynchronously create channels from a list of stream IDs.
+    Provides progress updates via WebSocket.
+
+    Args:
+        stream_ids: List of stream IDs to create channels from
+        channel_profile_ids: Optional list of channel profile IDs to assign channels to
+        starting_channel_number: Optional starting channel number behavior:
+            - None: Use provider channel numbers, then auto-assign from 1
+            - 0: Start with lowest available number and increment by 1
+            - Other number: Use as starting number for auto-assignment
+    """
+    from apps.channels.models import Stream, Channel, ChannelGroup, ChannelProfile, ChannelProfileMembership, Logo
+    from apps.epg.models import EPGData
+    from django.db import transaction
+    from django.shortcuts import get_object_or_404
+    from core.utils import send_websocket_update
+
+    task_id = self.request.id
+    total_streams = len(stream_ids)
+    created_channels = []
+    errors = []
+
+    try:
+        # Send initial progress update
+        send_websocket_update('updates', 'update', {
+            'type': 'bulk_channel_creation_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_streams,
+            'status': 'starting',
+            'message': f'Starting bulk creation of {total_streams} channels...'
+        })
+
+        # Gather current used numbers once
+        used_numbers = set(Channel.objects.all().values_list("channel_number", flat=True))
+
+        # Initialize next_number based on starting_channel_number mode
+        if starting_channel_number is None:
+            # Mode 1: Use provider numbers when available, auto-assign when not
+            next_number = 1
+        elif starting_channel_number == 0:
+            # Mode 2: Start from lowest available number
+            next_number = 1
+        else:
+            # Mode 3: Start from specified number
+            next_number = starting_channel_number
+
+        def get_auto_number():
+            nonlocal next_number
+            while next_number in used_numbers:
+                next_number += 1
+            used_numbers.add(next_number)
+            return next_number
+
+        logos_to_create = []
+        channels_to_create = []
+        streams_map = []
+        logo_map = []
+        profile_map = []
+
+        # Process streams in batches to avoid memory issues
+        batch_size = 100
+        processed = 0
+
+        for i in range(0, total_streams, batch_size):
+            batch_stream_ids = stream_ids[i:i + batch_size]
+            batch_streams = Stream.objects.filter(id__in=batch_stream_ids)
+
+            # Send progress update
+            send_websocket_update('updates', 'update', {
+                'type': 'bulk_channel_creation_progress',
+                'task_id': task_id,
+                'progress': processed,
+                'total': total_streams,
+                'status': 'processing',
+                'message': f'Processing streams {processed + 1}-{min(processed + batch_size, total_streams)} of {total_streams}...'
+            })
+
+            for stream in batch_streams:
+                try:
+                    name = stream.name
+                    channel_group = stream.channel_group
+                    stream_custom_props = stream.custom_properties or {}
+
+                    # Determine channel number based on starting_channel_number mode
+                    channel_number = None
+
+                    if starting_channel_number is None:
+                        # Mode 1: Use provider numbers when available
+                        if "tvg-chno" in stream_custom_props:
+                            channel_number = float(stream_custom_props["tvg-chno"])
+                        elif "channel-number" in stream_custom_props:
+                            channel_number = float(stream_custom_props["channel-number"])
+                        elif "num" in stream_custom_props:
+                            channel_number = float(stream_custom_props["num"])
+
+                    # For modes 2 and 3 (starting_channel_number == 0 or specific number),
+                    # ignore provider numbers and use sequential assignment
+
+                    # Get TVC guide station ID
+                    tvc_guide_stationid = None
+                    if "tvc-guide-stationid" in stream_custom_props:
+                        tvc_guide_stationid = stream_custom_props["tvc-guide-stationid"]
+
+                    # Check if the determined/provider number is available
+                    if channel_number is not None and (
+                        channel_number in used_numbers
+                        or Channel.objects.filter(channel_number=channel_number).exists()
+                    ):
+                        # Provider number is taken, use auto-assignment
+                        channel_number = get_auto_number()
+                    elif channel_number is not None:
+                        # Provider number is available, use it
+                        used_numbers.add(channel_number)
+                    else:
+                        # No provider number or ignoring provider numbers, use auto-assignment
+                        channel_number = get_auto_number()
+
+                    channel_data = {
+                        "channel_number": channel_number,
+                        "name": name,
+                        "tvc_guide_stationid": tvc_guide_stationid,
+                        "tvg_id": stream.tvg_id,
+                    }
+
+                    # Only add channel_group_id if the stream has a channel group
+                    if channel_group:
+                        channel_data["channel_group_id"] = channel_group.id
+
+                    # Attempt to find existing EPGs with the same tvg-id
+                    epgs = EPGData.objects.filter(tvg_id=stream.tvg_id)
+                    if epgs:
+                        channel_data["epg_data_id"] = epgs.first().id
+
+                    channel = Channel(**channel_data)
+                    channels_to_create.append(channel)
+                    streams_map.append([stream.id])
+
+                    # Store profile IDs for this channel
+                    profile_map.append(channel_profile_ids)
+
+                    # Handle logo
+                    if stream.logo_url:
+                        logos_to_create.append(
+                            Logo(
+                                url=stream.logo_url,
+                                name=stream.name or stream.tvg_id,
+                            )
+                        )
+                        logo_map.append(stream.logo_url)
+                    else:
+                        logo_map.append(None)
+
+                    processed += 1
+
+                except Exception as e:
+                    errors.append({
+                        'stream_id': stream.id if 'stream' in locals() else 'unknown',
+                        'error': str(e)
+                    })
+                    processed += 1
+
+        # Create logos first
+        if logos_to_create:
+            send_websocket_update('updates', 'update', {
+                'type': 'bulk_channel_creation_progress',
+                'task_id': task_id,
+                'progress': processed,
+                'total': total_streams,
+                'status': 'creating_logos',
+                'message': f'Creating {len(logos_to_create)} logos...'
+            })
+            Logo.objects.bulk_create(logos_to_create, ignore_conflicts=True)
+
+        # Get logo objects for association
+        channel_logos = {
+            logo.url: logo
+            for logo in Logo.objects.filter(
+                url__in=[url for url in logo_map if url is not None]
+            )
+        }
+
+        # Create channels in database
+        if channels_to_create:
+            send_websocket_update('updates', 'update', {
+                'type': 'bulk_channel_creation_progress',
+                'task_id': task_id,
+                'progress': processed,
+                'total': total_streams,
+                'status': 'creating_channels',
+                'message': f'Creating {len(channels_to_create)} channels in database...'
+            })
+
+            with transaction.atomic():
+                created_channels = Channel.objects.bulk_create(channels_to_create)
+
+                # Update channels with logos and create stream associations
+                update = []
+                channel_stream_associations = []
+                channel_profile_memberships = []
+
+                for channel, stream_ids, logo_url, profile_ids in zip(
+                    created_channels, streams_map, logo_map, profile_map
+                ):
+                    if logo_url:
+                        channel.logo = channel_logos[logo_url]
+                        update.append(channel)
+
+                    # Create stream associations
+                    for stream_id in stream_ids:
+                        from apps.channels.models import ChannelStream
+                        channel_stream_associations.append(
+                            ChannelStream(channel=channel, stream_id=stream_id, order=0)
+                        )
+
+                    # Handle channel profile membership
+                    if profile_ids:
+                        try:
+                            specific_profiles = ChannelProfile.objects.filter(id__in=profile_ids)
+                            channel_profile_memberships.extend([
+                                ChannelProfileMembership(
+                                    channel_profile=profile,
+                                    channel=channel,
+                                    enabled=True
+                                )
+                                for profile in specific_profiles
+                            ])
+                        except Exception as e:
+                            errors.append({
+                                'channel_id': channel.id,
+                                'error': f'Failed to add to profiles: {str(e)}'
+                            })
+                    else:
+                        # Add to all profiles by default
+                        all_profiles = ChannelProfile.objects.all()
+                        channel_profile_memberships.extend([
+                            ChannelProfileMembership(
+                                channel_profile=profile,
+                                channel=channel,
+                                enabled=True
+                            )
+                            for profile in all_profiles
+                        ])
+
+                # Bulk update channels with logos
+                if update:
+                    Channel.objects.bulk_update(update, ["logo"])
+
+                # Bulk create channel-stream associations
+                if channel_stream_associations:
+                    from apps.channels.models import ChannelStream
+                    ChannelStream.objects.bulk_create(channel_stream_associations, ignore_conflicts=True)
+
+                # Bulk create profile memberships
+                if channel_profile_memberships:
+                    ChannelProfileMembership.objects.bulk_create(channel_profile_memberships, ignore_conflicts=True)
+
+        # Send completion update
+        send_websocket_update('updates', 'update', {
+            'type': 'bulk_channel_creation_progress',
+            'task_id': task_id,
+            'progress': total_streams,
+            'total': total_streams,
+            'status': 'completed',
+            'message': f'Successfully created {len(created_channels)} channels',
+            'created_count': len(created_channels),
+            'error_count': len(errors),
+            'errors': errors[:10]  # Send first 10 errors only
+        })
+
+        # Send general channel update notification
+        send_websocket_update('updates', 'update', {
+            'type': 'channels_created',
+            'count': len(created_channels)
+        })
+
+        return {
+            'status': 'completed',
+            'created_count': len(created_channels),
+            'error_count': len(errors),
+            'errors': errors
+        }
+
+    except Exception as e:
+        logger.error(f"Bulk channel creation failed: {e}")
+        send_websocket_update('updates', 'update', {
+            'type': 'bulk_channel_creation_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_streams,
+            'status': 'failed',
+            'message': f'Task failed: {str(e)}',
+            'error': str(e)
+        })
+        raise

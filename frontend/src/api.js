@@ -549,24 +549,32 @@ export default class API {
     }
   }
 
-  static async createChannelsFromStreams(values) {
+  static async createChannelsFromStreamsAsync(streamIds, channelProfileIds = null, startingChannelNumber = null) {
     try {
+      const requestBody = {
+        stream_ids: streamIds,
+      };
+
+      if (channelProfileIds !== null) {
+        requestBody.channel_profile_ids = channelProfileIds;
+      }
+
+      if (startingChannelNumber !== null) {
+        requestBody.starting_channel_number = startingChannelNumber;
+      }
+
       const response = await request(
         `${host}/api/channels/channels/from-stream/bulk/`,
         {
           method: 'POST',
-          body: values,
+          body: requestBody,
         }
       );
 
-      if (response.created && response.created.length > 0) {
-        useChannelsStore.getState().addChannels(response.created);
-      }
-
       return response;
     } catch (e) {
-      errorNotification('Failed to create channels', e);
-      throw e; // Re-throw to allow proper error handling in calling code
+      errorNotification('Failed to start bulk channel creation task', e);
+      throw e;
     }
   }
 
@@ -2036,15 +2044,28 @@ export default class API {
 
   static async getStreamsByIds(ids) {
     try {
-      const params = new URLSearchParams();
-      params.append('ids', ids.join(','));
-      const response = await request(
-        `${host}/api/channels/streams/?${params.toString()}`
-      );
-
-      return response.results || response;
+      // Use POST for large ID lists to avoid URL length limitations
+      if (ids.length > 50) {
+        const response = await request(
+          `${host}/api/channels/streams/by-ids/`,
+          {
+            method: 'POST',
+            body: { ids },
+          }
+        );
+        return response;
+      } else {
+        // Use GET for small ID lists for backward compatibility
+        const params = new URLSearchParams();
+        params.append('ids', ids.join(','));
+        const response = await request(
+          `${host}/api/channels/streams/?${params.toString()}`
+        );
+        return response.results || response;
+      }
     } catch (e) {
       errorNotification('Failed to retrieve streams by IDs', e);
+      throw e; // Re-throw to allow proper error handling in calling code
     }
   }
 
