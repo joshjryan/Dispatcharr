@@ -2036,15 +2036,28 @@ export default class API {
 
   static async getStreamsByIds(ids) {
     try {
-      const params = new URLSearchParams();
-      params.append('ids', ids.join(','));
-      const response = await request(
-        `${host}/api/channels/streams/?${params.toString()}`
-      );
-
-      return response.results || response;
+      // Use POST for large ID lists to avoid URL length limitations
+      if (ids.length > 50) {
+        const response = await request(
+          `${host}/api/channels/streams/by-ids/`,
+          {
+            method: 'POST',
+            body: { ids },
+          }
+        );
+        return response;
+      } else {
+        // Use GET for small ID lists for backward compatibility
+        const params = new URLSearchParams();
+        params.append('ids', ids.join(','));
+        const response = await request(
+          `${host}/api/channels/streams/?${params.toString()}`
+        );
+        return response.results || response;
+      }
     } catch (e) {
       errorNotification('Failed to retrieve streams by IDs', e);
+      throw e; // Re-throw to allow proper error handling in calling code
     }
   }
 

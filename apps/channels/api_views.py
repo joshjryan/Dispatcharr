@@ -178,6 +178,35 @@ class StreamViewSet(viewsets.ModelViewSet):
         # Return the response with the list of unique group names
         return Response(list(group_names))
 
+    @swagger_auto_schema(
+        method="post",
+        operation_description="Retrieve streams by a list of IDs using POST to avoid URL length limitations",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["ids"],
+            properties={
+                "ids": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(type=openapi.TYPE_INTEGER),
+                    description="List of stream IDs to retrieve"
+                ),
+            },
+        ),
+        responses={200: StreamSerializer(many=True)},
+    )
+    @action(detail=False, methods=["post"], url_path="by-ids")
+    def get_by_ids(self, request, *args, **kwargs):
+        ids = request.data.get("ids", [])
+        if not isinstance(ids, list):
+            return Response(
+                {"error": "ids must be a list of integers"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        streams = Stream.objects.filter(id__in=ids)
+        serializer = self.get_serializer(streams, many=True)
+        return Response(serializer.data)
+
 
 # ─────────────────────────────────────────────────────────
 # 2) Channel Group Management (CRUD)

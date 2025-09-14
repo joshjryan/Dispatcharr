@@ -196,6 +196,8 @@ const StreamsTable = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [sorting, setSorting] = useState([{ id: 'name', desc: '' }]);
   const [selectedStreamIds, setSelectedStreamIds] = useState([]);
+  const [isCreatingChannels, setIsCreatingChannels] = useState(false);
+  const [creationProgress, setCreationProgress] = useState('');
   // const [allRowsSelected, setAllRowsSelected] = useState(false);
 
   // Add local storage for page size
@@ -421,30 +423,82 @@ const StreamsTable = () => {
   // Bulk creation: create channels from selected streams in one API call
   const createChannelsFromStreams = async () => {
     setIsLoading(true);
+    setIsCreatingChannels(true);
+    setCreationProgress('Preparing channel creation...');
+    
     try {
       const selectedChannelProfileId =
         useChannelsStore.getState().selectedProfileId;
 
-      // Try to fetch the actual stream data for selected streams
-      let streamsData = [];
-      try {
-        streamsData = await API.getStreamsByIds(selectedStreamIds);
-      } catch (error) {
-        console.warn('Could not fetch stream details, using IDs only:', error);
+      // For very large selections (>1000), process in smaller batches
+      const BATCH_SIZE = 1000;
+      const shouldBatch = selectedStreamIds.length > BATCH_SIZE;
+      
+      if (shouldBatch) {
+        console.log(`Processing ${selectedStreamIds.length} streams in batches of ${BATCH_SIZE}`);
+        
+        for (let i = 0; i < selectedStreamIds.length; i += BATCH_SIZE) {
+          const batchIds = selectedStreamIds.slice(i, i + BATCH_SIZE);
+          const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+          const totalBatches = Math.ceil(selectedStreamIds.length / BATCH_SIZE);
+          
+          setCreationProgress(`Processing batch ${batchNumber}/${totalBatches} (${batchIds.length} streams)...`);
+          console.log(`Processing batch ${batchNumber}/${totalBatches}`);
+          
+          // Try to fetch the actual stream data for this batch
+          let streamsData = [];
+          try {
+            streamsData = await API.getStreamsByIds(batchIds);
+            console.log(`Successfully fetched ${streamsData.length} streams for batch`);
+          } catch (error) {
+            console.warn('Could not fetch stream details for batch, using IDs only:', error);
+          }
+
+          const streamData = batchIds.map((streamId) => {
+            const stream = streamsData.find((s) => s.id === streamId);
+            return {
+              stream_id: streamId,
+              name: stream?.name || `Stream ${streamId}`,
+              ...(selectedChannelProfileId !== '0' && {
+                channel_profile_ids: selectedChannelProfileId,
+              }),
+            };
+          });
+
+          await API.createChannelsFromStreams(streamData);
+        }
+      } else {
+        // Process all at once for smaller selections
+        setCreationProgress(`Fetching stream data for ${selectedStreamIds.length} streams...`);
+        
+        let streamsData = [];
+        try {
+          streamsData = await API.getStreamsByIds(selectedStreamIds);
+          console.log(`Successfully fetched ${streamsData.length} streams`);
+        } catch (error) {
+          console.warn('Could not fetch stream details, using IDs only:', error);
+          // If fetching streams fails, we'll create channels with fallback names
+          // This happens when there are too many streams or network issues
+        }
+
+        setCreationProgress(`Creating ${selectedStreamIds.length} channels...`);
+        
+        const streamData = selectedStreamIds.map((streamId) => {
+          const stream = streamsData.find((s) => s.id === streamId);
+          return {
+            stream_id: streamId,
+            name: stream?.name || `Stream ${streamId}`,
+            ...(selectedChannelProfileId !== '0' && {
+              channel_profile_ids: selectedChannelProfileId,
+            }),
+          };
+        });
+
+        console.log(`Creating ${streamData.length} channels from selected streams`);
+        await API.createChannelsFromStreams(streamData);
       }
 
-      const streamData = selectedStreamIds.map((streamId) => {
-        const stream = streamsData.find((s) => s.id === streamId);
-        return {
-          stream_id: streamId,
-          name: stream?.name || `Stream ${streamId}`,
-          ...(selectedChannelProfileId !== '0' && {
-            channel_profile_ids: selectedChannelProfileId,
-          }),
-        };
-      });
-
-      await API.createChannelsFromStreams(streamData);
+      setCreationProgress('Refreshing channels...');
       await API.requeryChannels();
 
       // Refresh channel profiles to update the membership information
@@ -455,10 +509,16 @@ const StreamsTable = () => {
       // Clear selection and refresh data
       setSelectedStreamIds([]);
       await fetchData();
+      
+      setCreationProgress('');
     } catch (error) {
       console.error('Error creating channels from streams:', error);
+      setCreationProgress('Error occurred during channel creation');
     } finally {
       setIsLoading(false);
+      setIsCreatingChannels(false);
+      // Clear progress after a short delay to let user see completion/error
+      setTimeout(() => setCreationProgress(''), 3000);
     }
   };
 
@@ -775,9 +835,13 @@ const StreamsTable = () => {
                 size="xs"
                 onClick={createChannelsFromStreams}
                 p={5}
-                disabled={selectedStreamIds.length == 0}
+                disabled={selectedStreamIds.length == 0 || isCreatingChannels}
+                loading={isCreatingChannels}
               >
-                Create Channels
+                {isCreatingChannels 
+                  ? (creationProgress || 'Creating Channels...') 
+                  : `Create Channels (${selectedStreamIds.length})`
+                }
               </Button>
 
               <Button
@@ -860,6 +924,22 @@ const StreamsTable = () => {
               height: 'calc(100vh - 100px)',
             }}
           >
+            {creationProgress && (
+              <Box
+                style={{
+                  backgroundColor: theme.colors.blue[6],
+                  color: 'white',
+                  padding: '10px',
+                  textAlign: 'center',
+                  borderRadius: 'var(--mantine-radius-default)',
+                  marginBottom: '10px',
+                }}
+              >
+                <Text size="sm" fw={500}>
+                  {creationProgress}
+                </Text>
+              </Box>
+            )}
             <Box
               style={{
                 flex: 1,
