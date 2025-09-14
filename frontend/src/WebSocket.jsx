@@ -571,11 +571,56 @@ export const WebsocketProvider = ({ children }) => {
 
               break;
 
-            case 'bulk_channel_creation_progress':
-              // Handle completion status globally to refresh channels
-              if (parsedEvent.data.status === 'completed') {
+            case 'bulk_channel_creation_progress': {
+              // Handle progress updates with persistent notifications like stream rehash
+              const data = parsedEvent.data;
+
+              if (data.status === 'starting') {
+                notifications.show({
+                  id: 'bulk-channel-creation-progress', // Persistent ID
+                  title: 'Bulk Channel Creation Started',
+                  message: data.message || 'Starting bulk channel creation...',
+                  color: 'blue.5',
+                  autoClose: false, // Don't auto-close
+                  withCloseButton: false, // No close button during processing
+                  loading: true, // Show loading indicator
+                });
+              } else if (
+                data.status === 'processing' ||
+                data.status === 'creating_logos' ||
+                data.status === 'creating_channels'
+              ) {
+                // Calculate progress percentage
+                const progressPercent =
+                  data.total > 0
+                    ? Math.round((data.progress / data.total) * 100)
+                    : 0;
+
+                // Update the existing notification with progress
+                notifications.update({
+                  id: 'bulk-channel-creation-progress',
+                  title: 'Bulk Channel Creation in Progress',
+                  message: `${progressPercent}% complete - ${data.message}`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (data.status === 'completed') {
+                // Update to completion state
+                notifications.update({
+                  id: 'bulk-channel-creation-progress',
+                  title: 'Bulk Channel Creation Complete',
+                  message: `Successfully created ${data.created_count || 'multiple'} channels${data.error_count > 0 ? ` (${data.error_count} errors)` : ''}`,
+                  color: 'green.5',
+                  autoClose: 8000, // Auto-close after completion
+                  withCloseButton: true, // Allow manual close
+                  loading: false, // Remove loading indicator
+                });
+
+                // Refresh channels
                 try {
-                  await API.requeryChannels();
+                  await useChannelsStore.getState().fetchChannels();
                   console.log(
                     'Channels refreshed after bulk creation completion'
                   );
@@ -585,11 +630,25 @@ export const WebsocketProvider = ({ children }) => {
                     error
                   );
                 }
+              } else if (data.status === 'failed') {
+                // Update to error state
+                notifications.update({
+                  id: 'bulk-channel-creation-progress',
+                  title: 'Bulk Channel Creation Failed',
+                  message:
+                    data.error ||
+                    'An error occurred during bulk channel creation',
+                  color: 'red.5',
+                  autoClose: 12000, // Auto-close after longer delay for errors
+                  withCloseButton: true, // Allow manual close
+                  loading: false, // Remove loading indicator
+                });
               }
 
-              // Pass through to individual components for progress updates
+              // Pass through to individual components for any additional handling
               setVal(parsedEvent);
               break;
+            }
 
             default:
               console.error(
