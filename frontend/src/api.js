@@ -549,27 +549,6 @@ export default class API {
     }
   }
 
-  static async createChannelsFromStreams(values) {
-    try {
-      const response = await request(
-        `${host}/api/channels/channels/from-stream/bulk/`,
-        {
-          method: 'POST',
-          body: values,
-        }
-      );
-
-      if (response.created && response.created.length > 0) {
-        useChannelsStore.getState().addChannels(response.created);
-      }
-
-      return response;
-    } catch (e) {
-      errorNotification('Failed to create channels', e);
-      throw e; // Re-throw to allow proper error handling in calling code
-    }
-  }
-
   static async createChannelsFromStreamsAsync(streamIds, channelProfileIds = null) {
     try {
       const requestBody = {
