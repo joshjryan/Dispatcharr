@@ -560,7 +560,7 @@ export default class API {
       }
 
       const response = await request(
-        `${host}/api/channels/channels/from-stream/bulk-async/`,
+        `${host}/api/channels/channels/from-stream/bulk/`,
         {
           method: 'POST',
           body: requestBody,
