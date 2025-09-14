@@ -703,6 +703,16 @@ class ChannelViewSet(viewsets.ModelViewSet):
                     for profile in profiles
                 ])
 
+        # Send WebSocket notification for single channel creation
+        from core.utils import send_websocket_update
+        send_websocket_update('updates', 'update', {
+            'type': 'channels_created',
+            'count': 1,
+            'channel_id': channel.id,
+            'channel_name': channel.name,
+            'channel_number': channel.channel_number
+        })
+
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @swagger_auto_schema(
