@@ -719,6 +719,10 @@ class ChannelViewSet(viewsets.ModelViewSet):
                     items=openapi.Items(type=openapi.TYPE_INTEGER),
                     description="(Optional) Channel profile ID(s) to add the channels to. If not provided, channels are added to all profiles."
                 ),
+                "starting_channel_number": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="(Optional) Starting channel number mode: null=use provider numbers, 0=lowest available, other=start from specified number"
+                ),
             },
         ),
         responses={202: "Task started successfully"},
@@ -729,6 +733,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
         stream_ids = request.data.get("stream_ids", [])
         channel_profile_ids = request.data.get("channel_profile_ids")
+        starting_channel_number = request.data.get("starting_channel_number")
 
         if not stream_ids:
             return Response(
@@ -748,7 +753,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 channel_profile_ids = [channel_profile_ids]
 
         # Start the async task
-        task = bulk_create_channels_from_streams.delay(stream_ids, channel_profile_ids)
+        task = bulk_create_channels_from_streams.delay(stream_ids, channel_profile_ids, starting_channel_number)
 
         return Response({
             "task_id": task.id,

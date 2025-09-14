@@ -549,7 +549,7 @@ export default class API {
     }
   }
 
-  static async createChannelsFromStreamsAsync(streamIds, channelProfileIds = null) {
+  static async createChannelsFromStreamsAsync(streamIds, channelProfileIds = null, startingChannelNumber = null) {
     try {
       const requestBody = {
         stream_ids: streamIds,
@@ -557,6 +557,10 @@ export default class API {
 
       if (channelProfileIds !== null) {
         requestBody.channel_profile_ids = channelProfileIds;
+      }
+
+      if (startingChannelNumber !== null) {
+        requestBody.starting_channel_number = startingChannelNumber;
       }
 
       const response = await request(
