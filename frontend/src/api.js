@@ -2077,7 +2077,14 @@ export default class API {
       );
       return response;
     } catch (e) {
-      errorNotification('Failed to retrieve movies', e);
+      // Don't show error notification for "Invalid page" errors as they're handled gracefully
+      const isInvalidPage = e.body?.detail?.includes('Invalid page') ||
+                           e.message?.includes('Invalid page');
+
+      if (!isInvalidPage) {
+        errorNotification('Failed to retrieve movies', e);
+      }
+      throw e;
     }
   }
 
@@ -2088,7 +2095,39 @@ export default class API {
       );
       return response;
     } catch (e) {
-      errorNotification('Failed to retrieve series', e);
+      // Don't show error notification for "Invalid page" errors as they're handled gracefully
+      const isInvalidPage = e.body?.detail?.includes('Invalid page') ||
+                           e.message?.includes('Invalid page');
+
+      if (!isInvalidPage) {
+        errorNotification('Failed to retrieve series', e);
+      }
+      throw e;
+    }
+  }
+
+  static async getAllContent(params = new URLSearchParams()) {
+    try {
+      console.log('Calling getAllContent with URL:', `${host}/api/vod/all/?${params.toString()}`);
+      const response = await request(
+        `${host}/api/vod/all/?${params.toString()}`
+      );
+      console.log('getAllContent raw response:', response);
+      return response;
+    } catch (e) {
+      console.error('getAllContent error:', e);
+      console.error('Error status:', e.status);
+      console.error('Error body:', e.body);
+      console.error('Error message:', e.message);
+
+      // Don't show error notification for "Invalid page" errors as they're handled gracefully
+      const isInvalidPage = e.body?.detail?.includes('Invalid page') ||
+                           e.message?.includes('Invalid page');
+
+      if (!isInvalidPage) {
+        errorNotification('Failed to retrieve content', e);
+      }
+      throw e;
     }
   }
 
