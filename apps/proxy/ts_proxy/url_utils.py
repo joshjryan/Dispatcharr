@@ -281,7 +281,9 @@ def get_alternate_streams(channel_id: str, current_stream_id: Optional[int] = No
                 if not m3u_account:
                     logger.debug(f"Stream {stream.id} has no M3U account")
                     continue
-
+                if m3u_account.is_active == False:
+                    logger.debug(f"M3U account {m3u_account.id} is inactive, skipping.")
+                    continue
                 m3u_profiles = m3u_account.profiles.all()
                 default_profile = next((obj for obj in m3u_profiles if obj.is_default), None)
 
