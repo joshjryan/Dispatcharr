@@ -418,9 +418,21 @@ export const WebsocketProvider = ({ children }) => {
                   loading: false,
                   autoClose: 6000,
                 });
-                // Refresh channels data
+                // Refresh channels data and logos
                 try {
+                  await API.requeryChannels();
                   await useChannelsStore.getState().fetchChannels();
+
+                  // Get updated channel data and extract logo IDs to load
+                  const channels = useChannelsStore.getState().channels;
+                  const logoIds = Object.values(channels)
+                    .filter((channel) => channel.logo_id)
+                    .map((channel) => channel.logo_id);
+
+                  // Fetch the specific logos that were just assigned
+                  if (logoIds.length > 0) {
+                    await useLogosStore.getState().fetchLogosByIds(logoIds);
+                  }
                 } catch (e) {
                   console.warn(
                     'Failed to refresh channels after logo setting:',
