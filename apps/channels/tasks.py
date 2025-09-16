@@ -30,9 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Lazy loading for ML models - only imported/loaded when needed
 _ml_model_cache = {
-    'sentence_transformer': None,
-    'model_path': os.path.join("/data", "models", "all-MiniLM-L6-v2"),  # Use /data for persistence
-    'model_name': "sentence-transformers/all-MiniLM-L6-v2"
+    'sentence_transformer': None
 }
 
 def get_sentence_transformer():
@@ -42,82 +40,28 @@ def get_sentence_transformer():
             from sentence_transformers import SentenceTransformer
             from sentence_transformers import util
 
-            model_path = _ml_model_cache['model_path']
-            model_name = _ml_model_cache['model_name']
-            cache_dir = os.path.dirname(model_path)  # /data/models
+            model_name = "sentence-transformers/all-MiniLM-L6-v2"
+            cache_dir = "/data/models"
 
             # Check environment variable to disable downloads
             disable_downloads = os.environ.get('DISABLE_ML_DOWNLOADS', 'false').lower() == 'true'
 
-            # Ensure directory exists and is writable
+            if disable_downloads:
+                # Check if model exists before attempting to load
+                hf_model_path = os.path.join(cache_dir, f"models--{model_name.replace('/', '--')}")
+                if not os.path.exists(hf_model_path):
+                    logger.warning("ML model not found and downloads disabled (DISABLE_ML_DOWNLOADS=true). Skipping ML matching.")
+                    return None, None
+
+            # Ensure cache directory exists
             os.makedirs(cache_dir, exist_ok=True)
 
-            # Debug: List what's actually in the cache directory
-            try:
-                if os.path.exists(cache_dir):
-                    logger.info(f"Cache directory contents: {os.listdir(cache_dir)}")
-                    for item in os.listdir(cache_dir):
-                        item_path = os.path.join(cache_dir, item)
-                        if os.path.isdir(item_path):
-                            logger.info(f"  Subdirectory '{item}' contains: {os.listdir(item_path)}")
-            except Exception as e:
-                logger.info(f"Could not list cache directory: {e}")
-
-            # Check if model files exist in our expected location
-            config_path = os.path.join(model_path, "config.json")
-
-            logger.info(f"Checking for cached model at {model_path}")
-            logger.info(f"Config exists: {os.path.exists(config_path)}")
-
-            # Also check if the model exists in the sentence-transformers default naming convention
-            alt_model_name = model_name.replace("/", "_")
-            alt_model_path = os.path.join(cache_dir, alt_model_name)
-            alt_config_path = os.path.join(alt_model_path, "config.json")
-            logger.info(f"Alternative path check - {alt_model_path}, config exists: {os.path.exists(alt_config_path)}")
-
-            # Check for Hugging Face Hub cache format (newer format)
-            hf_model_name = f"models--{model_name.replace('/', '--')}"
-            hf_model_path = os.path.join(cache_dir, hf_model_name)
-            hf_snapshots_path = os.path.join(hf_model_path, "snapshots")
-
-            logger.info(f"Hugging Face cache path check - {hf_model_path}, snapshots exists: {os.path.exists(hf_snapshots_path)}")
-
-            # If HF cache exists, find the latest snapshot
-            hf_config_exists = False
-            hf_snapshot_path = None
-            if os.path.exists(hf_snapshots_path):
-                try:
-                    snapshots = os.listdir(hf_snapshots_path)
-                    if snapshots:
-                        # Use the first (and likely only) snapshot
-                        hf_snapshot_path = os.path.join(hf_snapshots_path, snapshots[0])
-                        hf_config_path = os.path.join(hf_snapshot_path, "config.json")
-                        hf_config_exists = os.path.exists(hf_config_path)
-                        logger.info(f"HF snapshot path: {hf_snapshot_path}, config exists: {hf_config_exists}")
-                except Exception as e:
-                    logger.info(f"Error checking HF cache: {e}")
-
-            # First try to load from our specific path
-            if os.path.exists(config_path):
-                logger.info(f"Loading cached sentence transformer from {model_path}")
-                _ml_model_cache['sentence_transformer'] = SentenceTransformer(model_path)
-            elif os.path.exists(alt_config_path):
-                logger.info(f"Loading cached sentence transformer from alternative path {alt_model_path}")
-                _ml_model_cache['sentence_transformer'] = SentenceTransformer(alt_model_path)
-            elif hf_config_exists and hf_snapshot_path:
-                logger.info(f"Loading cached sentence transformer from HF cache {hf_snapshot_path}")
-                _ml_model_cache['sentence_transformer'] = SentenceTransformer(hf_snapshot_path)
-            elif disable_downloads:
-                logger.warning(f"ML model not found and downloads disabled (DISABLE_ML_DOWNLOADS=true). Skipping ML matching.")
-                return None, None
-            else:
-                logger.info(f"Model cache not found, downloading {model_name}")
-                # Let sentence-transformers handle the download with its cache folder
-                _ml_model_cache['sentence_transformer'] = SentenceTransformer(
-                    model_name,
-                    cache_folder=cache_dir
-                )
-                logger.info(f"Model downloaded and loaded successfully")
+            # Let sentence-transformers handle all cache detection and management
+            logger.info(f"Loading sentence transformer model (cache: {cache_dir})")
+            _ml_model_cache['sentence_transformer'] = SentenceTransformer(
+                model_name,
+                cache_folder=cache_dir
+            )
 
             return _ml_model_cache['sentence_transformer'], util
         except ImportError:
