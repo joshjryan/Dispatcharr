@@ -318,6 +318,12 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
             # No ML available or very low fuzzy score
             logger.info(f"Channel {chan['id']} '{chan['name']}' => best fuzzy score={best_score} < {LOWER_FUZZY_THRESHOLD}, no ML fallback available")
 
+    # Clean up ML models from memory after matching (infrequent operation)
+    if _ml_model_cache['sentence_transformer'] is not None:
+        logger.info("Cleaning up ML models from memory")
+        _ml_model_cache['sentence_transformer'] = None
+        gc.collect()
+
     return {
         "channels_to_update": channels_to_update,
         "matched_channels": matched_channels
@@ -432,6 +438,11 @@ def match_epg_channels():
         return f"Done. Matched {total_matched} channel(s)."
 
     finally:
+        # Clean up ML models from memory after bulk matching
+        if _ml_model_cache['sentence_transformer'] is not None:
+            logger.info("Cleaning up ML models from memory")
+            _ml_model_cache['sentence_transformer'] = None
+
         # Memory cleanup
         gc.collect()
         from core.utils import cleanup_memory
@@ -529,6 +540,12 @@ def match_single_channel_epg(channel_id):
 
                     logger.info(success_msg)
 
+                    # Clean up ML models from memory after single channel matching
+                    if _ml_model_cache['sentence_transformer'] is not None:
+                        logger.info("Cleaning up ML models from memory")
+                        _ml_model_cache['sentence_transformer'] = None
+                        gc.collect()
+
                     return {
                         "matched": True,
                         "message": success_msg,
@@ -539,6 +556,12 @@ def match_single_channel_epg(channel_id):
                     return {"matched": False, "message": "Matched EPG data not found"}
 
         # No match found
+        # Clean up ML models from memory after single channel matching
+        if _ml_model_cache['sentence_transformer'] is not None:
+            logger.info("Cleaning up ML models from memory")
+            _ml_model_cache['sentence_transformer'] = None
+            gc.collect()
+
         return {
             "matched": False,
             "message": f"No suitable EPG match found for channel '{channel.name}'"
@@ -546,6 +569,13 @@ def match_single_channel_epg(channel_id):
 
     except Exception as e:
         logger.error(f"Error in integrated single channel EPG matching: {e}", exc_info=True)
+
+        # Clean up ML models from memory even on error
+        if _ml_model_cache['sentence_transformer'] is not None:
+            logger.info("Cleaning up ML models from memory after error")
+            _ml_model_cache['sentence_transformer'] = None
+            gc.collect()
+
         return {"matched": False, "message": f"Error during matching: {str(e)}"}
 
 
