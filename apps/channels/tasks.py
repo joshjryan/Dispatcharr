@@ -12,6 +12,7 @@ import gc
 
 from celery import shared_task
 from django.utils.text import slugify
+from rapidfuzz import fuzz
 
 from apps.channels.models import Channel
 from apps.epg.models import EPGData
@@ -244,122 +245,133 @@ def match_epg_channels():
 @shared_task
 def match_single_channel_epg(channel_id):
     """
-    Try to match a single channel with EPG data using the same logic as match_epg_channels
-    but for just one channel. Returns a dict with match status and message.
+    Try to match a single channel with EPG data using optimized logic
+    that doesn't require loading all EPG data or running the external script.
+    Returns a dict with match status and message.
     """
     try:
         from apps.channels.models import Channel
         from apps.epg.models import EPGData
-        import tempfile
-        import subprocess
-        import json
-        
-        logger.info(f"Starting single channel EPG matching for channel ID {channel_id}")
-        
+        import re
+
+        logger.info(f"Starting optimized single channel EPG matching for channel ID {channel_id}")
+
         # Get the channel
         try:
             channel = Channel.objects.get(id=channel_id)
         except Channel.DoesNotExist:
             return {"matched": False, "message": "Channel not found"}
-        
+
         # If channel already has EPG data, skip
         if channel.epg_data:
             return {"matched": False, "message": f"Channel '{channel.name}' already has EPG data assigned"}
-        
+
         # Get region preference
         try:
             region_obj = CoreSettings.objects.get(key="preferred-region")
             region_code = region_obj.value.strip().lower()
         except CoreSettings.DoesNotExist:
             region_code = None
-        
-        # Prepare channel data for matching script
+
+        # Prepare channel data
         normalized_tvg_id = channel.tvg_id.strip().lower() if channel.tvg_id else ""
-        channel_json = {
-            "id": channel.id,
-            "name": channel.name,
-            "tvg_id": normalized_tvg_id,
-            "original_tvg_id": channel.tvg_id,
-            "fallback_name": normalized_tvg_id if normalized_tvg_id else channel.name,
-            "norm_chan": normalize_name(normalized_tvg_id if normalized_tvg_id else channel.name)
+        normalized_channel_name = normalize_name(channel.name)
+
+        logger.info(f"Matching channel '{channel.name}' (TVG ID: '{channel.tvg_id}') against EPG data")
+
+        # Step 1: Try exact TVG ID match first (most efficient)
+        if normalized_tvg_id:
+            epg_exact_match = EPGData.objects.filter(tvg_id__iexact=channel.tvg_id).first()
+            if epg_exact_match:
+                logger.info(f"Channel '{channel.name}' matched with EPG '{epg_exact_match.name}' by exact TVG ID match")
+                channel.epg_data = epg_exact_match
+                channel.save(update_fields=["epg_data"])
+                return {
+                    "matched": True,
+                    "message": f"Channel '{channel.name}' matched with EPG '{epg_exact_match.name}' by exact TVG ID match"
+                }
+
+        # Step 2: Try case-insensitive TVG ID match
+        if normalized_tvg_id:
+            epg_case_match = EPGData.objects.filter(tvg_id__icontains=normalized_tvg_id).first()
+            if epg_case_match:
+                logger.info(f"Channel '{channel.name}' matched with EPG '{epg_case_match.name}' by case-insensitive TVG ID match")
+                channel.epg_data = epg_case_match
+                channel.save(update_fields=["epg_data"])
+                return {
+                    "matched": True,
+                    "message": f"Channel '{channel.name}' matched with EPG '{epg_case_match.name}' by case-insensitive TVG ID match"
+                }
+
+        # Step 3: Fuzzy name matching (only if name-based matching is needed)
+        if not normalized_channel_name:
+            return {"matched": False, "message": f"Channel '{channel.name}' has no usable name for matching"}
+
+        # Query EPG data with name filtering to reduce dataset
+        epg_candidates = EPGData.objects.filter(name__isnull=False).exclude(name='').values('id', 'name', 'tvg_id')
+        epg_count = epg_candidates.count()
+        logger.info(f"Fuzzy matching against {epg_count} EPG entries (optimized - not loading all EPG data)")
+
+        best_score = 0
+        best_epg = None
+
+        for epg in epg_candidates:
+            if not epg['name']:
+                continue
+
+            epg_normalized_name = normalize_name(epg['name'])
+            if not epg_normalized_name:
+                continue
+
+            # Calculate base fuzzy score
+            base_score = fuzz.ratio(normalized_channel_name, epg_normalized_name)
+            bonus = 0
+
+            # Apply region-based bonus/penalty if applicable
+            if region_code and epg['tvg_id']:
+                combined_text = epg['tvg_id'].lower() + " " + epg['name'].lower()
+                dot_regions = re.findall(r'\.([a-z]{2})', combined_text)
+
+                if dot_regions:
+                    if region_code in dot_regions:
+                        bonus = 30  # Bigger bonus for matching region
+                    else:
+                        bonus = -15  # Penalty for different region
+                elif region_code in combined_text:
+                    bonus = 15
+
+            final_score = base_score + bonus
+
+            if final_score > best_score:
+                best_score = final_score
+                best_epg = epg
+
+        # Apply matching thresholds (same as the ML script)
+        BEST_FUZZY_THRESHOLD = 85
+
+        if best_epg and best_score >= BEST_FUZZY_THRESHOLD:
+            try:
+                logger.info(f"Channel '{channel.name}' matched with EPG '{best_epg['name']}' (score: {best_score})")
+                epg_data = EPGData.objects.get(id=best_epg['id'])
+                channel.epg_data = epg_data
+                channel.save(update_fields=["epg_data"])
+
+                return {
+                    "matched": True,
+                    "message": f"Channel '{channel.name}' matched with EPG '{epg_data.name}' (score: {best_score})"
+                }
+            except EPGData.DoesNotExist:
+                return {"matched": False, "message": "Matched EPG data not found"}
+
+        # No good match found
+        logger.info(f"No suitable EPG match found for channel '{channel.name}' (best score: {best_score})")
+        return {
+            "matched": False,
+            "message": f"No suitable EPG match found for channel '{channel.name}' (best score: {best_score})"
         }
-        
-        # Prepare EPG data
-        epg_json = []
-        for epg in EPGData.objects.all():
-            normalized_epg_tvg_id = epg.tvg_id.strip().lower() if epg.tvg_id else ""
-            epg_json.append({
-                'id': epg.id,
-                'tvg_id': normalized_epg_tvg_id,
-                'original_tvg_id': epg.tvg_id,
-                'name': epg.name,
-                'norm_name': normalize_name(epg.name),
-                'epg_source_id': epg.epg_source.id if epg.epg_source else None,
-            })
-        
-        # Create payload for matching script
-        payload = {
-            "channels": [channel_json],  # Only one channel
-            "epg_data": epg_json,
-        }
-        
-        if region_code:
-            payload["region_code"] = region_code
-        
-        # Write to temporary file and run the matching script
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-            json.dump(payload, temp_file)
-            temp_file_path = temp_file.name
-        
-        try:
-            # Run the matching script
-            from django.conf import settings
-            import os
-            
-            project_root = settings.BASE_DIR
-            script_path = os.path.join(project_root, 'scripts', 'epg_match.py')
-            
-            process = subprocess.Popen(
-                ['python', script_path, temp_file_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=project_root
-            )
-            
-            stdout, stderr = process.communicate(timeout=60)  # 1 minute timeout for single channel
-            
-            if process.returncode != 0:
-                logger.error(f"EPG matching script failed: {stderr}")
-                return {"matched": False, "message": "EPG matching failed"}
-            
-            result = json.loads(stdout)
-            channels_to_update = result.get("channels_to_update", [])
-            
-            if channels_to_update:
-                # Update the channel with the matched EPG data
-                epg_data_id = channels_to_update[0].get("epg_data_id")
-                if epg_data_id:
-                    try:
-                        epg_data = EPGData.objects.get(id=epg_data_id)
-                        channel.epg_data = epg_data
-                        channel.save(update_fields=["epg_data"])
-                        
-                        return {
-                            "matched": True, 
-                            "message": f"Channel '{channel.name}' matched with EPG '{epg_data.name}' (TVG ID: {epg_data.tvg_id})"
-                        }
-                    except EPGData.DoesNotExist:
-                        return {"matched": False, "message": "Matched EPG data not found"}
-            
-            return {"matched": False, "message": f"No suitable EPG match found for channel '{channel.name}'"}
-            
-        finally:
-            # Clean up temp file
-            os.remove(temp_file_path)
-            
+
     except Exception as e:
-        logger.error(f"Error in single channel EPG matching: {e}", exc_info=True)
+        logger.error(f"Error in optimized single channel EPG matching: {e}", exc_info=True)
         return {"matched": False, "message": f"Error during matching: {str(e)}"}
 
 

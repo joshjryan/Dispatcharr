@@ -134,13 +134,13 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
     try {
       const response = await API.matchChannelEpg(channel.id);
-      
+
       if (response.matched) {
         // Update the form with the new EPG data
         if (response.channel && response.channel.epg_data_id) {
           formik.setFieldValue('epg_data_id', response.channel.epg_data_id);
         }
-        
+
         notifications.show({
           title: 'Success',
           message: response.message,
@@ -758,7 +758,11 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                             handleAutoMatchEpg();
                           }}
                           disabled={!channel || !channel.id}
-                          title={!channel || !channel.id ? "Auto-match is only available for existing channels" : "Automatically match EPG data"}
+                          title={
+                            !channel || !channel.id
+                              ? 'Auto-match is only available for existing channels'
+                              : 'Automatically match EPG data'
+                          }
                           leftSection={<Zap size="14" />}
                         >
                           Auto Match

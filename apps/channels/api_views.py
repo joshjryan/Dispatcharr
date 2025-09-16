@@ -797,17 +797,17 @@ class ChannelViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="match-epg")
     def match_channel_epg(self, request, pk=None):
         channel = self.get_object()
-        
+
         # Import the matching logic
         from apps.channels.tasks import match_single_channel_epg
-        
+
         try:
             # Try to match this specific channel - call synchronously for immediate response
             result = match_single_channel_epg.apply_async(args=[channel.id]).get(timeout=30)
-            
+
             # Refresh the channel from DB to get any updates
             channel.refresh_from_db()
-            
+
             return Response({
                 "message": result.get("message", "Channel matching completed"),
                 "matched": result.get("matched", False),
