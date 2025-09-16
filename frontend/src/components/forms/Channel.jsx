@@ -167,6 +167,87 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     }
   };
 
+  const handleSetNameFromEpg = () => {
+    const epgDataId = formik.values.epg_data_id;
+    if (!epgDataId) {
+      notifications.show({
+        title: 'No EPG Selected',
+        message: 'Please select an EPG source first.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    const tvg = tvgsById[epgDataId];
+    if (tvg && tvg.name) {
+      formik.setFieldValue('name', tvg.name);
+      notifications.show({
+        title: 'Success',
+        message: `Channel name set to "${tvg.name}"`,
+        color: 'green',
+      });
+    } else {
+      notifications.show({
+        title: 'No Name Available',
+        message: 'No name found in the selected EPG data.',
+        color: 'orange',
+      });
+    }
+  };
+
+  const handleSetLogoFromEpg = async () => {
+    const epgDataId = formik.values.epg_data_id;
+    if (!epgDataId) {
+      notifications.show({
+        title: 'No EPG Selected',
+        message: 'Please select an EPG source first.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    const tvg = tvgsById[epgDataId];
+    if (!tvg || !tvg.name) {
+      notifications.show({
+        title: 'No EPG Name',
+        message: 'EPG data does not have a name to match against logos.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    try {
+      // Try to find a logo that matches the EPG name
+      const matchingLogo = Object.values(logos).find(
+        (logo) =>
+          logo.name.toLowerCase().includes(tvg.name.toLowerCase()) ||
+          tvg.name.toLowerCase().includes(logo.name.toLowerCase())
+      );
+
+      if (matchingLogo) {
+        formik.setFieldValue('logo_id', matchingLogo.id);
+        notifications.show({
+          title: 'Success',
+          message: `Logo set to "${matchingLogo.name}"`,
+          color: 'green',
+        });
+      } else {
+        notifications.show({
+          title: 'No Matching Logo',
+          message: `No existing logo found that matches "${tvg.name}". Consider uploading a logo or using the smart logo selection.`,
+          color: 'orange',
+        });
+      }
+    } catch (error) {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to set logo from EPG data',
+        color: 'red',
+      });
+      console.error('Set logo from EPG error:', error);
+    }
+  };
+
   const formik = useFormik({
     initialValues: {
       name: '',
@@ -349,15 +430,27 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
         <form onSubmit={formik.handleSubmit}>
           <Group justify="space-between" align="top">
             <Stack gap="5" style={{ flex: 1 }}>
-              <TextInput
-                id="name"
-                name="name"
-                label="Channel Name"
-                value={formik.values.name}
-                onChange={formik.handleChange}
-                error={formik.errors.name ? formik.touched.name : ''}
-                size="xs"
-              />
+              <Group align="end">
+                <TextInput
+                  id="name"
+                  name="name"
+                  label="Channel Name"
+                  value={formik.values.name}
+                  onChange={formik.handleChange}
+                  error={formik.errors.name ? formik.touched.name : ''}
+                  size="xs"
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={handleSetNameFromEpg}
+                  disabled={!formik.values.epg_data_id}
+                  title="Set channel name from EPG data"
+                >
+                  Use EPG Name
+                </Button>
+              </Group>
 
               <Flex gap="sm">
                 <Popover
@@ -647,11 +740,22 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                   </Popover.Dropdown>
                 </Popover>
 
-                <LazyLogo
-                  logoId={formik.values.logo_id}
-                  alt="channel logo"
-                  style={{ height: 40 }}
-                />
+                <Stack gap="xs" align="center">
+                  <LazyLogo
+                    logoId={formik.values.logo_id}
+                    alt="channel logo"
+                    style={{ height: 40 }}
+                  />
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={handleSetLogoFromEpg}
+                    disabled={!formik.values.epg_data_id}
+                    title="Find matching logo based on EPG name"
+                  >
+                    Use EPG Logo
+                  </Button>
+                </Stack>
               </Group>
 
               <Group>

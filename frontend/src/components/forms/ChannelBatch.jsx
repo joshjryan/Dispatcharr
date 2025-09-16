@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import useChannelsStore from '../../store/channels';
 import API from '../../api';
 import useStreamProfilesStore from '../../store/streamProfiles';
+import useEPGsStore from '../../store/epgs';
 import ChannelGroupForm from './ChannelGroup';
 import {
   Box,
@@ -27,6 +28,7 @@ import {
 import { ListOrdered, SquarePlus, SquareX, X } from 'lucide-react';
 import { FixedSizeList as List } from 'react-window';
 import { useForm } from '@mantine/form';
+import { notifications } from '@mantine/notifications';
 import { USER_LEVELS, USER_LEVEL_LABELS } from '../../constants';
 
 const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
@@ -38,6 +40,9 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const canEditChannelGroup = useChannelsStore((s) => s.canEditChannelGroup);
 
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
+  const epgs = useEPGsStore((s) => s.epgs);
+  const tvgs = useEPGsStore((s) => s.tvgs);
+  const tvgsById = useEPGsStore((s) => s.tvgsById);
 
   const [channelGroupModelOpen, setChannelGroupModalOpen] = useState(false);
   const [selectedChannelGroup, setSelectedChannelGroup] = useState('-1');
@@ -134,6 +139,137 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     }
   };
 
+  const handleSetNamesFromEpg = async () => {
+    if (!channelIds || channelIds.length === 0) {
+      notifications.show({
+        title: 'No Channels Selected',
+        message: 'No channels to update.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    try {
+      const channelsMap = useChannelsStore.getState().channels;
+      const updates = [];
+
+      for (const id of channelIds) {
+        const channel = channelsMap[id];
+        if (channel && channel.epg_data_id) {
+          const tvg = tvgsById[channel.epg_data_id];
+          if (tvg && tvg.name) {
+            updates.push({
+              id,
+              name: tvg.name,
+            });
+          }
+        }
+      }
+
+      if (updates.length === 0) {
+        notifications.show({
+          title: 'No Updates Available',
+          message: 'No selected channels have EPG data with names.',
+          color: 'orange',
+        });
+        return;
+      }
+
+      await API.bulkUpdateChannels(updates);
+      await Promise.all([
+        API.requeryChannels(),
+        useChannelsStore.getState().fetchChannels(),
+      ]);
+
+      notifications.show({
+        title: 'Success',
+        message: `Updated names for ${updates.length} channels from EPG data.`,
+        color: 'green',
+      });
+    } catch (error) {
+      console.error('Failed to set names from EPG:', error);
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to set names from EPG data.',
+        color: 'red',
+      });
+    }
+  };
+
+  const handleSetLogosFromEpg = async () => {
+    if (!channelIds || channelIds.length === 0) {
+      notifications.show({
+        title: 'No Channels Selected',
+        message: 'No channels to update.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    try {
+      // First, get all available logos
+      const logosResponse = await API.getLogos();
+      const logos = logosResponse.reduce((acc, logo) => {
+        acc[logo.id] = logo;
+        return acc;
+      }, {});
+
+      const channelsMap = useChannelsStore.getState().channels;
+      const updates = [];
+
+      for (const id of channelIds) {
+        const channel = channelsMap[id];
+        if (channel && channel.epg_data_id) {
+          const tvg = tvgsById[channel.epg_data_id];
+          if (tvg && tvg.name) {
+            // Try to find a matching logo
+            const matchingLogo = Object.values(logos).find(
+              (logo) =>
+                logo.name.toLowerCase().includes(tvg.name.toLowerCase()) ||
+                tvg.name.toLowerCase().includes(logo.name.toLowerCase())
+            );
+
+            if (matchingLogo) {
+              updates.push({
+                id,
+                logo_id: matchingLogo.id,
+              });
+            }
+          }
+        }
+      }
+
+      if (updates.length === 0) {
+        notifications.show({
+          title: 'No Matching Logos',
+          message:
+            'No matching logos found for the selected channels based on their EPG names.',
+          color: 'orange',
+        });
+        return;
+      }
+
+      await API.bulkUpdateChannels(updates);
+      await Promise.all([
+        API.requeryChannels(),
+        useChannelsStore.getState().fetchChannels(),
+      ]);
+
+      notifications.show({
+        title: 'Success',
+        message: `Updated logos for ${updates.length} channels based on EPG names.`,
+        color: 'green',
+      });
+    } catch (error) {
+      console.error('Failed to set logos from EPG:', error);
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to set logos from EPG data.',
+        color: 'red',
+      });
+    }
+  };
+
   // useEffect(() => {
   //   // const sameStreamProfile = channels.every(
   //   //   (channel) => channel.stream_profile_id == channels[0].stream_profile_id
@@ -183,7 +319,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       <Modal
         opened={isOpen}
         onClose={onClose}
-        size={"lg"}
+        size={'lg'}
         title={
           <Group gap="5">
             <ListOrdered size="20" />
@@ -197,7 +333,9 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
             <Stack gap="5" style={{ flex: 1 }}>
               <Paper withBorder p="xs" radius="md">
                 <Group justify="space-between" align="center" mb={6}>
-                  <Text size="sm" fw={600}>Channel Name</Text>
+                  <Text size="sm" fw={600}>
+                    Channel Name
+                  </Text>
                 </Group>
                 <Group align="end" gap="xs" wrap="nowrap">
                   <TextInput
@@ -222,6 +360,36 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                   find={regexFind}
                   replace={regexReplace}
                 />
+              </Paper>
+
+              <Paper withBorder p="xs" radius="md">
+                <Group justify="space-between" align="center" mb={6}>
+                  <Text size="sm" fw={600}>
+                    EPG Operations
+                  </Text>
+                </Group>
+                <Group gap="xs" wrap="nowrap">
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={handleSetNamesFromEpg}
+                    style={{ flex: 1 }}
+                  >
+                    Set Names from EPG
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={handleSetLogosFromEpg}
+                    style={{ flex: 1 }}
+                  >
+                    Set Logos from EPG
+                  </Button>
+                </Group>
+                <Text size="xs" c="dimmed" mt="xs">
+                  Updates channel names and logos based on their assigned EPG
+                  data
+                </Text>
               </Paper>
 
               <Popover
@@ -403,7 +571,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
 export default ChannelBatchForm;
 
 // Lightweight inline preview component to visualize rename results for a subset
-const RegexPreview = ({ channelIds, find, replace}) => {
+const RegexPreview = ({ channelIds, find, replace }) => {
   const channelsMap = useChannelsStore((s) => s.channels);
   const previewItems = useMemo(() => {
     const items = [];
@@ -412,7 +580,8 @@ const RegexPreview = ({ channelIds, find, replace}) => {
     let re;
     try {
       re = new RegExp(find, flags);
-    } catch (e) {
+    } catch (error) {
+      console.error('Invalid regex:', error);
       return [{ before: 'Invalid regex', after: '' }];
     }
     for (let i = 0; i < Math.min(channelIds.length, 25); i++) {
@@ -431,20 +600,41 @@ const RegexPreview = ({ channelIds, find, replace}) => {
   return (
     <Box mt={8}>
       <Text size="xs" c="dimmed" mb={4}>
-        Preview (first {Math.min(channelIds.length, 25)} of {channelIds.length} selected)
+        Preview (first {Math.min(channelIds.length, 25)} of {channelIds.length}{' '}
+        selected)
       </Text>
       <ScrollArea h={120} offsetScrollbars>
         <Stack gap={4}>
           {previewItems.length === 0 ? (
-            <Text size="xs" c="dimmed">No changes with current pattern.</Text>
+            <Text size="xs" c="dimmed">
+              No changes with current pattern.
+            </Text>
           ) : (
             previewItems.map((row, idx) => (
               <Group key={idx} gap={8} wrap="nowrap" align="center">
-                <Text size="xs" style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <Text
+                  size="xs"
+                  style={{
+                    flex: 1,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
                   {row.before}
                 </Text>
-                <Text size="xs" c="gray.6">→</Text>
-                <Text size="xs" style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <Text size="xs" c="gray.6">
+                  →
+                </Text>
+                <Text
+                  size="xs"
+                  style={{
+                    flex: 1,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
                   {row.after}
                 </Text>
               </Group>
