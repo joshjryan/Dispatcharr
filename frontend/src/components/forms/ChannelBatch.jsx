@@ -2,9 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import useChannelsStore from '../../store/channels';
 import API from '../../api';
 import useStreamProfilesStore from '../../store/streamProfiles';
-import useEPGsStore from '../../store/epgs';
 import ChannelGroupForm from './ChannelGroup';
-import { useLogoSelection } from '../../hooks/useSmartLogos';
 import {
   Box,
   Button,
@@ -38,18 +36,8 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const groupListRef = useRef(null);
 
   const channelGroups = useChannelsStore((s) => s.channelGroups);
-  const canEditChannelGroup = useChannelsStore((s) => s.canEditChannelGroup);
 
   const streamProfiles = useStreamProfilesStore((s) => s.profiles);
-  const epgs = useEPGsStore((s) => s.epgs);
-  const tvgs = useEPGsStore((s) => s.tvgs);
-  const tvgsById = useEPGsStore((s) => s.tvgsById);
-
-  const {
-    logos,
-    ensureLogosLoaded,
-    isLoading: logosLoading,
-  } = useLogoSelection();
 
   const [channelGroupModelOpen, setChannelGroupModalOpen] = useState(false);
   const [selectedChannelGroup, setSelectedChannelGroup] = useState('-1');
@@ -157,47 +145,24 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     }
 
     try {
-      const channelsMap = useChannelsStore.getState().channels;
-      const updates = [];
+      // Start the backend task
+      await API.setChannelNamesFromEpg(channelIds);
 
-      for (const id of channelIds) {
-        const channel = channelsMap[id];
-        if (channel && channel.epg_data_id) {
-          const tvg = tvgsById[channel.epg_data_id];
-          if (tvg && tvg.name) {
-            updates.push({
-              id,
-              name: tvg.name,
-            });
-          }
-        }
-      }
-
-      if (updates.length === 0) {
-        notifications.show({
-          title: 'No Updates Available',
-          message: 'No selected channels have EPG data with names.',
-          color: 'orange',
-        });
-        return;
-      }
-
-      await API.bulkUpdateChannels(updates);
-      await Promise.all([
-        API.requeryChannels(),
-        useChannelsStore.getState().fetchChannels(),
-      ]);
-
+      // The task will send WebSocket updates for progress
+      // Just show that it started successfully
       notifications.show({
-        title: 'Success',
-        message: `Updated names for ${updates.length} channels from EPG data.`,
-        color: 'green',
+        title: 'Task Started',
+        message: `Started setting names from EPG for ${channelIds.length} channels. Progress will be shown in notifications.`,
+        color: 'blue',
       });
+
+      // Close the modal since the task is now running in background
+      onClose();
     } catch (error) {
-      console.error('Failed to set names from EPG:', error);
+      console.error('Failed to start EPG name setting task:', error);
       notifications.show({
         title: 'Error',
-        message: 'Failed to set names from EPG data.',
+        message: 'Failed to start EPG name setting task.',
         color: 'red',
       });
     }
@@ -214,63 +179,24 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     }
 
     try {
-      // Ensure logos are loaded first
-      await ensureLogosLoaded();
+      // Start the backend task
+      await API.setChannelLogosFromEpg(channelIds);
 
-      const channelsMap = useChannelsStore.getState().channels;
-      const updates = [];
-
-      for (const id of channelIds) {
-        const channel = channelsMap[id];
-        if (channel && channel.epg_data_id) {
-          const tvg = tvgsById[channel.epg_data_id];
-          if (tvg && tvg.name) {
-            // Try to find a matching logo
-            const matchingLogo = Object.values(logos).find(
-              (logo) =>
-                logo.name.toLowerCase().includes(tvg.name.toLowerCase()) ||
-                tvg.name.toLowerCase().includes(logo.name.toLowerCase())
-            );
-
-            if (matchingLogo) {
-              updates.push({
-                id,
-                logo_id: matchingLogo.id,
-              });
-            }
-          }
-        }
-      }
-
-      if (updates.length === 0) {
-        notifications.show({
-          title: 'No Matching Logos',
-          message:
-            'No matching logos found for the selected channels based on their EPG names.',
-          color: 'orange',
-        });
-        return;
-      }
-
-      await API.bulkUpdateChannels(updates);
-      
-      // Refresh both channels and logos data
-      await Promise.all([
-        API.requeryChannels(),
-        useChannelsStore.getState().fetchChannels(),
-        ensureLogosLoaded(), // Ensure logos are refreshed
-      ]);
-
+      // The task will send WebSocket updates for progress
+      // Just show that it started successfully
       notifications.show({
-        title: 'Success',
-        message: `Updated logos for ${updates.length} channels based on EPG names.`,
-        color: 'green',
+        title: 'Task Started',
+        message: `Started setting logos from EPG for ${channelIds.length} channels. Progress will be shown in notifications.`,
+        color: 'blue',
       });
+
+      // Close the modal since the task is now running in background
+      onClose();
     } catch (error) {
-      console.error('Failed to set logos from EPG:', error);
+      console.error('Failed to start EPG logo setting task:', error);
       notifications.show({
         title: 'Error',
-        message: 'Failed to set logos from EPG data.',
+        message: 'Failed to start EPG logo setting task.',
         color: 'red',
       });
     }

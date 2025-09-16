@@ -207,21 +207,19 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     }
 
     const tvg = tvgsById[epgDataId];
-    if (!tvg || !tvg.name) {
+    if (!tvg || !tvg.icon_url) {
       notifications.show({
-        title: 'No EPG Name',
-        message: 'EPG data does not have a name to match against logos.',
+        title: 'No EPG Icon',
+        message: 'EPG data does not have an icon URL.',
         color: 'orange',
       });
       return;
     }
 
     try {
-      // Try to find a logo that matches the EPG name
-      const matchingLogo = Object.values(logos).find(
-        (logo) =>
-          logo.name.toLowerCase().includes(tvg.name.toLowerCase()) ||
-          tvg.name.toLowerCase().includes(logo.name.toLowerCase())
+      // Try to find a logo that matches the EPG icon URL
+      let matchingLogo = Object.values(logos).find(
+        (logo) => logo.url === tvg.icon_url
       );
 
       if (matchingLogo) {
@@ -232,11 +230,47 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
           color: 'green',
         });
       } else {
+        // Logo doesn't exist - create it
         notifications.show({
-          title: 'No Matching Logo',
-          message: `No existing logo found that matches "${tvg.name}". Consider uploading a logo or using the smart logo selection.`,
-          color: 'orange',
+          id: 'creating-logo',
+          title: 'Creating Logo',
+          message: `Creating new logo from EPG icon URL...`,
+          loading: true,
         });
+
+        try {
+          const newLogoData = {
+            name: tvg.name || `Logo for ${tvg.icon_url}`,
+            url: tvg.icon_url,
+          };
+
+          // Create logo by calling the Logo API directly
+          const newLogo = await API.createLogo(newLogoData);
+
+          formik.setFieldValue('logo_id', newLogo.id);
+
+          // Refresh logos to update the cache
+          await ensureLogosLoaded();
+
+          notifications.update({
+            id: 'creating-logo',
+            title: 'Success',
+            message: `Created and assigned new logo "${newLogo.name}"`,
+            loading: false,
+            color: 'green',
+            autoClose: 5000,
+          });
+        } catch (createError) {
+          notifications.update({
+            id: 'creating-logo',
+            title: 'Error',
+            message: 'Failed to create logo from EPG icon URL',
+            loading: false,
+            color: 'red',
+            autoClose: 5000,
+          });
+          throw createError;
+        }
       }
     } catch (error) {
       notifications.show({
@@ -751,7 +785,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                     variant="light"
                     onClick={handleSetLogoFromEpg}
                     disabled={!formik.values.epg_data_id}
-                    title="Find matching logo based on EPG name"
+                    title="Find matching logo based on EPG icon URL"
                   >
                     Use EPG Logo
                   </Button>

@@ -2465,3 +2465,227 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
             'error': str(e)
         })
         raise
+
+
+@shared_task(bind=True)
+def set_channels_names_from_epg(self, channel_ids):
+    """
+    Celery task to set channel names from EPG data for multiple channels
+    """
+    from core.utils import send_websocket_update
+
+    task_id = self.request.id
+    total_channels = len(channel_ids)
+    updated_count = 0
+    errors = []
+
+    try:
+        logger.info(f"Starting EPG name setting task for {total_channels} channels")
+
+        # Send initial progress
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_name_setting_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_channels,
+            'status': 'running',
+            'message': 'Starting EPG name setting...'
+        })
+
+        batch_size = 100
+        for i in range(0, total_channels, batch_size):
+            batch_ids = channel_ids[i:i + batch_size]
+            batch_updates = []
+
+            # Get channels and their EPG data
+            channels = Channel.objects.filter(id__in=batch_ids).select_related('epg_data')
+
+            for channel in channels:
+                try:
+                    if channel.epg_data and channel.epg_data.name:
+                        if channel.name != channel.epg_data.name:
+                            channel.name = channel.epg_data.name
+                            batch_updates.append(channel)
+                            updated_count += 1
+                except Exception as e:
+                    errors.append(f"Channel {channel.id}: {str(e)}")
+                    logger.error(f"Error processing channel {channel.id}: {e}")
+
+            # Bulk update the batch
+            if batch_updates:
+                Channel.objects.bulk_update(batch_updates, ['name'])
+
+            # Send progress update
+            progress = min(i + batch_size, total_channels)
+            send_websocket_update('updates', 'update', {
+                'type': 'epg_name_setting_progress',
+                'task_id': task_id,
+                'progress': progress,
+                'total': total_channels,
+                'status': 'running',
+                'message': f'Updated {updated_count} channel names...',
+                'updated_count': updated_count
+            })
+
+        # Send completion notification
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_name_setting_progress',
+            'task_id': task_id,
+            'progress': total_channels,
+            'total': total_channels,
+            'status': 'completed',
+            'message': f'Successfully updated {updated_count} channel names from EPG data',
+            'updated_count': updated_count,
+            'error_count': len(errors),
+            'errors': errors
+        })
+
+        logger.info(f"EPG name setting task completed. Updated {updated_count} channels")
+        return {
+            'status': 'completed',
+            'updated_count': updated_count,
+            'error_count': len(errors),
+            'errors': errors
+        }
+
+    except Exception as e:
+        logger.error(f"EPG name setting task failed: {e}")
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_name_setting_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_channels,
+            'status': 'failed',
+            'message': f'Task failed: {str(e)}',
+            'error': str(e)
+        })
+        raise
+
+
+@shared_task(bind=True)
+def set_channels_logos_from_epg(self, channel_ids):
+    """
+    Celery task to set channel logos from EPG data for multiple channels
+    Creates logos from EPG icon URLs if they don't exist
+    """
+    from .models import Logo
+    from core.utils import send_websocket_update
+    import requests
+    from urllib.parse import urlparse
+
+    task_id = self.request.id
+    total_channels = len(channel_ids)
+    updated_count = 0
+    created_logos_count = 0
+    errors = []
+
+    try:
+        logger.info(f"Starting EPG logo setting task for {total_channels} channels")
+
+        # Send initial progress
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_logo_setting_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_channels,
+            'status': 'running',
+            'message': 'Starting EPG logo setting...'
+        })
+
+        batch_size = 50  # Smaller batch for logo processing
+        for i in range(0, total_channels, batch_size):
+            batch_ids = channel_ids[i:i + batch_size]
+            batch_updates = []
+
+            # Get channels and their EPG data
+            channels = Channel.objects.filter(id__in=batch_ids).select_related('epg_data', 'logo')
+
+            for channel in channels:
+                try:
+                    if channel.epg_data and channel.epg_data.icon_url:
+                        icon_url = channel.epg_data.icon_url.strip()
+
+                        # Try to find existing logo with this URL
+                        try:
+                            logo = Logo.objects.get(url=icon_url)
+                        except Logo.DoesNotExist:
+                            # Create new logo from EPG icon URL
+                            try:
+                                # Generate a name for the logo
+                                logo_name = channel.epg_data.name or f"Logo for {channel.epg_data.tvg_id}"
+
+                                # Create the logo record
+                                logo = Logo.objects.create(
+                                    name=logo_name,
+                                    url=icon_url
+                                )
+                                created_logos_count += 1
+                                logger.info(f"Created new logo from EPG: {logo_name} - {icon_url}")
+
+                            except Exception as create_error:
+                                errors.append(f"Channel {channel.id}: Failed to create logo from {icon_url}: {str(create_error)}")
+                                logger.error(f"Failed to create logo for channel {channel.id}: {create_error}")
+                                continue
+
+                        # Update channel logo if different
+                        if channel.logo != logo:
+                            channel.logo = logo
+                            batch_updates.append(channel)
+                            updated_count += 1
+
+                except Exception as e:
+                    errors.append(f"Channel {channel.id}: {str(e)}")
+                    logger.error(f"Error processing channel {channel.id}: {e}")
+
+            # Bulk update the batch
+            if batch_updates:
+                Channel.objects.bulk_update(batch_updates, ['logo'])
+
+            # Send progress update
+            progress = min(i + batch_size, total_channels)
+            send_websocket_update('updates', 'update', {
+                'type': 'epg_logo_setting_progress',
+                'task_id': task_id,
+                'progress': progress,
+                'total': total_channels,
+                'status': 'running',
+                'message': f'Updated {updated_count} channel logos, created {created_logos_count} new logos...',
+                'updated_count': updated_count,
+                'created_logos_count': created_logos_count
+            })
+
+        # Send completion notification
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_logo_setting_progress',
+            'task_id': task_id,
+            'progress': total_channels,
+            'total': total_channels,
+            'status': 'completed',
+            'message': f'Successfully updated {updated_count} channel logos and created {created_logos_count} new logos from EPG data',
+            'updated_count': updated_count,
+            'created_logos_count': created_logos_count,
+            'error_count': len(errors),
+            'errors': errors
+        })
+
+        logger.info(f"EPG logo setting task completed. Updated {updated_count} channels, created {created_logos_count} logos")
+        return {
+            'status': 'completed',
+            'updated_count': updated_count,
+            'created_logos_count': created_logos_count,
+            'error_count': len(errors),
+            'errors': errors
+        }
+
+    except Exception as e:
+        logger.error(f"EPG logo setting task failed: {e}")
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_logo_setting_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_channels,
+            'status': 'failed',
+            'message': f'Task failed: {str(e)}',
+            'error': str(e)
+        })
+        raise

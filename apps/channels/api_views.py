@@ -493,6 +493,68 @@ class ChannelViewSet(viewsets.ModelViewSet):
             "channels": serialized_channels
         })
 
+    @action(detail=False, methods=["post"], url_path="set-names-from-epg")
+    def set_names_from_epg(self, request):
+        """
+        Trigger a Celery task to set channel names from EPG data
+        """
+        from .tasks import set_channels_names_from_epg
+
+        data = request.data
+        channel_ids = data.get("channel_ids", [])
+
+        if not channel_ids:
+            return Response(
+                {"error": "channel_ids is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(channel_ids, list):
+            return Response(
+                {"error": "channel_ids must be a list"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Start the Celery task
+        task = set_channels_names_from_epg.delay(channel_ids)
+
+        return Response({
+            "message": f"Started EPG name setting task for {len(channel_ids)} channels",
+            "task_id": task.id,
+            "channel_count": len(channel_ids)
+        })
+
+    @action(detail=False, methods=["post"], url_path="set-logos-from-epg")
+    def set_logos_from_epg(self, request):
+        """
+        Trigger a Celery task to set channel logos from EPG data
+        """
+        from .tasks import set_channels_logos_from_epg
+
+        data = request.data
+        channel_ids = data.get("channel_ids", [])
+
+        if not channel_ids:
+            return Response(
+                {"error": "channel_ids is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(channel_ids, list):
+            return Response(
+                {"error": "channel_ids must be a list"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Start the Celery task
+        task = set_channels_logos_from_epg.delay(channel_ids)
+
+        return Response({
+            "message": f"Started EPG logo setting task for {len(channel_ids)} channels",
+            "task_id": task.id,
+            "channel_count": len(channel_ids)
+        })
+
     @action(detail=False, methods=["get"], url_path="ids")
     def get_ids(self, request, *args, **kwargs):
         # Get the filtered queryset
