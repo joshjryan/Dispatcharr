@@ -19,6 +19,7 @@ from tzlocal import get_localzone
 from urllib.parse import urlparse
 import base64
 import logging
+from django.db.models.functions import Lower
 import os
 from apps.m3u.utils import calculate_tuner_count
 
@@ -859,11 +860,11 @@ def xc_get_live_categories(user):
                 channel_profiles
             )
 
-        channel_groups = ChannelGroup.objects.filter(**filters).distinct()
+        channel_groups = ChannelGroup.objects.filter(**filters).distinct().order_by(Lower("name"))
     else:
         channel_groups = ChannelGroup.objects.filter(
             channels__isnull=False, channels__user_level__lte=user.user_level
-        ).distinct()
+        ).distinct().order_by(Lower("name"))
 
     for group in channel_groups:
         response.append(
@@ -1025,13 +1026,13 @@ def xc_get_vod_categories(user):
         categories = VODCategory.objects.filter(
             category_type='movie',
             m3umovierelation__m3u_account__in=m3u_accounts
-        ).distinct()
+        ).distinct().order_by(Lower("name"))
     else:
         # Admins can see all categories that have active movie relations
         categories = VODCategory.objects.filter(
             category_type='movie',
             m3umovierelation__m3u_account__is_active=True
-        ).distinct()
+        ).distinct().order_by(Lower("name"))
 
     for category in categories:
         response.append({
@@ -1142,12 +1143,12 @@ def xc_get_series_categories(user):
         categories = VODCategory.objects.filter(
             category_type='series',
             m3useriesrelation__m3u_account__in=m3u_accounts
-        ).distinct()
+        ).distinct().order_by(Lower("name"))
     else:
         categories = VODCategory.objects.filter(
             category_type='series',
             m3useriesrelation__m3u_account__is_active=True
-        ).distinct()
+        ).distinct().order_by(Lower("name"))
 
     for category in categories:
         response.append({
