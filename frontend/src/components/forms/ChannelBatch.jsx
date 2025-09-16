@@ -4,6 +4,7 @@ import API from '../../api';
 import useStreamProfilesStore from '../../store/streamProfiles';
 import useEPGsStore from '../../store/epgs';
 import ChannelGroupForm from './ChannelGroup';
+import { useLogoSelection } from '../../hooks/useSmartLogos';
 import {
   Box,
   Button,
@@ -43,6 +44,12 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const epgs = useEPGsStore((s) => s.epgs);
   const tvgs = useEPGsStore((s) => s.tvgs);
   const tvgsById = useEPGsStore((s) => s.tvgsById);
+
+  const {
+    logos,
+    ensureLogosLoaded,
+    isLoading: logosLoading,
+  } = useLogoSelection();
 
   const [channelGroupModelOpen, setChannelGroupModalOpen] = useState(false);
   const [selectedChannelGroup, setSelectedChannelGroup] = useState('-1');
@@ -207,12 +214,8 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     }
 
     try {
-      // First, get all available logos
-      const logosResponse = await API.getLogos();
-      const logos = logosResponse.reduce((acc, logo) => {
-        acc[logo.id] = logo;
-        return acc;
-      }, {});
+      // Ensure logos are loaded first
+      await ensureLogosLoaded();
 
       const channelsMap = useChannelsStore.getState().channels;
       const updates = [];
