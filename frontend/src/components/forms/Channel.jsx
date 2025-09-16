@@ -34,7 +34,7 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { ListOrdered, SquarePlus, SquareX, X } from 'lucide-react';
+import { ListOrdered, SquarePlus, SquareX, X, Zap } from 'lucide-react';
 import useEPGsStore from '../../store/epgs';
 import { Dropzone } from '@mantine/dropzone';
 import { FixedSizeList as List } from 'react-window';
@@ -118,6 +118,48 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
       }
     } else {
       setLogoPreview(null);
+    }
+  };
+
+  const handleAutoMatchEpg = async () => {
+    // Only attempt auto-match for existing channels (editing mode)
+    if (!channel || !channel.id) {
+      notifications.show({
+        title: 'Info',
+        message: 'Auto-match is only available when editing existing channels.',
+        color: 'blue',
+      });
+      return;
+    }
+
+    try {
+      const response = await API.matchChannelEpg(channel.id);
+      
+      if (response.matched) {
+        // Update the form with the new EPG data
+        if (response.channel && response.channel.epg_data_id) {
+          formik.setFieldValue('epg_data_id', response.channel.epg_data_id);
+        }
+        
+        notifications.show({
+          title: 'Success',
+          message: response.message,
+          color: 'green',
+        });
+      } else {
+        notifications.show({
+          title: 'No Match Found',
+          message: response.message,
+          color: 'orange',
+        });
+      }
+    } catch (error) {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to auto-match EPG data',
+        color: 'red',
+      });
+      console.error('Auto-match error:', error);
     }
   };
 
@@ -706,6 +748,20 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                           }
                         >
                           Use Dummy
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="transparent"
+                          color="blue"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAutoMatchEpg();
+                          }}
+                          disabled={!channel || !channel.id}
+                          title={!channel || !channel.id ? "Auto-match is only available for existing channels" : "Automatically match EPG data"}
+                          leftSection={<Zap size="14" />}
+                        >
+                          Auto Match
                         </Button>
                       </Group>
                     }

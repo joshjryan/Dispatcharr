@@ -1452,6 +1452,26 @@ export default class API {
     }
   }
 
+  static async matchChannelEpg(channelId) {
+    try {
+      const response = await request(
+        `${host}/api/channels/channels/${channelId}/match-epg/`,
+        {
+          method: 'POST',
+        }
+      );
+
+      // Update the channel in the store with the refreshed data if provided
+      if (response.channel) {
+        useChannelsStore.getState().updateChannel(response.channel);
+      }
+
+      return response;
+    } catch (e) {
+      errorNotification('Failed to run EPG auto-match for channel', e);
+    }
+  }
+
   static async fetchActiveChannelStats() {
     try {
       const response = await request(`${host}/proxy/ts/status`);

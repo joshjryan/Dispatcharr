@@ -39,7 +39,7 @@ from .serializers import (
     ChannelProfileSerializer,
     RecordingSerializer,
 )
-from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl
+from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl, match_single_channel_epg
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -788,6 +788,33 @@ class ChannelViewSet(viewsets.ModelViewSet):
         return Response(
             {"message": "EPG matching task initiated."}, status=status.HTTP_202_ACCEPTED
         )
+
+    @swagger_auto_schema(
+        method="post",
+        operation_description="Try to auto-match this specific channel with EPG data.",
+        responses={200: "EPG matching completed", 202: "EPG matching task initiated"},
+    )
+    @action(detail=True, methods=["post"], url_path="match-epg")
+    def match_channel_epg(self, request, pk=None):
+        channel = self.get_object()
+        
+        # Import the matching logic
+        from apps.channels.tasks import match_single_channel_epg
+        
+        try:
+            # Try to match this specific channel - call synchronously for immediate response
+            result = match_single_channel_epg.apply_async(args=[channel.id]).get(timeout=30)
+            
+            # Refresh the channel from DB to get any updates
+            channel.refresh_from_db()
+            
+            return Response({
+                "message": result.get("message", "Channel matching completed"),
+                "matched": result.get("matched", False),
+                "channel": self.get_serializer(channel).data
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
 
     # ─────────────────────────────────────────────────────────
     # 7) Set EPG and Refresh
