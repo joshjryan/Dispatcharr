@@ -330,6 +330,51 @@ export const WebsocketProvider = ({ children }) => {
               }
               break;
 
+            case 'epg_matching_progress': {
+              const progress = parsedEvent.data;
+              const id = 'epg-matching-progress';
+
+              if (progress.stage === 'starting') {
+                notifications.show({
+                  id,
+                  title: 'EPG Matching in Progress',
+                  message: `Starting to match ${progress.total} channels...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.stage === 'matching') {
+                let message = `Matched ${progress.matched} of ${progress.total} channels`;
+                if (progress.remaining > 0) {
+                  message += ` (${progress.remaining} remaining)`;
+                }
+                if (progress.current_channel) {
+                  message += `\nCurrently processing: ${progress.current_channel}`;
+                }
+
+                notifications.update({
+                  id,
+                  title: 'EPG Matching in Progress',
+                  message,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.stage === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'EPG Matching Complete',
+                  message: `Successfully matched ${progress.matched} of ${progress.total} channels (${progress.progress_percent}%)`,
+                  color: progress.matched > 0 ? 'green.5' : 'orange',
+                  loading: false,
+                  autoClose: 6000,
+                });
+              }
+              break;
+            }
+
             case 'm3u_profile_test':
               setProfilePreview(
                 parsedEvent.data.search_preview,

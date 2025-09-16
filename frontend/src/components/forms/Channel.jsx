@@ -78,6 +78,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
   const [groupPopoverOpened, setGroupPopoverOpened] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
+  const [autoMatchLoading, setAutoMatchLoading] = useState(false);
   const groupOptions = Object.values(channelGroups);
 
   const addStream = (stream) => {
@@ -132,6 +133,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
       return;
     }
 
+    setAutoMatchLoading(true);
     try {
       const response = await API.matchChannelEpg(channel.id);
 
@@ -160,6 +162,8 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
         color: 'red',
       });
       console.error('Auto-match error:', error);
+    } finally {
+      setAutoMatchLoading(false);
     }
   };
 
@@ -758,6 +762,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                             handleAutoMatchEpg();
                           }}
                           disabled={!channel || !channel.id}
+                          loading={autoMatchLoading}
                           title={
                             !channel || !channel.id
                               ? 'Auto-match is only available for existing channels'

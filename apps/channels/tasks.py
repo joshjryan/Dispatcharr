@@ -28,6 +28,36 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
+def send_epg_matching_progress(total_channels, matched_channels, current_channel_name="", stage="matching"):
+    """
+    Send EPG matching progress via WebSocket
+    """
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            progress_data = {
+                'type': 'epg_matching_progress',
+                'total': total_channels,
+                'matched': len(matched_channels) if isinstance(matched_channels, list) else matched_channels,
+                'remaining': total_channels - (len(matched_channels) if isinstance(matched_channels, list) else matched_channels),
+                'current_channel': current_channel_name,
+                'stage': stage,
+                'progress_percent': round((len(matched_channels) if isinstance(matched_channels, list) else matched_channels) / total_channels * 100, 1) if total_channels > 0 else 0
+            }
+
+            async_to_sync(channel_layer.group_send)(
+                "updates",
+                {
+                    "type": "update",
+                    "data": {
+                        "type": "epg_matching_progress",
+                        **progress_data
+                    }
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Failed to send EPG matching progress: {e}")
+
 # Lazy loading for ML models - only imported/loaded when needed
 _ml_model_cache = {
     'sentence_transformer': None
@@ -121,13 +151,18 @@ def normalize_name(name: str) -> str:
     norm = " ".join(tokens).strip()
     return norm
 
-def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True):
+def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True, send_progress=True):
     """
     EPG matching logic that finds the best EPG matches for channels using
     multiple matching strategies including fuzzy matching and ML models.
     """
     channels_to_update = []
     matched_channels = []
+    total_channels = len(channels_data)
+
+    # Send initial progress
+    if send_progress:
+        send_epg_matching_progress(total_channels, 0, stage="starting")
 
     # Try to get ML models if requested (but don't load yet - lazy loading)
     st_model, util = None, None
@@ -135,7 +170,18 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
     ml_available = use_ml
 
     # Process each channel
-    for chan in channels_data:
+    for index, chan in enumerate(channels_data):
+        normalized_tvg_id = chan.get("tvg_id", "")
+        fallback_name = chan["tvg_id"].strip() if chan["tvg_id"] else chan["name"]
+
+        # Send progress update every 5 channels or for the first few
+        if send_progress and (index < 5 or index % 5 == 0 or index == total_channels - 1):
+            send_epg_matching_progress(
+                total_channels,
+                len(matched_channels),
+                current_channel_name=chan["name"][:50],  # Truncate long names
+                stage="matching"
+            )
         normalized_tvg_id = chan.get("tvg_id", "")
         fallback_name = chan["tvg_id"].strip() if chan["tvg_id"] else chan["name"]
 
@@ -324,6 +370,14 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
         _ml_model_cache['sentence_transformer'] = None
         gc.collect()
 
+    # Send final progress update
+    if send_progress:
+        send_epg_matching_progress(
+            total_channels,
+            len(matched_channels),
+            stage="completed"
+        )
+
     return {
         "channels_to_update": channels_to_update,
         "matched_channels": matched_channels
@@ -376,8 +430,8 @@ def match_epg_channels():
 
         logger.info(f"Processing {len(channels_data)} channels against {len(epg_data)} EPG entries")
 
-        # Run EPG matching
-        result = match_channels_to_epg(channels_data, epg_data, region_code, use_ml=True)
+        # Run EPG matching with progress updates
+        result = match_channels_to_epg(channels_data, epg_data, region_code, use_ml=True, send_progress=True)
         channels_to_update_dicts = result["channels_to_update"]
         matched_channels = result["matched_channels"]
 
@@ -507,8 +561,11 @@ def match_single_channel_epg(channel_id):
 
         logger.info(f"Matching single channel '{channel.name}' against {len(epg_data_list)} EPG entries")
 
-        # Use the EPG matching function
-        result = match_channels_to_epg([channel_data], epg_data_list)
+        # Send progress for single channel matching
+        send_epg_matching_progress(1, 0, current_channel_name=channel.name, stage="matching")
+
+        # Use the EPG matching function (no progress updates for single channel to avoid spam)
+        result = match_channels_to_epg([channel_data], epg_data_list, send_progress=False)
         channels_to_update = result.get("channels_to_update", [])
         matched_channels = result.get("matched_channels", [])
 
@@ -540,6 +597,9 @@ def match_single_channel_epg(channel_id):
 
                     logger.info(success_msg)
 
+                    # Send completion progress for single channel
+                    send_epg_matching_progress(1, 1, current_channel_name=channel.name, stage="completed")
+
                     # Clean up ML models from memory after single channel matching
                     if _ml_model_cache['sentence_transformer'] is not None:
                         logger.info("Cleaning up ML models from memory")
@@ -556,6 +616,9 @@ def match_single_channel_epg(channel_id):
                     return {"matched": False, "message": "Matched EPG data not found"}
 
         # No match found
+        # Send completion progress for single channel (failed)
+        send_epg_matching_progress(1, 0, current_channel_name=channel.name, stage="completed")
+
         # Clean up ML models from memory after single channel matching
         if _ml_model_cache['sentence_transformer'] is not None:
             logger.info("Cleaning up ML models from memory")
