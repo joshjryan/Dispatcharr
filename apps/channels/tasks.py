@@ -551,7 +551,7 @@ def match_selected_channels_epg(channel_ids):
 
         if not channels_without_epg.exists():
             logger.info("No selected channels need EPG matching.")
-            
+
             # Send WebSocket update
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(

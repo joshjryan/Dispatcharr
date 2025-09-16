@@ -306,10 +306,9 @@ const ChannelTableHeader = ({
                 onClick={matchEpg}
               >
                 <Text size="xs">
-                  {selectedTableIds.length > 0 
-                    ? `Auto-Match (${selectedTableIds.length} selected)` 
-                    : 'Auto-Match EPG'
-                  }
+                  {selectedTableIds.length > 0
+                    ? `Auto-Match (${selectedTableIds.length} selected)`
+                    : 'Auto-Match EPG'}
                 </Text>
               </Menu.Item>
 

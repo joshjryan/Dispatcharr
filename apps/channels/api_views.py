@@ -796,7 +796,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
     def match_epg(self, request):
         # Get channel IDs from request body if provided
         channel_ids = request.data.get('channel_ids', [])
-        
+
         if channel_ids:
             # Process only selected channels
             from .tasks import match_selected_channels_epg
@@ -806,7 +806,7 @@ class ChannelViewSet(viewsets.ModelViewSet):
             # Process all channels without EPG (original behavior)
             match_epg_channels.delay()
             message = "EPG matching task initiated for all channels without EPG."
-        
+
         return Response(
             {"message": message}, status=status.HTTP_202_ACCEPTED
         )
