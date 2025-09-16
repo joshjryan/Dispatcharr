@@ -259,68 +259,6 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
         # Log the best score we found
         if best_epg:
             logger.info(f"Channel {chan['id']} '{chan['name']}' => best match: '{best_epg['name']}' (score: {best_score})")
-
-            # Debug: Show some other potential matches for analysis
-            def score_epg_entry(epg_row):
-                base_score = fuzz.ratio(chan["norm_chan"], epg_row.get("norm_name", ""))
-                bonus = 0
-                if region_code and epg_row.get("tvg_id"):
-                    combined_text = epg_row["tvg_id"].lower() + " " + epg_row["name"].lower()
-                    dot_regions = re.findall(r'\.([a-z]{2})', combined_text)
-                    if dot_regions:
-                        if region_code in dot_regions:
-                            bonus = 30
-                        else:
-                            bonus = -15
-                    elif region_code in combined_text:
-                        bonus = 15
-                return base_score + bonus
-
-            # Check specifically for entries matching the channel's call sign or name parts
-            channel_keywords = chan["norm_chan"].split()
-            potential_matches = []
-            for keyword in channel_keywords:
-                if len(keyword) >= 3:  # Only check meaningful keywords
-                    matching_entries = [row for row in epg_data if keyword.lower() in row['name'].lower() or keyword.lower() in row['tvg_id'].lower()]
-                    potential_matches.extend(matching_entries)
-
-            # Remove duplicates
-            unique_matches = []
-            seen_ids = set()
-            for match in potential_matches:
-                if match['tvg_id'] not in seen_ids:
-                    seen_ids.add(match['tvg_id'])
-                    unique_matches.append(match)
-
-            if unique_matches:
-                logger.info(f"Found {len(unique_matches)} entries containing channel keywords {channel_keywords}:")
-                for match_row in unique_matches:
-                    match_score = score_epg_entry(match_row)
-                    # Show original name vs normalized name to debug normalization
-                    logger.info(f"  Match: '{match_row['name']}' → normalized: '{match_row.get('norm_name', 'MISSING')}' (tvg_id: {match_row['tvg_id']}) => score: {match_score}")
-            else:
-                logger.warning(f"No entries found containing any of the channel keywords: {channel_keywords}")
-
-            sorted_scores = sorted([(row, score_epg_entry(row)) for row in epg_data if row.get("norm_name") and score_epg_entry(row) > 20], key=lambda x: x[1], reverse=True)
-
-            # Remove duplicates based on tvg_id
-            seen_tvg_ids = set()
-            unique_sorted_scores = []
-            for row, score in sorted_scores:
-                if row['tvg_id'] not in seen_tvg_ids:
-                    seen_tvg_ids.add(row['tvg_id'])
-                    unique_sorted_scores.append((row, score))
-
-            logger.debug(f"Channel {chan['id']} '{chan['name']}' => top 10 unique fuzzy matches:")
-            for i, (epg_row, score) in enumerate(unique_sorted_scores[:10]):
-                # Highlight entries that contain any of the channel's keywords
-                channel_keywords = chan["norm_chan"].split()
-                is_keyword_match = any(keyword in epg_row['name'].lower() or keyword in epg_row['tvg_id'].lower() for keyword in channel_keywords if len(keyword) >= 3)
-
-                if is_keyword_match:
-                    logger.info(f"  {i+1}. 🎯 KEYWORD MATCH: '{epg_row['name']}' (tvg_id: {epg_row['tvg_id']}) => score: {score} (norm_name: '{epg_row.get('norm_name', 'MISSING')}')")
-                else:
-                    logger.debug(f"  {i+1}. '{epg_row['name']}' (tvg_id: {epg_row['tvg_id']}) => score: {score}")
         else:
             logger.debug(f"Channel {chan['id']} '{chan['name']}' => no EPG entries with valid norm_name found")
             continue
@@ -334,16 +272,9 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
 
         # Medium confidence - use ML if available (lazy load models here)
         elif best_score >= LOWER_FUZZY_THRESHOLD and ml_available:
-            logger.debug(f"Channel {chan['id']} entering ML matching path at {time.time()}")
-
-            # Note: If experiencing 5+ second delays here, check if Celery Beat
-            # task 'scan_and_process_files' is running too frequently and blocking execution
-
             # Lazy load ML models only when we actually need them
             if st_model is None:
-                logger.debug(f"Channel {chan['id']} about to load ML model at {time.time()}")
                 st_model, util = get_sentence_transformer()
-                logger.debug(f"Channel {chan['id']} finished loading ML model at {time.time()}")
 
             # Lazy generate embeddings only when we actually need them
             if epg_embeddings is None and st_model and any(row.get("norm_name") for row in epg_data):
@@ -398,13 +329,9 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
 
         # Last resort: Try ML matching even with very low fuzzy scores
         elif best_score >= 20 and ml_available:
-            logger.debug(f"Channel {chan['id']} entering last resort ML matching at {time.time()}")
-
             # Lazy load ML models for last resort attempts
             if st_model is None:
-                logger.debug(f"Channel {chan['id']} loading ML model for last resort at {time.time()}")
                 st_model, util = get_sentence_transformer()
-                logger.debug(f"Channel {chan['id']} finished loading ML model for last resort at {time.time()}")
 
             # Lazy generate embeddings for last resort attempts
             if epg_embeddings is None and st_model and any(row.get("norm_name") for row in epg_data):
