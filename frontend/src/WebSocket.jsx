@@ -375,6 +375,115 @@ export const WebsocketProvider = ({ children }) => {
               break;
             }
 
+            case 'epg_logo_setting_progress': {
+              const progress = parsedEvent.data;
+              const id = 'epg-logo-setting-progress';
+
+              if (progress.status === 'running' && progress.progress === 0) {
+                // Initial message
+                notifications.show({
+                  id,
+                  title: 'Setting Logos from EPG',
+                  message: `Processing ${progress.total} channels...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'running') {
+                // Progress update
+                let message = `Processed ${progress.progress} of ${progress.total} channels`;
+                if (progress.updated_count !== undefined) {
+                  message += ` (${progress.updated_count} updated)`;
+                }
+                if (progress.created_logos_count !== undefined) {
+                  message += `, created ${progress.created_logos_count} logos`;
+                }
+
+                notifications.update({
+                  id,
+                  title: 'Setting Logos from EPG',
+                  message,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Logo Setting Complete',
+                  message: `Successfully updated ${progress.updated_count || 0} channel logos${progress.created_logos_count ? `, created ${progress.created_logos_count} new logos` : ''}`,
+                  color: progress.updated_count > 0 ? 'green.5' : 'orange',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                // Refresh channels data
+                try {
+                  await useChannelsStore.getState().fetchChannels();
+                } catch (e) {
+                  console.warn(
+                    'Failed to refresh channels after logo setting:',
+                    e
+                  );
+                }
+              }
+              break;
+            }
+
+            case 'epg_name_setting_progress': {
+              const progress = parsedEvent.data;
+              const id = 'epg-name-setting-progress';
+
+              if (progress.status === 'running' && progress.progress === 0) {
+                // Initial message
+                notifications.show({
+                  id,
+                  title: 'Setting Names from EPG',
+                  message: `Processing ${progress.total} channels...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'running') {
+                // Progress update
+                let message = `Processed ${progress.progress} of ${progress.total} channels`;
+                if (progress.updated_count !== undefined) {
+                  message += ` (${progress.updated_count} updated)`;
+                }
+
+                notifications.update({
+                  id,
+                  title: 'Setting Names from EPG',
+                  message,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Name Setting Complete',
+                  message: `Successfully updated ${progress.updated_count || 0} channel names from EPG data`,
+                  color: progress.updated_count > 0 ? 'green.5' : 'orange',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                // Refresh channels data
+                try {
+                  await useChannelsStore.getState().fetchChannels();
+                } catch (e) {
+                  console.warn(
+                    'Failed to refresh channels after name setting:',
+                    e
+                  );
+                }
+              }
+              break;
+            }
+
             case 'm3u_profile_test':
               setProfilePreview(
                 parsedEvent.data.search_preview,
