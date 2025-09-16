@@ -253,11 +253,11 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
 
                 if dot_regions:
                     if region_code in dot_regions:
-                        bonus = 30  # Bigger bonus for matching region
+                        bonus = 15  # Bigger bonus for matching region
                     else:
                         bonus = -15  # Penalty for different region
                 elif region_code in combined_text:
-                    bonus = 15
+                    bonus = 10
 
             score = base_score + bonus
 
