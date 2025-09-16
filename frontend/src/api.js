@@ -1437,12 +1437,18 @@ export default class API {
     }
   }
 
-  static async matchEpg() {
+  static async matchEpg(channelIds = null) {
     try {
+      const requestBody = channelIds ? { channel_ids: channelIds } : {};
+      
       const response = await request(
         `${host}/api/channels/channels/match-epg/`,
         {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
         }
       );
 

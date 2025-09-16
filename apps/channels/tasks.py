@@ -527,6 +527,150 @@ def match_epg_channels():
 
 
 @shared_task
+def match_selected_channels_epg(channel_ids):
+    """
+    Match EPG data for only the specified selected channels.
+    Uses the same integrated EPG matching logic but processes only selected channels.
+    """
+    try:
+        logger.info(f"Starting integrated EPG matching for {len(channel_ids)} selected channels...")
+
+        # Get region preference
+        try:
+            region_obj = CoreSettings.objects.get(key="preferred-region")
+            region_code = region_obj.value.strip().lower()
+        except CoreSettings.DoesNotExist:
+            region_code = None
+
+        # Get only the specified channels that don't have EPG data assigned
+        channels_without_epg = Channel.objects.filter(
+            id__in=channel_ids,
+            epg_data__isnull=True
+        )
+        logger.info(f"Found {channels_without_epg.count()} selected channels without EPG data")
+
+        if not channels_without_epg.exists():
+            logger.info("No selected channels need EPG matching.")
+            
+            # Send WebSocket update
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                'updates',
+                {
+                    'type': 'update',
+                    "data": {
+                        "success": True,
+                        "type": "epg_match",
+                        "refresh_channels": True,
+                        "matches_count": 0,
+                        "message": "No selected channels need EPG matching",
+                        "associations": []
+                    }
+                }
+            )
+            return "No selected channels needed EPG matching."
+
+        channels_data = []
+        for channel in channels_without_epg:
+            normalized_tvg_id = channel.tvg_id.strip().lower() if channel.tvg_id else ""
+            channels_data.append({
+                "id": channel.id,
+                "name": channel.name,
+                "tvg_id": normalized_tvg_id,
+                "original_tvg_id": channel.tvg_id,
+                "fallback_name": normalized_tvg_id if normalized_tvg_id else channel.name,
+                "norm_chan": normalize_name(channel.name)
+            })
+
+        # Get all EPG data
+        epg_data = []
+        for epg in EPGData.objects.all():
+            normalized_tvg_id = epg.tvg_id.strip().lower() if epg.tvg_id else ""
+            epg_data.append({
+                'id': epg.id,
+                'tvg_id': normalized_tvg_id,
+                'original_tvg_id': epg.tvg_id,
+                'name': epg.name,
+                'norm_name': normalize_name(epg.name),
+                'epg_source_id': epg.epg_source.id if epg.epg_source else None,
+            })
+
+        logger.info(f"Processing {len(channels_data)} selected channels against {len(epg_data)} EPG entries")
+
+        # Run EPG matching with progress updates - automatically uses appropriate thresholds
+        result = match_channels_to_epg(channels_data, epg_data, region_code, use_ml=True, send_progress=True)
+        channels_to_update_dicts = result["channels_to_update"]
+        matched_channels = result["matched_channels"]
+
+        # Update channels in database
+        if channels_to_update_dicts:
+            channel_ids_to_update = [d["id"] for d in channels_to_update_dicts]
+            channels_qs = Channel.objects.filter(id__in=channel_ids_to_update)
+            channels_list = list(channels_qs)
+
+            # Create mapping from channel_id to epg_data_id
+            epg_mapping = {d["id"]: d["epg_data_id"] for d in channels_to_update_dicts}
+
+            # Update each channel with matched EPG data
+            for channel_obj in channels_list:
+                epg_data_id = epg_mapping.get(channel_obj.id)
+                if epg_data_id:
+                    try:
+                        epg_data_obj = EPGData.objects.get(id=epg_data_id)
+                        channel_obj.epg_data = epg_data_obj
+                    except EPGData.DoesNotExist:
+                        logger.error(f"EPG data {epg_data_id} not found for channel {channel_obj.id}")
+
+            # Bulk update all channels
+            Channel.objects.bulk_update(channels_list, ["epg_data"])
+
+        total_matched = len(matched_channels)
+        if total_matched:
+            logger.info(f"Selected Channel Match Summary: {total_matched} channel(s) matched.")
+            for (cid, cname, tvg) in matched_channels:
+                logger.info(f"  - Channel ID={cid}, Name='{cname}' => tvg_id='{tvg}'")
+        else:
+            logger.info("No selected channels were matched.")
+
+        logger.info("Finished integrated EPG matching for selected channels.")
+
+        # Send WebSocket update
+        channel_layer = get_channel_layer()
+        associations = [
+            {"channel_id": chan["id"], "epg_data_id": chan["epg_data_id"]}
+            for chan in channels_to_update_dicts
+        ]
+
+        async_to_sync(channel_layer.group_send)(
+            'updates',
+            {
+                'type': 'update',
+                "data": {
+                    "success": True,
+                    "type": "epg_match",
+                    "refresh_channels": True,
+                    "matches_count": total_matched,
+                    "message": f"EPG matching complete: {total_matched} selected channel(s) matched",
+                    "associations": associations
+                }
+            }
+        )
+
+        return f"Done. Matched {total_matched} selected channel(s)."
+
+    finally:
+        # Clean up ML models from memory after bulk matching
+        if _ml_model_cache['sentence_transformer'] is not None:
+            logger.info("Cleaning up ML models from memory")
+            _ml_model_cache['sentence_transformer'] = None
+
+        # Memory cleanup
+        gc.collect()
+        from core.utils import cleanup_memory
+        cleanup_memory(log_usage=True, force_collection=True)
+
+
+@shared_task
 def match_single_channel_epg(channel_id):
     """
     Try to match a single channel with EPG data using the integrated matching logic

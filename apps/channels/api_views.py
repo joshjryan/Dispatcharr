@@ -39,7 +39,7 @@ from .serializers import (
     ChannelProfileSerializer,
     RecordingSerializer,
 )
-from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl, match_single_channel_epg
+from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl, match_single_channel_epg, match_selected_channels_epg
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -779,14 +779,36 @@ class ChannelViewSet(viewsets.ModelViewSet):
     # ─────────────────────────────────────────────────────────
     @swagger_auto_schema(
         method="post",
-        operation_description="Kick off a Celery task that tries to fuzzy-match channels with EPG data.",
+        operation_description="Kick off a Celery task that tries to fuzzy-match channels with EPG data. If channel_ids are provided, only those channels will be processed.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'channel_ids': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                    description='List of channel IDs to process. If empty or not provided, all channels without EPG will be processed.'
+                )
+            }
+        ),
         responses={202: "EPG matching task initiated"},
     )
     @action(detail=False, methods=["post"], url_path="match-epg")
     def match_epg(self, request):
-        match_epg_channels.delay()
+        # Get channel IDs from request body if provided
+        channel_ids = request.data.get('channel_ids', [])
+        
+        if channel_ids:
+            # Process only selected channels
+            from .tasks import match_selected_channels_epg
+            match_selected_channels_epg.delay(channel_ids)
+            message = f"EPG matching task initiated for {len(channel_ids)} selected channel(s)."
+        else:
+            # Process all channels without EPG (original behavior)
+            match_epg_channels.delay()
+            message = "EPG matching task initiated for all channels without EPG."
+        
         return Response(
-            {"message": "EPG matching task initiated."}, status=status.HTTP_202_ACCEPTED
+            {"message": message}, status=status.HTTP_202_ACCEPTED
         )
 
     @swagger_auto_schema(
