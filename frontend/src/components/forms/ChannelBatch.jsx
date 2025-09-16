@@ -253,9 +253,12 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       }
 
       await API.bulkUpdateChannels(updates);
+      
+      // Refresh both channels and logos data
       await Promise.all([
         API.requeryChannels(),
         useChannelsStore.getState().fetchChannels(),
+        ensureLogosLoaded(), // Ensure logos are refreshed
       ]);
 
       notifications.show({
