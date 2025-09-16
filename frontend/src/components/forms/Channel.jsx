@@ -464,27 +464,32 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
         <form onSubmit={formik.handleSubmit}>
           <Group justify="space-between" align="top">
             <Stack gap="5" style={{ flex: 1 }}>
-              <Group align="end">
-                <TextInput
-                  id="name"
-                  name="name"
-                  label="Channel Name"
-                  value={formik.values.name}
-                  onChange={formik.handleChange}
-                  error={formik.errors.name ? formik.touched.name : ''}
-                  size="xs"
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  size="xs"
-                  variant="light"
-                  onClick={handleSetNameFromEpg}
-                  disabled={!formik.values.epg_data_id}
-                  title="Set channel name from EPG data"
-                >
-                  Use EPG Name
-                </Button>
-              </Group>
+              <TextInput
+                id="name"
+                name="name"
+                label={
+                  <Group gap="xs">
+                    <span>Channel Name</span>
+                    {formik.values.epg_data_id && (
+                      <Button
+                        size="xs"
+                        variant="transparent"
+                        onClick={handleSetNameFromEpg}
+                        title="Set channel name from EPG data"
+                        p={0}
+                        h="auto"
+                      >
+                        Use EPG Name
+                      </Button>
+                    )}
+                  </Group>
+                }
+                value={formik.values.name}
+                onChange={formik.handleChange}
+                error={formik.errors.name ? formik.touched.name : ''}
+                size="xs"
+                style={{ flex: 1 }}
+              />
 
               <Flex gap="sm">
                 <Popover
@@ -665,7 +670,23 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                     <TextInput
                       id="logo_id"
                       name="logo_id"
-                      label="Logo"
+                      label={
+                        <Group gap="xs">
+                          <span>Logo</span>
+                          {formik.values.epg_data_id && (
+                            <Button
+                              size="xs"
+                              variant="transparent"
+                              onClick={handleSetLogoFromEpg}
+                              title="Find matching logo based on EPG icon URL"
+                              p={0}
+                              h="auto"
+                            >
+                              Use EPG Logo
+                            </Button>
+                          )}
+                        </Group>
+                      }
                       readOnly
                       value={logos[formik.values.logo_id]?.name || 'Default'}
                       onClick={() => {
@@ -780,15 +801,6 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                     alt="channel logo"
                     style={{ height: 40 }}
                   />
-                  <Button
-                    size="xs"
-                    variant="light"
-                    onClick={handleSetLogoFromEpg}
-                    disabled={!formik.values.epg_data_id}
-                    title="Find matching logo based on EPG icon URL"
-                  >
-                    Use EPG Logo
-                  </Button>
                 </Stack>
               </Group>
 
