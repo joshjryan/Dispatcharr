@@ -155,6 +155,10 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
     """
     EPG matching logic that finds the best EPG matches for channels using
     multiple matching strategies including fuzzy matching and ML models.
+
+    Automatically uses conservative thresholds for bulk matching (multiple channels)
+    to avoid bad matches that create user cleanup work, and aggressive thresholds
+    for single channel matching where users specifically requested a match attempt.
     """
     channels_to_update = []
     matched_channels = []
@@ -169,7 +173,26 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
     epg_embeddings = None
     ml_available = use_ml
 
-    # Process each channel
+    # Automatically determine matching strategy based on number of channels
+    is_bulk_matching = len(channels_data) > 1
+
+    # Adjust matching thresholds based on operation type
+    if is_bulk_matching:
+        # Conservative thresholds for bulk matching to avoid creating cleanup work
+        FUZZY_HIGH_CONFIDENCE = 90      # Only very high fuzzy scores
+        FUZZY_MEDIUM_CONFIDENCE = 70    # Higher threshold for ML enhancement
+        ML_HIGH_CONFIDENCE = 0.75       # Higher ML confidence required
+        ML_LAST_RESORT = 0.65          # More conservative last resort
+        FUZZY_LAST_RESORT_MIN = 50     # Higher fuzzy minimum for last resort
+        logger.info(f"Using conservative thresholds for bulk matching ({total_channels} channels)")
+    else:
+        # More aggressive thresholds for single channel matching (user requested specific match)
+        FUZZY_HIGH_CONFIDENCE = 85      # Original threshold
+        FUZZY_MEDIUM_CONFIDENCE = 40    # Original threshold
+        ML_HIGH_CONFIDENCE = 0.65       # Original threshold
+        ML_LAST_RESORT = 0.50          # Original desperate threshold
+        FUZZY_LAST_RESORT_MIN = 20     # Original minimum
+        logger.info("Using aggressive thresholds for single channel matching")    # Process each channel
     for index, chan in enumerate(channels_data):
         normalized_tvg_id = chan.get("tvg_id", "")
         fallback_name = chan["tvg_id"].strip() if chan["tvg_id"] else chan["name"]
@@ -254,14 +277,14 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
             continue
 
         # High confidence match - accept immediately
-        if best_score >= BEST_FUZZY_THRESHOLD:
+        if best_score >= FUZZY_HIGH_CONFIDENCE:
             chan["epg_data_id"] = best_epg["id"]
             channels_to_update.append(chan)
             matched_channels.append((chan['id'], chan['name'], best_epg["tvg_id"]))
             logger.info(f"Channel {chan['id']} '{chan['name']}' => matched tvg_id={best_epg['tvg_id']} (score={best_score})")
 
         # Medium confidence - use ML if available (lazy load models here)
-        elif best_score >= LOWER_FUZZY_THRESHOLD and ml_available:
+        elif best_score >= FUZZY_MEDIUM_CONFIDENCE and ml_available:
             # Lazy load ML models only when we actually need them
             if st_model is None:
                 st_model, util = get_sentence_transformer()
@@ -288,7 +311,7 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
                     top_index = int(sim_scores.argmax())
                     top_value = float(sim_scores[top_index])
 
-                    if top_value >= EMBED_SIM_THRESHOLD:
+                    if top_value >= ML_HIGH_CONFIDENCE:
                         # Find the EPG entry that corresponds to this embedding index
                         epg_with_names = [epg for epg in epg_data if epg.get("norm_name")]
                         matched_epg = epg_with_names[top_index]
@@ -298,10 +321,10 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
                         matched_channels.append((chan['id'], chan['name'], matched_epg["tvg_id"]))
                         logger.info(f"Channel {chan['id']} '{chan['name']}' => matched EPG tvg_id={matched_epg['tvg_id']} (fuzzy={best_score}, ML-sim={top_value:.2f})")
                     else:
-                        logger.info(f"Channel {chan['id']} '{chan['name']}' => fuzzy={best_score}, ML-sim={top_value:.2f} < {EMBED_SIM_THRESHOLD}, trying last resort...")
+                        logger.info(f"Channel {chan['id']} '{chan['name']}' => fuzzy={best_score}, ML-sim={top_value:.2f} < {ML_HIGH_CONFIDENCE}, trying last resort...")
 
                         # Last resort: try ML with very low fuzzy threshold
-                        if top_value >= 0.45:  # Lower ML threshold as last resort
+                        if top_value >= ML_LAST_RESORT:  # Dynamic last resort threshold
                             epg_with_names = [epg for epg in epg_data if epg.get("norm_name")]
                             matched_epg = epg_with_names[top_index]
 
@@ -310,7 +333,7 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
                             matched_channels.append((chan['id'], chan['name'], matched_epg["tvg_id"]))
                             logger.info(f"Channel {chan['id']} '{chan['name']}' => LAST RESORT match EPG tvg_id={matched_epg['tvg_id']} (fuzzy={best_score}, ML-sim={top_value:.2f})")
                         else:
-                            logger.info(f"Channel {chan['id']} '{chan['name']}' => even last resort ML-sim {top_value:.2f} < 0.45, skipping")
+                            logger.info(f"Channel {chan['id']} '{chan['name']}' => even last resort ML-sim {top_value:.2f} < {ML_LAST_RESORT}, skipping")
 
                 except Exception as e:
                     logger.warning(f"ML matching failed for channel {chan['id']}: {e}")
@@ -318,7 +341,7 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
                     logger.info(f"Channel {chan['id']} '{chan['name']}' => fuzzy score {best_score} below threshold, skipping")
 
         # Last resort: Try ML matching even with very low fuzzy scores
-        elif best_score >= 20 and ml_available:
+        elif best_score >= FUZZY_LAST_RESORT_MIN and ml_available:
             # Lazy load ML models for last resort attempts
             if st_model is None:
                 st_model, util = get_sentence_transformer()
@@ -346,7 +369,7 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
                     top_index = int(sim_scores.argmax())
                     top_value = float(sim_scores[top_index])
 
-                    if top_value >= 0.50:  # Even lower threshold for last resort
+                    if top_value >= ML_LAST_RESORT:  # Dynamic threshold for desperate attempts
                         # Find the EPG entry that corresponds to this embedding index
                         epg_with_names = [epg for epg in epg_data if epg.get("norm_name")]
                         matched_epg = epg_with_names[top_index]
@@ -356,13 +379,13 @@ def match_channels_to_epg(channels_data, epg_data, region_code=None, use_ml=True
                         matched_channels.append((chan['id'], chan['name'], matched_epg["tvg_id"]))
                         logger.info(f"Channel {chan['id']} '{chan['name']}' => DESPERATE LAST RESORT match EPG tvg_id={matched_epg['tvg_id']} (fuzzy={best_score}, ML-sim={top_value:.2f})")
                     else:
-                        logger.info(f"Channel {chan['id']} '{chan['name']}' => desperate last resort ML-sim {top_value:.2f} < 0.50, giving up")
+                        logger.info(f"Channel {chan['id']} '{chan['name']}' => desperate last resort ML-sim {top_value:.2f} < {ML_LAST_RESORT}, giving up")
                 except Exception as e:
                     logger.warning(f"Last resort ML matching failed for channel {chan['id']}: {e}")
-                    logger.info(f"Channel {chan['id']} '{chan['name']}' => best fuzzy score={best_score} < {LOWER_FUZZY_THRESHOLD}, giving up")
+                    logger.info(f"Channel {chan['id']} '{chan['name']}' => best fuzzy score={best_score} < {FUZZY_MEDIUM_CONFIDENCE}, giving up")
         else:
             # No ML available or very low fuzzy score
-            logger.info(f"Channel {chan['id']} '{chan['name']}' => best fuzzy score={best_score} < {LOWER_FUZZY_THRESHOLD}, no ML fallback available")
+            logger.info(f"Channel {chan['id']} '{chan['name']}' => best fuzzy score={best_score} < {FUZZY_MEDIUM_CONFIDENCE}, no ML fallback available")
 
     # Clean up ML models from memory after matching (infrequent operation)
     if _ml_model_cache['sentence_transformer'] is not None:
@@ -430,7 +453,7 @@ def match_epg_channels():
 
         logger.info(f"Processing {len(channels_data)} channels against {len(epg_data)} EPG entries")
 
-        # Run EPG matching with progress updates
+        # Run EPG matching with progress updates - automatically uses conservative thresholds for bulk operations
         result = match_channels_to_epg(channels_data, epg_data, region_code, use_ml=True, send_progress=True)
         channels_to_update_dicts = result["channels_to_update"]
         matched_channels = result["matched_channels"]
@@ -564,7 +587,7 @@ def match_single_channel_epg(channel_id):
         # Send progress for single channel matching
         send_epg_matching_progress(1, 0, current_channel_name=channel.name, stage="matching")
 
-        # Use the EPG matching function (no progress updates for single channel to avoid spam)
+        # Use the EPG matching function - automatically uses aggressive thresholds for single channel
         result = match_channels_to_epg([channel_data], epg_data_list, send_progress=False)
         channels_to_update = result.get("channels_to_update", [])
         matched_channels = result.get("matched_channels", [])
