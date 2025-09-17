@@ -249,9 +249,6 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
           formik.setFieldValue('logo_id', newLogo.id);
 
-          // Refresh logos to update the cache
-          await ensureLogosLoaded();
-
           notifications.update({
             id: 'creating-logo',
             title: 'Success',
