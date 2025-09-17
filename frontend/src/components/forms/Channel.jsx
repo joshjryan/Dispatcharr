@@ -9,6 +9,7 @@ import ChannelGroupForm from './ChannelGroup';
 import usePlaylistsStore from '../../store/playlists';
 import logo from '../../images/logo.png';
 import { useChannelLogoSelection } from '../../hooks/useSmartLogos';
+import useLogosStore from '../../store/logos';
 import LazyLogo from '../LazyLogo';
 import {
   Box,
@@ -55,6 +56,9 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     ensureLogosLoaded,
     isLoading: logosLoading,
   } = useChannelLogoSelection();
+
+  // Import the full logos store for duplicate checking
+  const allLogos = useLogosStore((s) => s.logos);
 
   // Ensure logos are loaded when component mounts
   useEffect(() => {
@@ -217,8 +221,8 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     }
 
     try {
-      // Try to find a logo that matches the EPG icon URL
-      let matchingLogo = Object.values(logos).find(
+      // Try to find a logo that matches the EPG icon URL - check ALL logos to avoid duplicates
+      let matchingLogo = Object.values(allLogos).find(
         (logo) => logo.url === tvg.icon_url
       );
 
