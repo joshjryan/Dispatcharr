@@ -485,6 +485,7 @@ export const WebsocketProvider = ({ children }) => {
                 });
                 // Refresh channels data
                 try {
+                  await API.requeryChannels();
                   await useChannelsStore.getState().fetchChannels();
                 } catch (e) {
                   console.warn(
