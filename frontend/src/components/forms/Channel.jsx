@@ -987,6 +987,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                       }
                       mb="xs"
                       size="xs"
+                      autoFocus
                     />
                   </Group>
 
