@@ -52,7 +52,7 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
   const canEditChannelGroup = useChannelsStore((s) => s.canEditChannelGroup);
 
   const {
-    logos,
+    logos: channelLogos,
     ensureLogosLoaded,
     isLoading: logosLoading,
   } = useChannelLogoSelection();
@@ -410,9 +410,11 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
 
   // Memoize logo options to prevent infinite re-renders during background loading
   const logoOptions = useMemo(() => {
-    const options = [{ id: '0', name: 'Default' }].concat(Object.values(logos));
+    const options = [{ id: '0', name: 'Default' }].concat(
+      Object.values(channelLogos)
+    );
     return options;
-  }, [logos]); // Only depend on logos object
+  }, [channelLogos]); // Only depend on channelLogos object
 
   // Update the handler for when channel group modal is closed
   const handleChannelGroupModalClose = (newGroup) => {
@@ -689,7 +691,9 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
                         </Group>
                       }
                       readOnly
-                      value={logos[formik.values.logo_id]?.name || 'Default'}
+                      value={
+                        channelLogos[formik.values.logo_id]?.name || 'Default'
+                      }
                       onClick={() => {
                         console.log(
                           'Logo input clicked, setting popover opened to true'
