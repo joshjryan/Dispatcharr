@@ -42,6 +42,7 @@ export const useLogoSelection = () => {
  * (unused + channel-used, excluding VOD-only logos)
  */
 export const useChannelLogoSelection = () => {
+  const [isInitialized, setIsInitialized] = useState(false);
   const channelLogos = useLogosStore((s) => s.channelLogos);
   const hasLoadedChannelLogos = useLogosStore((s) => s.hasLoadedChannelLogos);
   const backgroundLoading = useLogosStore((s) => s.backgroundLoading);
@@ -56,7 +57,7 @@ export const useChannelLogoSelection = () => {
       return;
     }
 
-    if (hasLoadedChannelLogos && hasLogos) {
+    if ((hasLoadedChannelLogos && hasLogos) || isInitialized) {
       return;
     }
 
@@ -71,6 +72,7 @@ export const useChannelLogoSelection = () => {
     hasLoadedChannelLogos,
     hasLogos,
     fetchChannelAssignableLogos,
+    isInitialized,
   ]);
 
   return {

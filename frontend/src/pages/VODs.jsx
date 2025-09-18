@@ -264,8 +264,7 @@ const useCardColumns = () => {
 };
 
 const VODsPage = () => {
-  const movies = useVODStore((s) => s.movies);
-  const series = useVODStore((s) => s.series);
+  const currentPageContent = useVODStore((s) => s.currentPageContent); // Direct subscription
   const allCategories = useVODStore((s) => s.categories);
   const filters = useVODStore((s) => s.filters);
   const currentPage = useVODStore((s) => s.currentPage);
@@ -288,8 +287,7 @@ const VODsPage = () => {
     setPageSize(Number(value));
     localStorage.setItem('vodsPageSize', value);
   };
-  const fetchMovies = useVODStore((s) => s.fetchMovies);
-  const fetchSeries = useVODStore((s) => s.fetchSeries);
+  const fetchContent = useVODStore((s) => s.fetchContent);
   const fetchCategories = useVODStore((s) => s.fetchCategories);
 
   // const showVideo = useVideoStore((s) => s.showVideo); - removed as unused
@@ -307,36 +305,10 @@ const VODsPage = () => {
 
   // Helper function to get display data based on current filters
   const getDisplayData = () => {
-    if (filters.type === 'series') {
-      return Object.values(series).map((item) => ({
-        ...item,
-        _vodType: 'series',
-      }));
-    } else if (filters.type === 'movies') {
-      return Object.values(movies).map((item) => ({
-        ...item,
-        _vodType: 'movie',
-      }));
-    } else {
-      // 'all' - combine movies and series, tagging each with its type, then sort alphabetically by name/title
-      const combined = [
-        ...Object.values(movies).map((item) => ({
-          ...item,
-          _vodType: 'movie',
-        })),
-        ...Object.values(series).map((item) => ({
-          ...item,
-          _vodType: 'series',
-        })),
-      ];
-      return combined.sort((a, b) => {
-        const nameA = (a.name || a.title || '').toLowerCase();
-        const nameB = (b.name || b.title || '').toLowerCase();
-        if (nameA < nameB) return -1;
-        if (nameA > nameB) return 1;
-        return 0;
-      });
-    }
+    return (currentPageContent || []).map((item) => ({
+      ...item,
+      _vodType: item.contentType === 'movie' ? 'movie' : 'series',
+    }));
   };
 
   useEffect(() => {
@@ -360,17 +332,8 @@ const VODsPage = () => {
   }, [fetchCategories]);
 
   useEffect(() => {
-    if (filters.type === 'series') {
-      fetchSeries().finally(() => setInitialLoad(false));
-    } else if (filters.type === 'movies') {
-      fetchMovies().finally(() => setInitialLoad(false));
-    } else {
-      // 'all': fetch both movies and series
-      Promise.all([fetchMovies(), fetchSeries()]).finally(() =>
-        setInitialLoad(false)
-      );
-    }
-  }, [filters, currentPage, pageSize, fetchMovies, fetchSeries]);
+    fetchContent().finally(() => setInitialLoad(false));
+  }, [filters, currentPage, pageSize, fetchContent]);
 
   const handleVODCardClick = (vod) => {
     setSelectedVOD(vod);
@@ -464,46 +427,25 @@ const VODsPage = () => {
           </Flex>
         ) : (
           <>
-            {filters.type === 'series' ? (
-              <Grid gutter="md">
-                {Object.values(series).map((seriesItem) => (
-                  <Grid.Col
-                    span={12 / columns}
-                    key={seriesItem.id}
-                    style={{
-                      minWidth: MIN_CARD_WIDTH,
-                      maxWidth: MAX_CARD_WIDTH,
-                      margin: '0 auto',
-                    }}
-                  >
-                    <SeriesCard
-                      series={seriesItem}
-                      onClick={handleSeriesClick}
-                    />
-                  </Grid.Col>
-                ))}
-              </Grid>
-            ) : (
-              <Grid gutter="md">
-                {getDisplayData().map((item) => (
-                  <Grid.Col
-                    span={12 / columns}
-                    key={item.id}
-                    style={{
-                      minWidth: MIN_CARD_WIDTH,
-                      maxWidth: MAX_CARD_WIDTH,
-                      margin: '0 auto',
-                    }}
-                  >
-                    {item._vodType === 'series' ? (
-                      <SeriesCard series={item} onClick={handleSeriesClick} />
-                    ) : (
-                      <VODCard vod={item} onClick={handleVODCardClick} />
-                    )}
-                  </Grid.Col>
-                ))}
-              </Grid>
-            )}
+            <Grid gutter="md">
+              {getDisplayData().map((item) => (
+                <Grid.Col
+                  span={12 / columns}
+                  key={`${item.contentType}_${item.id}`}
+                  style={{
+                    minWidth: MIN_CARD_WIDTH,
+                    maxWidth: MAX_CARD_WIDTH,
+                    margin: '0 auto',
+                  }}
+                >
+                  {item.contentType === 'series' ? (
+                    <SeriesCard series={item} onClick={handleSeriesClick} />
+                  ) : (
+                    <VODCard vod={item} onClick={handleVODCardClick} />
+                  )}
+                </Grid.Col>
+              ))}
+            </Grid>
 
             {/* Pagination */}
             {totalPages > 1 && (

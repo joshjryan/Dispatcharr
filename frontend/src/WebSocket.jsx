@@ -330,6 +330,173 @@ export const WebsocketProvider = ({ children }) => {
               }
               break;
 
+            case 'epg_matching_progress': {
+              const progress = parsedEvent.data;
+              const id = 'epg-matching-progress';
+
+              if (progress.stage === 'starting') {
+                notifications.show({
+                  id,
+                  title: 'EPG Matching in Progress',
+                  message: `Starting to match ${progress.total} channels...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.stage === 'matching') {
+                let message = `Matched ${progress.matched} of ${progress.total} channels`;
+                if (progress.remaining > 0) {
+                  message += ` (${progress.remaining} remaining)`;
+                }
+                if (progress.current_channel) {
+                  message += `\nCurrently processing: ${progress.current_channel}`;
+                }
+
+                notifications.update({
+                  id,
+                  title: 'EPG Matching in Progress',
+                  message,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.stage === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'EPG Matching Complete',
+                  message: `Successfully matched ${progress.matched} of ${progress.total} channels (${progress.progress_percent}%)`,
+                  color: progress.matched > 0 ? 'green.5' : 'orange',
+                  loading: false,
+                  autoClose: 6000,
+                });
+              }
+              break;
+            }
+
+            case 'epg_logo_setting_progress': {
+              const progress = parsedEvent.data;
+              const id = 'epg-logo-setting-progress';
+
+              if (progress.status === 'running' && progress.progress === 0) {
+                // Initial message
+                notifications.show({
+                  id,
+                  title: 'Setting Logos from EPG',
+                  message: `Processing ${progress.total} channels...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'running') {
+                // Progress update
+                let message = `Processed ${progress.progress} of ${progress.total} channels`;
+                if (progress.updated_count !== undefined) {
+                  message += ` (${progress.updated_count} updated)`;
+                }
+                if (progress.created_logos_count !== undefined) {
+                  message += `, created ${progress.created_logos_count} logos`;
+                }
+
+                notifications.update({
+                  id,
+                  title: 'Setting Logos from EPG',
+                  message,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Logo Setting Complete',
+                  message: `Successfully updated ${progress.updated_count || 0} channel logos${progress.created_logos_count ? `, created ${progress.created_logos_count} new logos` : ''}`,
+                  color: progress.updated_count > 0 ? 'green.5' : 'orange',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                // Refresh channels data and logos
+                try {
+                  await API.requeryChannels();
+                  await useChannelsStore.getState().fetchChannels();
+
+                  // Get updated channel data and extract logo IDs to load
+                  const channels = useChannelsStore.getState().channels;
+                  const logoIds = Object.values(channels)
+                    .filter((channel) => channel.logo_id)
+                    .map((channel) => channel.logo_id);
+
+                  // Fetch the specific logos that were just assigned
+                  if (logoIds.length > 0) {
+                    await useLogosStore.getState().fetchLogosByIds(logoIds);
+                  }
+                } catch (e) {
+                  console.warn(
+                    'Failed to refresh channels after logo setting:',
+                    e
+                  );
+                }
+              }
+              break;
+            }
+
+            case 'epg_name_setting_progress': {
+              const progress = parsedEvent.data;
+              const id = 'epg-name-setting-progress';
+
+              if (progress.status === 'running' && progress.progress === 0) {
+                // Initial message
+                notifications.show({
+                  id,
+                  title: 'Setting Names from EPG',
+                  message: `Processing ${progress.total} channels...`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'running') {
+                // Progress update
+                let message = `Processed ${progress.progress} of ${progress.total} channels`;
+                if (progress.updated_count !== undefined) {
+                  message += ` (${progress.updated_count} updated)`;
+                }
+
+                notifications.update({
+                  id,
+                  title: 'Setting Names from EPG',
+                  message,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (progress.status === 'completed') {
+                notifications.update({
+                  id,
+                  title: 'Name Setting Complete',
+                  message: `Successfully updated ${progress.updated_count || 0} channel names from EPG data`,
+                  color: progress.updated_count > 0 ? 'green.5' : 'orange',
+                  loading: false,
+                  autoClose: 6000,
+                });
+                // Refresh channels data
+                try {
+                  await API.requeryChannels();
+                  await useChannelsStore.getState().fetchChannels();
+                } catch (e) {
+                  console.warn(
+                    'Failed to refresh channels after name setting:',
+                    e
+                  );
+                }
+              }
+              break;
+            }
+
             case 'm3u_profile_test':
               setProfilePreview(
                 parsedEvent.data.search_preview,
@@ -548,6 +715,87 @@ export const WebsocketProvider = ({ children }) => {
                 autoClose: 8000,
               });
               break;
+
+            case 'channels_created':
+              // General notification for channel creation
+              notifications.show({
+                title: 'Channels Created',
+                message: `Successfully created ${parsedEvent.data.count || 'multiple'} channel(s)`,
+                color: 'green',
+                autoClose: 4000,
+              });
+
+              // Refresh the channels table to show new channels
+              try {
+                await API.requeryChannels();
+                await useChannelsStore.getState().fetchChannels();
+                console.log('Channels refreshed after bulk creation');
+              } catch (error) {
+                console.error(
+                  'Error refreshing channels after creation:',
+                  error
+                );
+              }
+
+              break;
+
+            case 'bulk_channel_creation_progress': {
+              // Handle progress updates with persistent notifications like stream rehash
+              const data = parsedEvent.data;
+
+              if (data.status === 'starting') {
+                notifications.show({
+                  id: 'bulk-channel-creation-progress', // Persistent ID
+                  title: 'Bulk Channel Creation Started',
+                  message: data.message || 'Starting bulk channel creation...',
+                  color: 'blue.5',
+                  autoClose: false, // Don't auto-close
+                  withCloseButton: false, // No close button during processing
+                  loading: true, // Show loading indicator
+                });
+              } else if (
+                data.status === 'processing' ||
+                data.status === 'creating_logos' ||
+                data.status === 'creating_channels'
+              ) {
+                // Calculate progress percentage
+                const progressPercent =
+                  data.total > 0
+                    ? Math.round((data.progress / data.total) * 100)
+                    : 0;
+
+                // Update the existing notification with progress
+                notifications.update({
+                  id: 'bulk-channel-creation-progress',
+                  title: 'Bulk Channel Creation in Progress',
+                  message: `${progressPercent}% complete - ${data.message}`,
+                  color: 'blue.5',
+                  autoClose: false,
+                  withCloseButton: false,
+                  loading: true,
+                });
+              } else if (data.status === 'completed') {
+                // Hide the progress notification since channels_created will show success
+                notifications.hide('bulk-channel-creation-progress');
+              } else if (data.status === 'failed') {
+                // Update to error state
+                notifications.update({
+                  id: 'bulk-channel-creation-progress',
+                  title: 'Bulk Channel Creation Failed',
+                  message:
+                    data.error ||
+                    'An error occurred during bulk channel creation',
+                  color: 'red.5',
+                  autoClose: 12000, // Auto-close after longer delay for errors
+                  withCloseButton: true, // Allow manual close
+                  loading: false, // Remove loading indicator
+                });
+              }
+
+              // Pass through to individual components for any additional handling
+              setVal(parsedEvent);
+              break;
+            }
 
             default:
               console.error(
