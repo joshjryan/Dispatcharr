@@ -158,6 +158,7 @@ DVR_TV_FALLBACK_DIR_KEY = slugify("DVR TV Fallback Dir")
 DVR_TV_FALLBACK_TEMPLATE_KEY = slugify("DVR TV Fallback Template")
 DVR_MOVIE_FALLBACK_TEMPLATE_KEY = slugify("DVR Movie Fallback Template")
 DVR_COMSKIP_ENABLED_KEY = slugify("DVR Comskip Enabled")
+DVR_COMSKIP_CUSTOM_PATH_KEY = slugify("DVR Comskip Custom Path")
 DVR_PRE_OFFSET_MINUTES_KEY = slugify("DVR Pre-Offset Minutes")
 DVR_POST_OFFSET_MINUTES_KEY = slugify("DVR Post-Offset Minutes")
 
@@ -273,6 +274,27 @@ class CoreSettings(models.Model):
             return str(val).lower() in ("1", "true", "yes", "on")
         except cls.DoesNotExist:
             return False
+
+    @classmethod
+    def get_dvr_comskip_custom_path(cls):
+        """Return configured comskip.ini path or empty string if unset."""
+        try:
+            return cls.objects.get(key=DVR_COMSKIP_CUSTOM_PATH_KEY).value
+        except cls.DoesNotExist:
+            return ""
+
+    @classmethod
+    def set_dvr_comskip_custom_path(cls, path: str | None):
+        """Persist the comskip.ini path setting, normalizing nulls to empty string."""
+        value = (path or "").strip()
+        obj, _ = cls.objects.get_or_create(
+            key=DVR_COMSKIP_CUSTOM_PATH_KEY,
+            defaults={"name": "DVR Comskip Custom Path", "value": value},
+        )
+        if obj.value != value:
+            obj.value = value
+            obj.save(update_fields=["value"])
+        return value
 
     @classmethod
     def get_dvr_pre_offset_minutes(cls):

@@ -601,3 +601,33 @@ class Recording(models.Model):
 
     def __str__(self):
         return f"{self.channel.name} - {self.start_time} to {self.end_time}"
+
+
+class RecurringRecordingRule(models.Model):
+    """Rule describing a recurring manual DVR schedule."""
+
+    channel = models.ForeignKey(
+        "Channel",
+        on_delete=models.CASCADE,
+        related_name="recurring_rules",
+    )
+    days_of_week = models.JSONField(default=list)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    enabled = models.BooleanField(default=True)
+    name = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["channel", "start_time"]
+
+    def __str__(self):
+        channel_name = getattr(self.channel, "name", str(self.channel_id))
+        return f"Recurring rule for {channel_name}"
+
+    def cleaned_days(self):
+        try:
+            return sorted({int(d) for d in (self.days_of_week or []) if 0 <= int(d) <= 6})
+        except Exception:
+            return []

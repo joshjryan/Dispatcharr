@@ -11,6 +11,7 @@ import {
   Center,
   Flex,
   Group,
+  FileInput,
   MultiSelect,
   Select,
   Stack,
@@ -20,6 +21,7 @@ import {
   NumberInput,
 } from '@mantine/core';
 import { isNotEmpty, useForm } from '@mantine/form';
+import { notifications } from '@mantine/notifications';
 import UserAgentsTable from '../components/tables/UserAgentsTable';
 import StreamProfilesTable from '../components/tables/StreamProfilesTable';
 import useLocalStorage from '../hooks/useLocalStorage';
@@ -57,6 +59,10 @@ const SettingsPage = () => {
   // Add a new state to track the dialog type
   const [rehashDialogType, setRehashDialogType] = useState(null); // 'save' or 'rehash'
 
+  const [comskipFile, setComskipFile] = useState(null);
+  const [comskipUploadLoading, setComskipUploadLoading] = useState(false);
+  const [comskipConfig, setComskipConfig] = useState({ path: '', exists: false });
+
   // UI / local storage settings
   const [tableSize, setTableSize] = useLocalStorage('table-size', 'default');
   const [timeFormat, setTimeFormat] = useLocalStorage('time-format', '12h');
@@ -77,6 +83,7 @@ const SettingsPage = () => {
       'dvr-tv-fallback-template': '',
       'dvr-movie-fallback-template': '',
       'dvr-comskip-enabled': false,
+      'dvr-comskip-custom-path': '',
       'dvr-pre-offset-minutes': 0,
       'dvr-post-offset-minutes': 0,
     },
@@ -155,6 +162,12 @@ const SettingsPage = () => {
       );
 
       form.setValues(formValues);
+      if (formValues['dvr-comskip-custom-path']) {
+        setComskipConfig((prev) => ({
+          path: formValues['dvr-comskip-custom-path'],
+          exists: prev.exists,
+        }));
+      }
 
       const networkAccessSettings = JSON.parse(
         settings['network-access'].value || '{}'
@@ -176,6 +189,26 @@ const SettingsPage = () => {
       }
     }
   }, [settings]);
+
+  useEffect(() => {
+    const loadComskipConfig = async () => {
+      try {
+        const response = await API.getComskipConfig();
+        if (response) {
+          setComskipConfig({
+            path: response.path || '',
+            exists: Boolean(response.exists),
+          });
+          if (response.path) {
+            form.setFieldValue('dvr-comskip-custom-path', response.path);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load comskip config', error);
+      }
+    };
+    loadComskipConfig();
+  }, []);
 
   const onSubmit = async () => {
     const values = form.getValues();
@@ -256,6 +289,39 @@ const SettingsPage = () => {
     });
 
     setProxySettingsSaved(true);
+  };
+
+  const onComskipUpload = async () => {
+    if (!comskipFile) {
+      return;
+    }
+
+    setComskipUploadLoading(true);
+    try {
+      const response = await API.uploadComskipIni(comskipFile);
+      if (response?.path) {
+        notifications.show({
+          title: 'comskip.ini uploaded',
+          message: response.path,
+          autoClose: 3000,
+          color: 'green',
+        });
+        form.setFieldValue('dvr-comskip-custom-path', response.path);
+        useSettingsStore.getState().updateSetting({
+          ...(settings['dvr-comskip-custom-path'] || {
+            key: 'dvr-comskip-custom-path',
+            name: 'DVR Comskip Custom Path',
+          }),
+          value: response.path,
+        });
+        setComskipConfig({ path: response.path, exists: true });
+      }
+    } catch (error) {
+      console.error('Failed to upload comskip.ini', error);
+    } finally {
+      setComskipUploadLoading(false);
+      setComskipFile(null);
+    }
   };
 
   const resetProxySettingsToDefaults = () => {
@@ -449,6 +515,44 @@ const SettingsPage = () => {
                           'dvr-comskip-enabled'
                         }
                       />
+                      <TextInput
+                        label="Custom comskip.ini path"
+                        description="Leave blank to use the built-in defaults."
+                        placeholder="/app/docker/comskip.ini"
+                        {...form.getInputProps('dvr-comskip-custom-path')}
+                        key={form.key('dvr-comskip-custom-path')}
+                        id={
+                          settings['dvr-comskip-custom-path']?.id ||
+                          'dvr-comskip-custom-path'
+                        }
+                        name={
+                          settings['dvr-comskip-custom-path']?.key ||
+                          'dvr-comskip-custom-path'
+                        }
+                      />
+                      <Group align="flex-end" gap="sm">
+                        <FileInput
+                          placeholder="Select comskip.ini"
+                          accept=".ini"
+                          value={comskipFile}
+                          onChange={setComskipFile}
+                          clearable
+                          disabled={comskipUploadLoading}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          variant="light"
+                          onClick={onComskipUpload}
+                          disabled={!comskipFile || comskipUploadLoading}
+                        >
+                          {comskipUploadLoading ? 'Uploading...' : 'Upload comskip.ini'}
+                        </Button>
+                      </Group>
+                      <Text size="xs" c="dimmed">
+                        {comskipConfig.exists && comskipConfig.path
+                          ? `Using ${comskipConfig.path}`
+                          : 'No custom comskip.ini uploaded.'}
+                      </Text>
                       <NumberInput
                         label="Start early (minutes)"
                         description="Begin recording this many minutes before the scheduled start."

@@ -16,6 +16,7 @@ import {
   Text,
   Title,
   Tooltip,
+  Switch,
   useMantineTheme,
 } from '@mantine/core';
 import {
@@ -28,6 +29,7 @@ import {
   Timer,
   Users,
   Video,
+  Trash2,
 } from 'lucide-react';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
@@ -42,10 +44,20 @@ import API from '../api';
 dayjs.extend(duration);
 dayjs.extend(relativeTime);
 
+const RECURRING_DAY_OPTIONS = [
+  { value: 6, label: 'Sun' },
+  { value: 0, label: 'Mon' },
+  { value: 1, label: 'Tue' },
+  { value: 2, label: 'Wed' },
+  { value: 3, label: 'Thu' },
+  { value: 4, label: 'Fri' },
+  { value: 5, label: 'Sat' },
+];
+
 // Short preview that triggers the details modal when clicked
 const RecordingSynopsis = ({ description, onOpen }) => {
   const truncated = description?.length > 140;
-  const preview = truncated ? `${description.slice(0, 140).trim()}…` : description;
+  const preview = truncated ? `${description.slice(0, 140).trim()}...` : description;
   if (!description) return null;
   return (
     <Text
@@ -61,16 +73,40 @@ const RecordingSynopsis = ({ description, onOpen }) => {
   );
 };
 
-const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl, onWatchLive, onWatchRecording, env_mode }) => {
-  if (!recording) return null;
+const formatRuleDays = (days) => {
+  if (!Array.isArray(days) || days.length === 0) {
+    return 'No days selected';
+  }
+  const normalized = new Set(days.map((d) => Number(d)));
+  const ordered = RECURRING_DAY_OPTIONS.filter((opt) => normalized.has(opt.value));
+  if (!ordered.length) {
+    return 'No days selected';
+  }
+  return ordered.map((opt) => opt.label).join(', ');
+};
 
-  const customProps = recording.custom_properties || {};
+const formatRuleTime = (time) => {
+  if (!time) return '';
+  const parsed = dayjs(time, 'HH:mm:ss');
+  if (!parsed.isValid()) {
+    return time;
+  }
+  return parsed.format('h:mm A');
+};
+
+const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl, onWatchLive, onWatchRecording, env_mode }) => {
+  const allRecordings = useChannelsStore((s) => s.recordings);
+  const channelMap = useChannelsStore((s) => s.channels);
+  const [childOpen, setChildOpen] = React.useState(false);
+  const [childRec, setChildRec] = React.useState(null);
+
+  const safeRecording = recording || {};
+  const customProps = safeRecording.custom_properties || {};
   const program = customProps.program || {};
   const recordingName = program.title || 'Custom Recording';
-  const subTitle = program.sub_title || '';
   const description = program.description || customProps.description || '';
-  const start = dayjs(recording.start_time);
-  const end = dayjs(recording.end_time);
+  const start = dayjs(safeRecording.start_time);
+  const end = dayjs(safeRecording.end_time);
   const stats = customProps.stream_info || {};
 
   const statRows = [
@@ -99,12 +135,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
     }
   }
 
-  // If this card represented a grouped series (next of N), show a series modal listing episodes
-  const allRecordings = useChannelsStore((s) => s.recordings);
-  const channels = useChannelsStore((s) => s.channels);
-  const [childOpen, setChildOpen] = React.useState(false);
-  const [childRec, setChildRec] = React.useState(null);
-  const isSeriesGroup = Boolean(recording._group_count && recording._group_count > 1);
+  const isSeriesGroup = Boolean(safeRecording._group_count && safeRecording._group_count > 1);
   const upcomingEpisodes = React.useMemo(() => {
     if (!isSeriesGroup) return [];
     const arr = Array.isArray(allRecordings) ? allRecordings : Object.values(allRecordings || {});
@@ -140,6 +171,8 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
     }
     return deduped.sort((a, b) => dayjs(a.start_time) - dayjs(b.start_time));
   }, [allRecordings, isSeriesGroup, program.tvg_id, program.title]);
+
+  if (!recording) return null;
 
   const EpisodeRow = ({ rec }) => {
     const cp = rec.custom_properties || {};
@@ -208,11 +241,11 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
               opened={childOpen}
               onClose={() => setChildOpen(false)}
               recording={childRec}
-              channel={channels[childRec.channel]}
+              channel={channelMap[childRec.channel]}
               posterUrl={(
                 childRec.custom_properties?.poster_logo_id
                   ? `/api/channels/logos/${childRec.custom_properties.poster_logo_id}/cache/`
-                  : childRec.custom_properties?.poster_url || channels[childRec.channel]?.logo?.cache_url
+                  : childRec.custom_properties?.poster_url || channelMap[childRec.channel]?.logo?.cache_url
               ) || '/logo.png'}
               env_mode={env_mode}
               onWatchLive={() => {
@@ -221,7 +254,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
                 const s = dayjs(rec.start_time);
                 const e = dayjs(rec.end_time);
                 if (now.isAfter(s) && now.isBefore(e)) {
-                  const ch = channels[rec.channel];
+                  const ch = channelMap[rec.channel];
                   if (!ch) return;
                   let url = `/proxy/ts/stream/${ch.uuid}`;
                   if (env_mode === 'dev') {
@@ -236,7 +269,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
                 if (env_mode === 'dev' && fileUrl.startsWith('/')) {
                   fileUrl = `${window.location.protocol}//${window.location.hostname}:5656${fileUrl}`;
                 }
-                useVideoStore.getState().showVideo(fileUrl, 'vod', { name: childRec.custom_properties?.program?.title || 'Recording', logo: { url: (childRec.custom_properties?.poster_logo_id ? `/api/channels/logos/${childRec.custom_properties.poster_logo_id}/cache/` : channels[childRec.channel]?.logo?.cache_url) || '/logo.png' } });
+                useVideoStore.getState().showVideo(fileUrl, 'vod', { name: childRec.custom_properties?.program?.title || 'Recording', logo: { url: (childRec.custom_properties?.poster_logo_id ? `/api/channels/logos/${childRec.custom_properties.poster_logo_id}/cache/` : channelMap[childRec.channel]?.logo?.cache_url) || '/logo.png' } });
               }}
             />
           )}
@@ -289,7 +322,7 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
   );
 };
 
-const RecordingCard = ({ recording, category, onOpenDetails }) => {
+const RecordingCard = ({ recording, onOpenDetails }) => {
   const channels = useChannelsStore((s) => s.channels);
   const env_mode = useSettingsStore((s) => s.environment.env_mode);
   const showVideo = useVideoStore((s) => s.showVideo);
@@ -437,6 +470,9 @@ const RecordingCard = ({ recording, category, onOpenDetails }) => {
               </Text>
               {isSeriesGroup && (
                 <Badge color="teal" variant="filled">Series</Badge>
+              )}
+              {customProps?.rule?.type === 'recurring' && (
+                <Badge color="blue" variant="light">Recurring</Badge>
               )}
               {seLabel && !isSeriesGroup && (
                 <Badge color="gray" variant="light">{seLabel}</Badge>
@@ -586,10 +622,13 @@ const DVRPage = () => {
   const fetchRecordings = useChannelsStore((s) => s.fetchRecordings);
   const channels = useChannelsStore((s) => s.channels);
   const fetchChannels = useChannelsStore((s) => s.fetchChannels);
+  const recurringRules = useChannelsStore((s) => s.recurringRules) || [];
+  const fetchRecurringRules = useChannelsStore((s) => s.fetchRecurringRules);
 
   const [recordingModalOpen, setRecordingModalOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsRecording, setDetailsRecording] = useState(null);
+  const [busyRuleId, setBusyRuleId] = useState(null);
 
   const openRecordingModal = () => {
     setRecordingModalOpen(true);
@@ -611,7 +650,44 @@ const DVRPage = () => {
       fetchChannels();
     }
     fetchRecordings();
+    fetchRecurringRules();
   }, []);
+
+  const handleDeleteRule = async (ruleId) => {
+    setBusyRuleId(ruleId);
+    try {
+      await API.deleteRecurringRule(ruleId);
+      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
+      notifications.show({
+        title: 'Recurring rule removed',
+        message: 'Future recordings for this rule were cancelled',
+        color: 'red',
+        autoClose: 2500,
+      });
+    } catch (error) {
+      console.error('Failed to delete recurring rule', error);
+    } finally {
+      setBusyRuleId(null);
+    }
+  };
+
+  const handleToggleRule = async (rule, enabled) => {
+    setBusyRuleId(rule.id);
+    try {
+      await API.updateRecurringRule(rule.id, { enabled });
+      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
+      notifications.show({
+        title: enabled ? 'Recurring rule enabled' : 'Recurring rule paused',
+        message: enabled ? 'Future occurrences will be scheduled automatically' : 'Upcoming recordings removed',
+        color: enabled ? 'green' : 'yellow',
+        autoClose: 2500,
+      });
+    } catch (error) {
+      console.error('Failed to update recurring rule', error);
+    } finally {
+      setBusyRuleId(null);
+    }
+  };
 
   // Re-render every second so time-based bucketing updates without a refresh
   const [now, setNow] = useState(dayjs());
@@ -707,12 +783,62 @@ const DVRPage = () => {
       <Stack gap="lg" style={{ paddingTop: 12 }}>
         <div>
           <Group justify="space-between" mb={8}>
+            <Title order={4}>Recurring Rules</Title>
+            <Badge color="blue.6">{recurringRules.length}</Badge>
+          </Group>
+          {recurringRules.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No recurring rules yet. Create one from the New Recording dialog.
+            </Text>
+          ) : (
+            <Stack gap="sm">
+              {recurringRules.map((rule) => {
+                const ch = channels?.[rule.channel];
+                const channelName = ch?.name || `Channel ${rule.channel}`;
+                const range = `${formatRuleTime(rule.start_time)} – ${formatRuleTime(rule.end_time)}`;
+                const days = formatRuleDays(rule.days_of_week);
+                return (
+                  <Card key={`rule-${rule.id}`} withBorder radius="md" padding="sm">
+                    <Group justify="space-between" align="center">
+                      <Stack gap={2} style={{ flex: 1 }}>
+                        <Group gap={6}>
+                          <Text fw={600}>{channelName}</Text>
+                          {!rule.enabled && <Badge color="gray" size="xs">Paused</Badge>}
+                        </Group>
+                        <Text size="sm" c="dimmed">{days} • {range}</Text>
+                      </Stack>
+                      <Group gap="xs">
+                        <Switch
+                          size="sm"
+                          checked={Boolean(rule.enabled)}
+                          onChange={(event) => handleToggleRule(rule, event.currentTarget.checked)}
+                          disabled={busyRuleId === rule.id}
+                        />
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          onClick={() => handleDeleteRule(rule.id)}
+                          disabled={busyRuleId === rule.id}
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Group>
+                  </Card>
+                );
+              })}
+            </Stack>
+          )}
+        </div>
+
+        <div>
+          <Group justify="space-between" mb={8}>
             <Title order={4}>Currently Recording</Title>
             <Badge color="red.6">{inProgress.length}</Badge>
           </Group>
           <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
             {inProgress.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} category="in_progress" onOpenDetails={openDetails} />
+              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} />
             ))}
             {inProgress.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -729,7 +855,7 @@ const DVRPage = () => {
           </Group>
           <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
             {upcoming.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} category="upcoming" onOpenDetails={openDetails} />
+              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} />
             ))}
             {upcoming.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -746,7 +872,7 @@ const DVRPage = () => {
           </Group>
           <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
             {completed.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} category="completed" onOpenDetails={openDetails} />
+              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} />
             ))}
             {completed.length === 0 && (
               <Text size="sm" c="dimmed">
