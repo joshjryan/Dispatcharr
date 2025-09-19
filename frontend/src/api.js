@@ -1873,6 +1873,19 @@ export default class API {
     }
   }
 
+  static async updateRecording(id, values) {
+    try {
+      const response = await request(`${host}/api/channels/recordings/${id}/`, {
+        method: 'PATCH',
+        body: values,
+      });
+      useChannelsStore.getState().fetchRecordings();
+      return response;
+    } catch (e) {
+      errorNotification(`Failed to update recording ${id}`, e);
+    }
+  }
+
   static async getComskipConfig() {
     try {
       return await request(`${host}/api/channels/dvr/comskip-config/`);

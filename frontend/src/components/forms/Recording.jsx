@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import dayjs from 'dayjs';
 import API from '../../api';
 import {
   Alert,
@@ -10,8 +11,9 @@ import {
   MultiSelect,
   Group,
   Text,
+  TextInput,
 } from '@mantine/core';
-import { DateTimePicker, TimeInput } from '@mantine/dates';
+import { DateTimePicker, TimeInput, DatePickerInput } from '@mantine/dates';
 import { CircleAlert } from 'lucide-react';
 import { isNotEmpty, useForm } from '@mantine/form';
 import useChannelsStore from '../../store/channels';
@@ -40,11 +42,26 @@ const toIsoIfDate = (value) => {
 };
 
 const toTimeString = (value) => {
+  if (!value) return '00:00';
+  if (typeof value === 'string') {
+    const parsed = dayjs(value, ['HH:mm', 'HH:mm:ss', 'h:mm A'], true);
+    if (parsed.isValid()) {
+      return parsed.format('HH:mm');
+    }
+    return value;
+  }
   const dt = asDate(value);
-  if (!dt) return '';
-  const hours = String(dt.getHours()).padStart(2, '0');
-  const minutes = String(dt.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
+  if (!dt) return '00:00';
+  return dayjs(dt).format('HH:mm');
+};
+
+const toDateString = (value) => {
+  const dt = asDate(value);
+  if (!dt) return null;
+  const year = dt.getFullYear();
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const createRoundedDate = (minutesAhead = 0) => {
@@ -68,6 +85,7 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
 
   const defaultStart = createRoundedDate();
   const defaultEnd = createRoundedDate(60);
+  const defaultDate = new Date();
 
   const singleForm = useForm({
     mode: 'controlled',
@@ -98,8 +116,11 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
     initialValues: {
       channel_id: channel ? `${channel.id}` : '',
       days_of_week: [],
-      start_time: defaultStart,
-      end_time: defaultEnd,
+      start_time: dayjs(defaultStart).format('HH:mm'),
+      end_time: dayjs(defaultEnd).format('HH:mm'),
+      rule_name: '',
+      start_date: defaultDate,
+      end_date: null,
     },
     validate: {
       channel_id: isNotEmpty('Select a channel'),
@@ -112,8 +133,51 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
         if (start && end <= start) return 'End time must be after start time';
         return null;
       },
+      end_date: (value, values) => {
+        const end = asDate(value);
+        const start = asDate(values.start_date);
+        if (end && start && end < start) {
+          return 'End date cannot be before start date';
+        }
+        return null;
+      },
     },
   });
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    if (recording && recording.id) {
+      setMode('single');
+      singleForm.setValues({
+        channel_id: `${recording.channel}`,
+        start_time: asDate(recording.start_time) || defaultStart,
+        end_time: asDate(recording.end_time) || defaultEnd,
+      });
+    } else {
+      // Reset forms to defaults when opening fresh
+      const freshStart = createRoundedDate();
+      const freshEnd = createRoundedDate(60);
+      const freshDate = new Date();
+      singleForm.setValues({
+        channel_id: channel ? `${channel.id}` : '',
+        start_time: freshStart,
+        end_time: freshEnd,
+      });
+      recurringForm.setValues({
+        channel_id: channel ? `${channel.id}` : '',
+        days_of_week: [],
+        start_time: dayjs(freshStart).format('HH:mm'),
+        end_time: dayjs(freshEnd).format('HH:mm'),
+        rule_name: channel?.name || '',
+        start_date: freshDate,
+        end_date: null,
+      });
+      setMode('single');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, recording, channel]);
 
   const channelOptions = useMemo(() => {
     const list = Object.values(channels || {});
@@ -142,18 +206,32 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
   const handleSingleSubmit = async (values) => {
     try {
       setSubmitting(true);
-      await API.createRecording({
-        channel: values.channel_id,
-        start_time: toIsoIfDate(values.start_time),
-        end_time: toIsoIfDate(values.end_time),
-      });
+      if (recording && recording.id) {
+        await API.updateRecording(recording.id, {
+          channel: values.channel_id,
+          start_time: toIsoIfDate(values.start_time),
+          end_time: toIsoIfDate(values.end_time),
+        });
+        notifications.show({
+          title: 'Recording updated',
+          message: 'Recording schedule updated successfully',
+          color: 'green',
+          autoClose: 2500,
+        });
+      } else {
+        await API.createRecording({
+          channel: values.channel_id,
+          start_time: toIsoIfDate(values.start_time),
+          end_time: toIsoIfDate(values.end_time),
+        });
+        notifications.show({
+          title: 'Recording scheduled',
+          message: 'One-time recording added to DVR queue',
+          color: 'green',
+          autoClose: 2500,
+        });
+      }
       await fetchRecordings();
-      notifications.show({
-        title: 'Recording scheduled',
-        message: 'One-time recording added to DVR queue',
-        color: 'green',
-        autoClose: 2500,
-      });
       handleClose();
     } catch (error) {
       console.error('Failed to create recording', error);
@@ -170,6 +248,9 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
         days_of_week: (values.days_of_week || []).map((d) => Number(d)),
         start_time: toTimeString(values.start_time),
         end_time: toTimeString(values.end_time),
+        start_date: toDateString(values.start_date),
+        end_date: toDateString(values.end_date),
+        name: values.rule_name?.trim() || '',
       });
       await Promise.all([fetchRecurringRules(), fetchRecordings()]);
       notifications.show({
@@ -210,6 +291,7 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
         <SegmentedControl
           value={mode}
           onChange={setMode}
+          disabled={Boolean(recording && recording.id)}
           data={[
             { value: 'single', label: 'One-time' },
             { value: 'recurring', label: 'Recurring' },
@@ -245,16 +327,24 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
                   key={singleForm.key('start_time')}
                   label="Start"
                   valueFormat="MMM D, YYYY hh:mm A"
+                  timeInputProps={{ format: '12', amLabel: 'AM', pmLabel: 'PM', withSeconds: false }}
                 />
                 <DateTimePicker
                   {...singleForm.getInputProps('end_time')}
                   key={singleForm.key('end_time')}
                   label="End"
                   valueFormat="MMM D, YYYY hh:mm A"
+                  timeInputProps={{ format: '12', amLabel: 'AM', pmLabel: 'PM', withSeconds: false }}
                 />
               </>
             ) : (
               <>
+                <TextInput
+                  {...recurringForm.getInputProps('rule_name')}
+                  key={recurringForm.key('rule_name')}
+                  label="Rule name"
+                  placeholder="Morning News, Football Sundays, ..."
+                />
                 <MultiSelect
                   {...recurringForm.getInputProps('days_of_week')}
                   key={recurringForm.key('days_of_week')}
@@ -266,22 +356,42 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
                   nothingFound="No match"
                 />
                 <Group grow>
-                  <TimeInput
-                    {...recurringForm.getInputProps('start_time')}
-                    key={recurringForm.key('start_time')}
-                    label="Start time"
-                    withSeconds={false}
+                  <DatePickerInput
+                    label="Start date"
+                    value={recurringForm.values.start_date}
+                    onChange={(value) => recurringForm.setFieldValue('start_date', value || new Date())}
+                    valueFormat="MMM D, YYYY"
                   />
-                  <TimeInput
-                    {...recurringForm.getInputProps('end_time')}
-                    key={recurringForm.key('end_time')}
-                    label="End time"
-                    withSeconds={false}
+                  <DatePickerInput
+                    label="End date"
+                    placeholder="No end date"
+                    clearable
+                    value={recurringForm.values.end_date}
+                    onChange={(value) => recurringForm.setFieldValue('end_date', value)}
+                    valueFormat="MMM D, YYYY"
+                    minDate={recurringForm.values.start_date || undefined}
                   />
                 </Group>
-                <Text c="dimmed" size="xs">
-                  Recurring recordings create upcoming events up to two weeks in advance.
-                </Text>
+                <Group grow>
+                  <TimeInput
+                    value={recurringForm.values.start_time}
+                    onChange={(value) => recurringForm.setFieldValue('start_time', value)}
+                    label="Start time"
+                    withSeconds={false}
+                    format="12"
+                    amLabel="AM"
+                    pmLabel="PM"
+                  />
+                  <TimeInput
+                    value={recurringForm.values.end_time}
+                    onChange={(value) => recurringForm.setFieldValue('end_time', value)}
+                    label="End time"
+                    withSeconds={false}
+                    format="12"
+                    amLabel="AM"
+                    pmLabel="PM"
+                  />
+                </Group>
               </>
             )}
 

@@ -616,6 +616,8 @@ class RecurringRecordingRule(models.Model):
     end_time = models.TimeField()
     enabled = models.BooleanField(default=True)
     name = models.CharField(max_length=255, blank=True)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

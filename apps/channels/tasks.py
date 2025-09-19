@@ -1141,14 +1141,22 @@ def sync_recurring_rule_impl(rule_id: int, drop_existing: bool = True, horizon_d
         return 0
 
     tz = timezone.get_current_timezone()
+    start_limit = rule.start_date or now.date()
+    end_limit = rule.end_date
     horizon = now + timedelta(days=horizon_days)
-    start_date = now.date()
-    end_date = horizon.date()
+    start_window = max(start_limit, now.date())
+    end_window = horizon.date()
+    if end_limit and end_limit < end_window:
+        end_window = end_limit
+    if end_window < start_window:
+        return 0
     total_created = 0
 
-    for offset in range((end_date - start_date).days + 1):
-        target_date = start_date + timedelta(days=offset)
+    for offset in range((end_window - start_window).days + 1):
+        target_date = start_window + timedelta(days=offset)
         if target_date.weekday() not in days:
+            continue
+        if end_limit and target_date > end_limit:
             continue
         try:
             start_dt = timezone.make_aware(datetime.combine(target_date, rule.start_time), tz)

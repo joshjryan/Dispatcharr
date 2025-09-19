@@ -17,6 +17,9 @@ import {
   Title,
   Tooltip,
   Switch,
+  Select,
+  MultiSelect,
+  TextInput,
   useMantineTheme,
 } from '@mantine/core';
 import {
@@ -29,7 +32,6 @@ import {
   Timer,
   Users,
   Video,
-  Trash2,
 } from 'lucide-react';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
@@ -40,6 +42,8 @@ import useVideoStore from '../store/useVideoStore';
 import RecordingForm from '../components/forms/Recording';
 import { notifications } from '@mantine/notifications';
 import API from '../api';
+import { DatePickerInput, TimeInput } from '@mantine/dates';
+import { useForm } from '@mantine/form';
 
 dayjs.extend(duration);
 dayjs.extend(relativeTime);
@@ -73,28 +77,7 @@ const RecordingSynopsis = ({ description, onOpen }) => {
   );
 };
 
-const formatRuleDays = (days) => {
-  if (!Array.isArray(days) || days.length === 0) {
-    return 'No days selected';
-  }
-  const normalized = new Set(days.map((d) => Number(d)));
-  const ordered = RECURRING_DAY_OPTIONS.filter((opt) => normalized.has(opt.value));
-  if (!ordered.length) {
-    return 'No days selected';
-  }
-  return ordered.map((opt) => opt.label).join(', ');
-};
-
-const formatRuleTime = (time) => {
-  if (!time) return '';
-  const parsed = dayjs(time, 'HH:mm:ss');
-  if (!parsed.isValid()) {
-    return time;
-  }
-  return parsed.format('h:mm A');
-};
-
-const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl, onWatchLive, onWatchRecording, env_mode }) => {
+const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl, onWatchLive, onWatchRecording, env_mode, onEdit }) => {
   const allRecordings = useChannelsStore((s) => s.recordings);
   const channelMap = useChannelsStore((s) => s.channels);
   const [childOpen, setChildOpen] = React.useState(false);
@@ -190,8 +173,8 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
     }
     const onRemove = async (e) => {
       e?.stopPropagation?.();
-      try { await API.deleteRecording(rec.id); } catch {}
-      try { await useChannelsStore.getState().fetchRecordings(); } catch {}
+      try { await API.deleteRecording(rec.id); } catch (error) { console.error('Failed to delete upcoming recording', error); }
+      try { await useChannelsStore.getState().fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings after delete', error); }
     };
     return (
       <Card withBorder radius="md" padding="sm" style={{ backgroundColor: '#27272A', cursor: 'pointer' }} onClick={() => { setChildRec(rec); setChildOpen(true); }}>
@@ -287,10 +270,28 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
               {onWatchRecording && (
                 <Button size="xs" variant="default" onClick={(e) => { e.stopPropagation?.(); onWatchRecording(); }} disabled={!canWatchRecording}>Watch</Button>
               )}
+              {onEdit && start.isAfter(dayjs()) && (
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="blue"
+                  onClick={(e) => {
+                    e.stopPropagation?.();
+                    onEdit(recording);
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
               {customProps.status === 'completed' && (!customProps?.comskip || customProps?.comskip?.status !== 'completed') && (
                 <Button size="xs" variant="light" color="teal" onClick={async (e) => {
                   e.stopPropagation?.();
-                  try { await API.runComskip(recording.id); notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 }); } catch {}
+                  try {
+                    await API.runComskip(recording.id);
+                    notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 });
+                  } catch (error) {
+                    console.error('Failed to run comskip', error);
+                  }
                 }}>Remove commercials</Button>
               )}
             </Group>
@@ -322,7 +323,338 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
   );
 };
 
-const RecordingCard = ({ recording, onOpenDetails }) => {
+const toTimeString = (value) => {
+  if (!value) return '00:00';
+  if (typeof value === 'string') {
+    const parsed = dayjs(value, ['HH:mm', 'HH:mm:ss', 'h:mm A'], true);
+    if (parsed.isValid()) return parsed.format('HH:mm');
+    return value;
+  }
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format('HH:mm') : '00:00';
+};
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const parsed = dayjs(value, ['YYYY-MM-DD', dayjs.ISO_8601], true);
+  return parsed.isValid() ? parsed.toDate() : null;
+};
+
+const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
+  const channels = useChannelsStore((s) => s.channels);
+  const recurringRules = useChannelsStore((s) => s.recurringRules);
+  const fetchRecurringRules = useChannelsStore((s) => s.fetchRecurringRules);
+  const fetchRecordings = useChannelsStore((s) => s.fetchRecordings);
+  const recordings = useChannelsStore((s) => s.recordings);
+
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [busyOccurrence, setBusyOccurrence] = useState(null);
+
+  const rule = recurringRules.find((r) => r.id === ruleId);
+
+  const channelOptions = useMemo(() => {
+    const list = Object.values(channels || {});
+    list.sort((a, b) => {
+      const aNum = Number(a.channel_number) || 0;
+      const bNum = Number(b.channel_number) || 0;
+      if (aNum === bNum) {
+        return (a.name || '').localeCompare(b.name || '');
+      }
+      return aNum - bNum;
+    });
+    return list.map((item) => ({ value: `${item.id}`, label: item.name || `Channel ${item.id}` }));
+  }, [channels]);
+
+  const form = useForm({
+    mode: 'controlled',
+    initialValues: {
+      channel_id: '',
+      days_of_week: [],
+      rule_name: '',
+      start_time: dayjs().startOf('hour').format('HH:mm'),
+      end_time: dayjs().startOf('hour').add(1, 'hour').format('HH:mm'),
+      start_date: dayjs().toDate(),
+      end_date: null,
+      enabled: true,
+    },
+    validate: {
+      channel_id: (value) => (value ? null : 'Select a channel'),
+      days_of_week: (value) => (value && value.length ? null : 'Pick at least one day'),
+      end_time: (value, values) => {
+        const startValue = dayjs(values.start_time);
+        const endValue = dayjs(value);
+        if (!value) return 'Select an end time';
+        if (endValue.isSameOrBefore(startValue)) return 'End time must be after start time';
+        return null;
+      },
+      end_date: (value, values) => {
+        const endDate = dayjs(value);
+        const startDate = dayjs(values.start_date);
+        if (value && startDate.isValid() && endDate.isBefore(startDate, 'day')) {
+          return 'End date cannot be before start date';
+        }
+        return null;
+      },
+    },
+  });
+
+  useEffect(() => {
+    if (opened && rule) {
+      form.setValues({
+        channel_id: `${rule.channel}`,
+        days_of_week: (rule.days_of_week || []).map((d) => String(d)),
+        rule_name: rule.name || '',
+        start_time: toTimeString(rule.start_time),
+        end_time: toTimeString(rule.end_time),
+        start_date: parseDate(rule.start_date) || dayjs().toDate(),
+        end_date: parseDate(rule.end_date),
+        enabled: Boolean(rule.enabled),
+      });
+    } else {
+      form.reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened, ruleId, rule]);
+
+  const upcomingOccurrences = useMemo(() => {
+    const list = Array.isArray(recordings) ? recordings : Object.values(recordings || {});
+    return list
+      .filter((rec) => rec?.custom_properties?.rule?.id === ruleId && dayjs(rec.start_time).isAfter(dayjs()))
+      .sort((a, b) => dayjs(a.start_time).valueOf() - dayjs(b.start_time).valueOf());
+  }, [recordings, ruleId]);
+
+  const handleSave = async (values) => {
+    if (!rule) return;
+    setSaving(true);
+    try {
+      await API.updateRecurringRule(ruleId, {
+        channel: values.channel_id,
+        days_of_week: (values.days_of_week || []).map((d) => Number(d)),
+        start_time: toTimeString(values.start_time),
+        end_time: toTimeString(values.end_time),
+        start_date: values.start_date ? dayjs(values.start_date).format('YYYY-MM-DD') : null,
+        end_date: values.end_date ? dayjs(values.end_date).format('YYYY-MM-DD') : null,
+        name: values.rule_name?.trim() || '',
+        enabled: Boolean(values.enabled),
+      });
+      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
+      notifications.show({
+        title: 'Recurring rule updated',
+        message: 'Schedule adjustments saved',
+        color: 'green',
+        autoClose: 2500,
+      });
+      onClose();
+    } catch (error) {
+      console.error('Failed to update recurring rule', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!rule) return;
+    setDeleting(true);
+    try {
+      await API.deleteRecurringRule(ruleId);
+      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
+      notifications.show({
+        title: 'Recurring rule removed',
+        message: 'All future occurrences were cancelled',
+        color: 'red',
+        autoClose: 2500,
+      });
+      onClose();
+    } catch (error) {
+      console.error('Failed to delete recurring rule', error);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleToggleEnabled = async (checked) => {
+    if (!rule) return;
+    setSaving(true);
+    try {
+      await API.updateRecurringRule(ruleId, { enabled: checked });
+      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
+      notifications.show({
+        title: checked ? 'Recurring rule enabled' : 'Recurring rule paused',
+        message: checked ? 'Future occurrences will resume' : 'Upcoming occurrences were removed',
+        color: checked ? 'green' : 'yellow',
+        autoClose: 2500,
+      });
+    } catch (error) {
+      console.error('Failed to toggle recurring rule', error);
+      form.setFieldValue('enabled', !checked);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelOccurrence = async (occurrence) => {
+    setBusyOccurrence(occurrence.id);
+    try {
+      await API.deleteRecording(occurrence.id);
+      await fetchRecordings();
+      notifications.show({
+        title: 'Occurrence cancelled',
+        message: 'The selected airing was removed',
+        color: 'yellow',
+        autoClose: 2000,
+      });
+    } catch (error) {
+      console.error('Failed to cancel occurrence', error);
+    } finally {
+      setBusyOccurrence(null);
+    }
+  };
+
+  if (!rule) {
+    return (
+      <Modal opened={opened} onClose={onClose} title="Recurring Rule" centered>
+        <Text size="sm">Recurring rule not found.</Text>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal opened={opened} onClose={onClose} title={rule.name || 'Recurring Rule'} size="lg" centered>
+      <Stack gap="md">
+        <Group justify="space-between" align="center">
+          <Text fw={600}>{channels?.[rule.channel]?.name || `Channel ${rule.channel}`}</Text>
+          <Switch
+            size="sm"
+            checked={form.values.enabled}
+            onChange={(event) => {
+              form.setFieldValue('enabled', event.currentTarget.checked);
+              handleToggleEnabled(event.currentTarget.checked);
+            }}
+            label={form.values.enabled ? 'Enabled' : 'Paused'}
+            disabled={saving}
+          />
+        </Group>
+        <form onSubmit={form.onSubmit(handleSave)}>
+          <Stack gap="md">
+            <Select
+              {...form.getInputProps('channel_id')}
+              label="Channel"
+              data={channelOptions}
+              searchable
+            />
+            <TextInput
+              {...form.getInputProps('rule_name')}
+              label="Rule name"
+              placeholder="Morning News, Football Sundays, ..."
+            />
+            <MultiSelect
+              {...form.getInputProps('days_of_week')}
+              label="Every"
+              data={RECURRING_DAY_OPTIONS.map((opt) => ({ value: String(opt.value), label: opt.label }))}
+              searchable
+              clearable
+            />
+            <Group grow>
+              <DatePickerInput
+                label="Start date"
+                value={form.values.start_date}
+                onChange={(value) => form.setFieldValue('start_date', value || dayjs().toDate())}
+                valueFormat="MMM D, YYYY"
+              />
+              <DatePickerInput
+                label="End date"
+                placeholder="No end date"
+                clearable
+                value={form.values.end_date}
+                onChange={(value) => form.setFieldValue('end_date', value)}
+                valueFormat="MMM D, YYYY"
+                minDate={form.values.start_date || undefined}
+              />
+            </Group>
+            <Group grow>
+              <TimeInput
+                label="Start time"
+                value={form.values.start_time}
+                onChange={(value) => form.setFieldValue('start_time', value)}
+                withSeconds={false}
+                format="12"
+                amLabel="AM"
+                pmLabel="PM"
+              />
+              <TimeInput
+                label="End time"
+                value={form.values.end_time}
+                onChange={(value) => form.setFieldValue('end_time', value)}
+                withSeconds={false}
+                format="12"
+                amLabel="AM"
+                pmLabel="PM"
+              />
+            </Group>
+            <Group justify="space-between">
+              <Button type="submit" loading={saving}>
+                Save changes
+              </Button>
+              <Button color="red" variant="light" loading={deleting} onClick={handleDelete}>
+                Delete rule
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+        <Stack gap="sm">
+          <Group justify="space-between" align="center">
+            <Text fw={600} size="sm">Upcoming occurrences</Text>
+            <Badge color="blue.6">{upcomingOccurrences.length}</Badge>
+          </Group>
+          {upcomingOccurrences.length === 0 ? (
+            <Text size="sm" c="dimmed">No future airings currently scheduled.</Text>
+          ) : (
+            <Stack gap="xs">
+              {upcomingOccurrences.map((occ) => {
+                const occStart = dayjs(occ.start_time);
+                const occEnd = dayjs(occ.end_time);
+                return (
+                  <Card key={`occ-${occ.id}`} withBorder padding="sm" radius="md">
+                    <Group justify="space-between" align="center">
+                      <Stack gap={2} style={{ flex: 1 }}>
+                        <Text fw={600} size="sm">{occStart.format('MMM D, YYYY')}</Text>
+                        <Text size="xs" c="dimmed">{occStart.format('h:mma')} – {occEnd.format('h:mma')}</Text>
+                      </Stack>
+                      <Group gap={6}>
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          onClick={() => {
+                            onClose();
+                            onEditOccurrence?.(occ);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="xs"
+                          color="red"
+                          variant="light"
+                          loading={busyOccurrence === occ.id}
+                          onClick={() => handleCancelOccurrence(occ)}
+                        >
+                          Cancel
+                        </Button>
+                      </Group>
+                    </Group>
+                  </Card>
+                );
+              })}
+            </Stack>
+          )}
+        </Stack>
+      </Stack>
+    </Modal>
+  );
+};
+
+const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
   const channels = useChannelsStore((s) => s.channels);
   const env_mode = useSettingsStore((s) => s.environment.env_mode);
   const showVideo = useVideoStore((s) => s.showVideo);
@@ -332,11 +664,11 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
 
   const deleteRecording = (id) => {
     // Optimistically remove immediately from UI
-    try { useChannelsStore.getState().removeRecording(id); } catch {}
+    try { useChannelsStore.getState().removeRecording(id); } catch (error) { console.error('Failed to optimistically remove recording', error); }
     // Fire-and-forget server delete; websocket will keep others in sync
     API.deleteRecording(id).catch(() => {
       // On failure, fallback to refetch to restore state
-      try { useChannelsStore.getState().fetchRecordings(); } catch {}
+      try { useChannelsStore.getState().fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings after delete', error); }
     });
   };
 
@@ -345,6 +677,7 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
   const recordingName = program.title || 'Custom Recording';
   const subTitle = program.sub_title || '';
   const description = program.description || customProps.description || '';
+  const isRecurringRule = customProps?.rule?.type === 'recurring';
 
   // Poster or channel logo
   const posterLogoId = customProps.poster_logo_id;
@@ -395,7 +728,9 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
     try {
       await API.runComskip(recording.id);
       notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 });
-    } catch {}
+    } catch (error) {
+      console.error('Failed to queue comskip for recording', error);
+    }
   };
 
   // Cancel handling for series groups
@@ -403,6 +738,10 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
   const [busy, setBusy] = React.useState(false);
   const handleCancelClick = (e) => {
     e.stopPropagation();
+    if (isRecurringRule) {
+      onOpenRecurring?.(recording, true);
+      return;
+    }
     if (isSeriesGroup) {
       setCancelOpen(true);
     } else {
@@ -410,11 +749,11 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
     }
   };
 
-  const seriesInfo = React.useMemo(() => {
+  const seriesInfo = (() => {
     const cp = customProps || {};
     const pr = cp.program || {};
     return { tvg_id: pr.tvg_id, title: pr.title };
-  }, [customProps]);
+  })();
 
   const removeUpcomingOnly = async () => {
     try {
@@ -423,7 +762,7 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
     } finally {
       setBusy(false);
       setCancelOpen(false);
-      try { await fetchRecordings(); } catch {}
+      try { await fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings', error); }
     }
   };
 
@@ -432,13 +771,13 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
       setBusy(true);
       const { tvg_id, title } = seriesInfo;
       if (tvg_id) {
-        try { await API.bulkRemoveSeriesRecordings({ tvg_id, title, scope: 'title' }); } catch {}
-        try { await API.deleteSeriesRule(tvg_id); } catch {}
+        try { await API.bulkRemoveSeriesRecordings({ tvg_id, title, scope: 'title' }); } catch (error) { console.error('Failed to remove series recordings', error); }
+        try { await API.deleteSeriesRule(tvg_id); } catch (error) { console.error('Failed to delete series rule', error); }
       }
     } finally {
       setBusy(false);
       setCancelOpen(false);
-      try { await fetchRecordings(); } catch {}
+      try { await fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings after series removal', error); }
     }
   };
 
@@ -455,7 +794,13 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
         height: '100%',
         cursor: 'pointer',
       }}
-      onClick={() => onOpenDetails?.(recording)}
+      onClick={() => {
+        if (isRecurringRule) {
+          onOpenRecurring?.(recording, false);
+        } else {
+          onOpenDetails?.(recording);
+        }
+      }}
     >
       <Flex justify="space-between" align="center" style={{ paddingBottom: 8 }}>
         <Group gap={8} style={{ flex: 1, minWidth: 0 }}>
@@ -471,7 +816,7 @@ const RecordingCard = ({ recording, onOpenDetails }) => {
               {isSeriesGroup && (
                 <Badge color="teal" variant="filled">Series</Badge>
               )}
-              {customProps?.rule?.type === 'recurring' && (
+              {isRecurringRule && (
                 <Badge color="blue" variant="light">Recurring</Badge>
               )}
               {seLabel && !isSeriesGroup && (
@@ -622,13 +967,13 @@ const DVRPage = () => {
   const fetchRecordings = useChannelsStore((s) => s.fetchRecordings);
   const channels = useChannelsStore((s) => s.channels);
   const fetchChannels = useChannelsStore((s) => s.fetchChannels);
-  const recurringRules = useChannelsStore((s) => s.recurringRules) || [];
   const fetchRecurringRules = useChannelsStore((s) => s.fetchRecurringRules);
 
   const [recordingModalOpen, setRecordingModalOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsRecording, setDetailsRecording] = useState(null);
-  const [busyRuleId, setBusyRuleId] = useState(null);
+  const [ruleModal, setRuleModal] = useState({ open: false, ruleId: null });
+  const [editRecording, setEditRecording] = useState(null);
 
   const openRecordingModal = () => {
     setRecordingModalOpen(true);
@@ -644,50 +989,27 @@ const DVRPage = () => {
   };
   const closeDetails = () => setDetailsOpen(false);
 
+  const openRuleModal = (recording) => {
+    const ruleId = recording?.custom_properties?.rule?.id;
+    if (!ruleId) {
+      openDetails(recording);
+      return;
+    }
+    setDetailsOpen(false);
+    setDetailsRecording(null);
+    setEditRecording(null);
+    setRuleModal({ open: true, ruleId });
+  };
+
+  const closeRuleModal = () => setRuleModal({ open: false, ruleId: null });
+
   useEffect(() => {
-    // Ensure channels and recordings are loaded for this view
     if (!channels || Object.keys(channels).length === 0) {
       fetchChannels();
     }
     fetchRecordings();
     fetchRecurringRules();
-  }, []);
-
-  const handleDeleteRule = async (ruleId) => {
-    setBusyRuleId(ruleId);
-    try {
-      await API.deleteRecurringRule(ruleId);
-      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
-      notifications.show({
-        title: 'Recurring rule removed',
-        message: 'Future recordings for this rule were cancelled',
-        color: 'red',
-        autoClose: 2500,
-      });
-    } catch (error) {
-      console.error('Failed to delete recurring rule', error);
-    } finally {
-      setBusyRuleId(null);
-    }
-  };
-
-  const handleToggleRule = async (rule, enabled) => {
-    setBusyRuleId(rule.id);
-    try {
-      await API.updateRecurringRule(rule.id, { enabled });
-      await Promise.all([fetchRecurringRules(), fetchRecordings()]);
-      notifications.show({
-        title: enabled ? 'Recurring rule enabled' : 'Recurring rule paused',
-        message: enabled ? 'Future occurrences will be scheduled automatically' : 'Upcoming recordings removed',
-        color: enabled ? 'green' : 'yellow',
-        autoClose: 2500,
-      });
-    } catch (error) {
-      console.error('Failed to update recurring rule', error);
-    } finally {
-      setBusyRuleId(null);
-    }
-  };
+  }, [channels, fetchChannels, fetchRecordings, fetchRecurringRules]);
 
   // Re-render every second so time-based bucketing updates without a refresh
   const [now, setNow] = useState(dayjs());
@@ -761,7 +1083,7 @@ const DVRPage = () => {
     });
     completed.sort((a, b) => dayjs(b.end_time) - dayjs(a.end_time));
     return { inProgress: inProgressDedup, upcoming: upcomingGrouped, completed };
-  }, [recordings]);
+  }, [recordings, now]);
 
   return (
     <Box style={{ padding: 10 }}>
@@ -783,62 +1105,12 @@ const DVRPage = () => {
       <Stack gap="lg" style={{ paddingTop: 12 }}>
         <div>
           <Group justify="space-between" mb={8}>
-            <Title order={4}>Recurring Rules</Title>
-            <Badge color="blue.6">{recurringRules.length}</Badge>
-          </Group>
-          {recurringRules.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              No recurring rules yet. Create one from the New Recording dialog.
-            </Text>
-          ) : (
-            <Stack gap="sm">
-              {recurringRules.map((rule) => {
-                const ch = channels?.[rule.channel];
-                const channelName = ch?.name || `Channel ${rule.channel}`;
-                const range = `${formatRuleTime(rule.start_time)} – ${formatRuleTime(rule.end_time)}`;
-                const days = formatRuleDays(rule.days_of_week);
-                return (
-                  <Card key={`rule-${rule.id}`} withBorder radius="md" padding="sm">
-                    <Group justify="space-between" align="center">
-                      <Stack gap={2} style={{ flex: 1 }}>
-                        <Group gap={6}>
-                          <Text fw={600}>{channelName}</Text>
-                          {!rule.enabled && <Badge color="gray" size="xs">Paused</Badge>}
-                        </Group>
-                        <Text size="sm" c="dimmed">{days} • {range}</Text>
-                      </Stack>
-                      <Group gap="xs">
-                        <Switch
-                          size="sm"
-                          checked={Boolean(rule.enabled)}
-                          onChange={(event) => handleToggleRule(rule, event.currentTarget.checked)}
-                          disabled={busyRuleId === rule.id}
-                        />
-                        <ActionIcon
-                          variant="subtle"
-                          color="red"
-                          onClick={() => handleDeleteRule(rule.id)}
-                          disabled={busyRuleId === rule.id}
-                        >
-                          <Trash2 size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Group>
-                  </Card>
-                );
-              })}
-            </Stack>
-          )}
-        </div>
-
-        <div>
-          <Group justify="space-between" mb={8}>
             <Title order={4}>Currently Recording</Title>
             <Badge color="red.6">{inProgress.length}</Badge>
           </Group>
           <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
             {inProgress.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} />
+              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} onOpenRecurring={openRuleModal} />
             ))}
             {inProgress.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -855,7 +1127,7 @@ const DVRPage = () => {
           </Group>
           <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
             {upcoming.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} />
+              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} onOpenRecurring={openRuleModal} />
             ))}
             {upcoming.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -872,7 +1144,7 @@ const DVRPage = () => {
           </Group>
           <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
             {completed.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} />
+              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} onOpenRecurring={openRuleModal} />
             ))}
             {completed.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -886,6 +1158,22 @@ const DVRPage = () => {
       <RecordingForm
         isOpen={recordingModalOpen}
         onClose={closeRecordingModal}
+      />
+
+      <RecordingForm
+        isOpen={Boolean(editRecording)}
+        recording={editRecording}
+        onClose={() => setEditRecording(null)}
+      />
+
+      <RecurringRuleModal
+        opened={ruleModal.open}
+        onClose={closeRuleModal}
+        ruleId={ruleModal.ruleId}
+        onEditOccurrence={(occ) => {
+          setRuleModal({ open: false, ruleId: null });
+          setEditRecording(occ);
+        }}
       />
 
       {/* Details Modal */}
@@ -924,6 +1212,10 @@ const DVRPage = () => {
               fileUrl = `${window.location.protocol}//${window.location.hostname}:5656${fileUrl}`;
             }
             useVideoStore.getState().showVideo(fileUrl, 'vod', { name: detailsRecording.custom_properties?.program?.title || 'Recording', logo: { url: (detailsRecording.custom_properties?.poster_logo_id ? `/api/channels/logos/${detailsRecording.custom_properties.poster_logo_id}/cache/` : channels[detailsRecording.channel]?.logo?.cache_url) || '/logo.png' } });
+          }}
+          onEdit={(rec) => {
+            setEditRecording(rec);
+            closeDetails();
           }}
         />
       )}
