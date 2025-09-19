@@ -879,6 +879,8 @@ def parse_channels_only(source):
                                 display_name = child.text.strip()
                             elif child.tag == 'icon':
                                 icon_url = child.get('src', '').strip()
+                            if display_name and icon_url:
+                                break  # No need to continue if we have both
 
                         if not display_name:
                             display_name = tvg_id

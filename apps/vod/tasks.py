@@ -62,9 +62,9 @@ def refresh_vod_content(account_id):
 
         logger.info(f"Batch VOD refresh completed for account {account.name} in {duration:.2f} seconds")
 
-        # Cleanup orphaned VOD content after refresh
-        logger.info("Starting cleanup of orphaned VOD content")
-        cleanup_result = cleanup_orphaned_vod_content(scan_start_time=start_time)
+        # Cleanup orphaned VOD content after refresh (scoped to this account only)
+        logger.info(f"Starting cleanup of orphaned VOD content for account {account.name}")
+        cleanup_result = cleanup_orphaned_vod_content(account_id=account_id, scan_start_time=start_time)
         logger.info(f"VOD cleanup completed: {cleanup_result}")
 
         # Send completion notification
@@ -1308,7 +1308,7 @@ def batch_refresh_series_episodes(account_id, series_ids=None):
 
 
 @shared_task
-def cleanup_orphaned_vod_content(stale_days=0, scan_start_time=None):
+def cleanup_orphaned_vod_content(stale_days=0, scan_start_time=None, account_id=None):
     """Clean up VOD content that has no M3U relations or has stale relations"""
     from datetime import timedelta
 
@@ -1318,30 +1318,44 @@ def cleanup_orphaned_vod_content(stale_days=0, scan_start_time=None):
     # Calculate cutoff date for stale relations
     cutoff_date = reference_time - timedelta(days=stale_days)
 
+    # Build base query filters
+    base_filters = {'last_seen__lt': cutoff_date}
+    if account_id:
+        base_filters['m3u_account_id'] = account_id
+        logger.info(f"Cleaning up stale VOD content for account {account_id}")
+    else:
+        logger.info("Cleaning up stale VOD content across all accounts")
+
     # Clean up stale movie relations (haven't been seen in the specified days)
-    stale_movie_relations = M3UMovieRelation.objects.filter(last_seen__lt=cutoff_date)
+    stale_movie_relations = M3UMovieRelation.objects.filter(**base_filters)
     stale_movie_count = stale_movie_relations.count()
     stale_movie_relations.delete()
 
     # Clean up stale series relations
-    stale_series_relations = M3USeriesRelation.objects.filter(last_seen__lt=cutoff_date)
+    stale_series_relations = M3USeriesRelation.objects.filter(**base_filters)
     stale_series_count = stale_series_relations.count()
     stale_series_relations.delete()
 
     # Clean up stale episode relations
-    stale_episode_relations = M3UEpisodeRelation.objects.filter(last_seen__lt=cutoff_date)
+    stale_episode_relations = M3UEpisodeRelation.objects.filter(**base_filters)
     stale_episode_count = stale_episode_relations.count()
     stale_episode_relations.delete()
 
-    # Clean up movies with no relations (orphaned)
-    orphaned_movies = Movie.objects.filter(m3u_relations__isnull=True)
-    orphaned_movie_count = orphaned_movies.count()
-    orphaned_movies.delete()
+    # Clean up movies with no relations (orphaned) - only if no account_id specified (global cleanup)
+    if not account_id:
+        orphaned_movies = Movie.objects.filter(m3u_relations__isnull=True)
+        orphaned_movie_count = orphaned_movies.count()
+        orphaned_movies.delete()
 
-    # Clean up series with no relations (orphaned)
-    orphaned_series = Series.objects.filter(m3u_relations__isnull=True)
-    orphaned_series_count = orphaned_series.count()
-    orphaned_series.delete()
+        # Clean up series with no relations (orphaned) - only if no account_id specified (global cleanup)
+        orphaned_series = Series.objects.filter(m3u_relations__isnull=True)
+        orphaned_series_count = orphaned_series.count()
+        orphaned_series.delete()
+    else:
+        # When cleaning up for specific account, we don't remove orphaned content
+        # as other accounts might still reference it
+        orphaned_movie_count = 0
+        orphaned_series_count = 0
 
     # Episodes will be cleaned up via CASCADE when series are deleted
 
