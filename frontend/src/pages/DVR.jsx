@@ -375,23 +375,26 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
       start_time: dayjs().startOf('hour').format('HH:mm'),
       end_time: dayjs().startOf('hour').add(1, 'hour').format('HH:mm'),
       start_date: dayjs().toDate(),
-      end_date: null,
+      end_date: dayjs().toDate(),
       enabled: true,
     },
     validate: {
       channel_id: (value) => (value ? null : 'Select a channel'),
       days_of_week: (value) => (value && value.length ? null : 'Pick at least one day'),
       end_time: (value, values) => {
-        const startValue = dayjs(values.start_time);
-        const endValue = dayjs(value);
         if (!value) return 'Select an end time';
-        if (endValue.isSameOrBefore(startValue)) return 'End time must be after start time';
+        const startValue = dayjs(values.start_time, ['HH:mm', 'hh:mm A', 'h:mm A'], true);
+        const endValue = dayjs(value, ['HH:mm', 'hh:mm A', 'h:mm A'], true);
+        if (startValue.isValid() && endValue.isValid() && endValue.diff(startValue, 'minute') === 0) {
+          return 'End time must differ from start time';
+        }
         return null;
       },
       end_date: (value, values) => {
         const endDate = dayjs(value);
         const startDate = dayjs(values.start_date);
-        if (value && startDate.isValid() && endDate.isBefore(startDate, 'day')) {
+        if (!value) return 'Select an end date';
+        if (startDate.isValid() && endDate.isBefore(startDate, 'day')) {
           return 'End date cannot be before start date';
         }
         return null;
@@ -564,8 +567,6 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               />
               <DatePickerInput
                 label="End date"
-                placeholder="No end date"
-                clearable
                 value={form.values.end_date}
                 onChange={(value) => form.setFieldValue('end_date', value)}
                 valueFormat="MMM D, YYYY"
@@ -576,7 +577,7 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               <TimeInput
                 label="Start time"
                 value={form.values.start_time}
-                onChange={(value) => form.setFieldValue('start_time', value)}
+                onChange={(value) => form.setFieldValue('start_time', toTimeString(value))}
                 withSeconds={false}
                 format="12"
                 amLabel="AM"
@@ -585,7 +586,7 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               <TimeInput
                 label="End time"
                 value={form.values.end_time}
-                onChange={(value) => form.setFieldValue('end_time', value)}
+                onChange={(value) => form.setFieldValue('end_time', toTimeString(value))}
                 withSeconds={false}
                 format="12"
                 amLabel="AM"

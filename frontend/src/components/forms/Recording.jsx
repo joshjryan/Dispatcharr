@@ -10,7 +10,6 @@ import {
   SegmentedControl,
   MultiSelect,
   Group,
-  Text,
   TextInput,
 } from '@mantine/core';
 import { DateTimePicker, TimeInput, DatePickerInput } from '@mantine/dates';
@@ -41,13 +40,12 @@ const toIsoIfDate = (value) => {
   return dt ? dt.toISOString() : value;
 };
 
+// Accepts "h:mm A"/"hh:mm A"/"HH:mm"/Date, returns "HH:mm"
 const toTimeString = (value) => {
   if (!value) return '00:00';
   if (typeof value === 'string') {
-    const parsed = dayjs(value, ['HH:mm', 'HH:mm:ss', 'h:mm A'], true);
-    if (parsed.isValid()) {
-      return parsed.format('HH:mm');
-    }
+    const parsed = dayjs(value, ['HH:mm', 'hh:mm A', 'h:mm A', 'HH:mm:ss'], true);
+    if (parsed.isValid()) return parsed.format('HH:mm');
     return value;
   }
   const dt = asDate(value);
@@ -69,10 +67,14 @@ const createRoundedDate = (minutesAhead = 0) => {
   dt.setSeconds(0);
   dt.setMilliseconds(0);
   dt.setMinutes(Math.ceil(dt.getMinutes() / 30) * 30);
-  if (minutesAhead) {
-    dt.setMinutes(dt.getMinutes() + minutesAhead);
-  }
+  if (minutesAhead) dt.setMinutes(dt.getMinutes() + minutesAhead);
   return dt;
+};
+
+// robust onChange for TimeInput (string or event)
+const timeChange = (setter) => (valOrEvent) => {
+  if (typeof valOrEvent === 'string') setter(valOrEvent);
+  else if (valOrEvent?.currentTarget) setter(valOrEvent.currentTarget.value);
 };
 
 const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) => {
@@ -87,14 +89,11 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
   const defaultEnd = createRoundedDate(60);
   const defaultDate = new Date();
 
+  // One-time form
   const singleForm = useForm({
     mode: 'controlled',
     initialValues: {
-      channel_id: recording
-        ? `${recording.channel}`
-        : channel
-          ? `${channel.id}`
-          : '',
+      channel_id: recording ? `${recording.channel}` : channel ? `${channel.id}` : '',
       start_time: recording ? asDate(recording.start_time) || defaultStart : defaultStart,
       end_time: recording ? asDate(recording.end_time) || defaultEnd : defaultEnd,
     },
@@ -111,8 +110,11 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
     },
   });
 
+  // Recurring form stores times as "HH:mm" strings for stable editing
   const recurringForm = useForm({
     mode: 'controlled',
+    validateInputOnChange: false,
+    validateInputOnBlur: true,
     initialValues: {
       channel_id: channel ? `${channel.id}` : '',
       days_of_week: [],
@@ -120,34 +122,38 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
       end_time: dayjs(defaultEnd).format('HH:mm'),
       rule_name: '',
       start_date: defaultDate,
-      end_date: null,
+      end_date: defaultDate,
     },
     validate: {
       channel_id: isNotEmpty('Select a channel'),
       days_of_week: (value) => (value && value.length ? null : 'Pick at least one day'),
-      start_time: isNotEmpty('Select a start time'),
+      start_time: (value) => (value ? null : 'Select a start time'),
       end_time: (value, values) => {
-        const start = asDate(values.start_time);
-        const end = asDate(value);
-        if (!end) return 'Select an end time';
-        if (start && end <= start) return 'End time must be after start time';
+        if (!value) return 'Select an end time';
+        const start = dayjs(values.start_time, ['HH:mm', 'hh:mm A', 'h:mm A'], true);
+        const end = dayjs(value, ['HH:mm', 'hh:mm A', 'h:mm A'], true);
+        if (start.isValid() && end.isValid() && end.diff(start, 'minute') === 0) {
+          return 'End time must differ from start time';
+        }
         return null;
       },
       end_date: (value, values) => {
         const end = asDate(value);
         const start = asDate(values.start_date);
-        if (end && start && end < start) {
-          return 'End date cannot be before start date';
-        }
+        if (!end) return 'Select an end date';
+        if (start && end < start) return 'End date cannot be before start date';
         return null;
       },
     },
   });
 
   useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
+    if (!isOpen) return;
+
+    const freshStart = createRoundedDate();
+    const freshEnd = createRoundedDate(60);
+    const freshDate = new Date();
+
     if (recording && recording.id) {
       setMode('single');
       singleForm.setValues({
@@ -156,23 +162,22 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
         end_time: asDate(recording.end_time) || defaultEnd,
       });
     } else {
-      // Reset forms to defaults when opening fresh
-      const freshStart = createRoundedDate();
-      const freshEnd = createRoundedDate(60);
-      const freshDate = new Date();
+      // Reset forms for fresh open
       singleForm.setValues({
         channel_id: channel ? `${channel.id}` : '',
         start_time: freshStart,
         end_time: freshEnd,
       });
+
+      const startStr = dayjs(freshStart).format('HH:mm');
       recurringForm.setValues({
         channel_id: channel ? `${channel.id}` : '',
         days_of_week: [],
-        start_time: dayjs(freshStart).format('HH:mm'),
+        start_time: startStr,
         end_time: dayjs(freshEnd).format('HH:mm'),
         rule_name: channel?.name || '',
         start_date: freshDate,
-        end_date: null,
+        end_date: freshDate,
       });
       setMode('single');
     }
@@ -184,9 +189,7 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
     list.sort((a, b) => {
       const aNum = Number(a.channel_number) || 0;
       const bNum = Number(b.channel_number) || 0;
-      if (aNum === bNum) {
-        return (a.name || '').localeCompare(b.name || '');
-      }
+      if (aNum === bNum) return (a.name || '').localeCompare(b.name || '');
       return aNum - bNum;
     });
     return list.map((item) => ({ value: `${item.id}`, label: item.name || `Channel ${item.id}` }));
@@ -252,6 +255,7 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
         end_date: toDateString(values.end_date),
         name: values.rule_name?.trim() || '',
       });
+
       await Promise.all([fetchRecurringRules(), fetchRecordings()]);
       notifications.show({
         title: 'Recurring rule saved',
@@ -267,13 +271,12 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
     }
   };
 
-  const onSubmit = mode === 'single'
-    ? singleForm.onSubmit(handleSingleSubmit)
-    : recurringForm.onSubmit(handleRecurringSubmit);
+  const onSubmit =
+    mode === 'single'
+      ? singleForm.onSubmit(handleSingleSubmit)
+      : recurringForm.onSubmit(handleRecurringSubmit);
 
-  if (!isOpen) {
-    return null;
-  }
+  if (!isOpen) return null;
 
   return (
     <Modal opened={isOpen} onClose={handleClose} title="Channel Recording">
@@ -326,15 +329,15 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
                   {...singleForm.getInputProps('start_time')}
                   key={singleForm.key('start_time')}
                   label="Start"
-                  valueFormat="MMM D, YYYY hh:mm A"
-                  timeInputProps={{ format: '12', amLabel: 'AM', pmLabel: 'PM', withSeconds: false }}
+                  valueFormat="MMM D, YYYY h:mm A"
+                  timeInputProps={{ format: '12', withSeconds: false, amLabel: 'AM', pmLabel: 'PM' }}
                 />
                 <DateTimePicker
                   {...singleForm.getInputProps('end_time')}
                   key={singleForm.key('end_time')}
                   label="End"
-                  valueFormat="MMM D, YYYY hh:mm A"
-                  timeInputProps={{ format: '12', amLabel: 'AM', pmLabel: 'PM', withSeconds: false }}
+                  valueFormat="MMM D, YYYY h:mm A"
+                  timeInputProps={{ format: '12', withSeconds: false, amLabel: 'AM', pmLabel: 'PM' }}
                 />
               </>
             ) : (
@@ -353,41 +356,52 @@ const RecordingModal = ({ recording = null, channel = null, isOpen, onClose }) =
                   data={DAY_OPTIONS}
                   searchable
                   clearable
-                  nothingFound="No match"
+                  nothingFoundMessage="No match"
                 />
+
                 <Group grow>
                   <DatePickerInput
                     label="Start date"
                     value={recurringForm.values.start_date}
-                    onChange={(value) => recurringForm.setFieldValue('start_date', value || new Date())}
+                    onChange={(value) =>
+                      recurringForm.setFieldValue('start_date', value || new Date())
+                    }
                     valueFormat="MMM D, YYYY"
                   />
                   <DatePickerInput
                     label="End date"
-                    placeholder="No end date"
-                    clearable
                     value={recurringForm.values.end_date}
                     onChange={(value) => recurringForm.setFieldValue('end_date', value)}
                     valueFormat="MMM D, YYYY"
                     minDate={recurringForm.values.start_date || undefined}
                   />
                 </Group>
+
                 <Group grow>
                   <TimeInput
-                    value={recurringForm.values.start_time}
-                    onChange={(value) => recurringForm.setFieldValue('start_time', value)}
                     label="Start time"
+                    value={recurringForm.values.start_time}
+                    onChange={timeChange((val) =>
+                      recurringForm.setFieldValue('start_time', toTimeString(val))
+                    )}
+                    onBlur={() => recurringForm.validateField('start_time')}
                     withSeconds={false}
-                    format="12"
+                    format="12"                     // shows 12-hour (so "00:00" renders "12:00 AM")
+                    inputMode="numeric"
                     amLabel="AM"
                     pmLabel="PM"
                   />
+
                   <TimeInput
-                    value={recurringForm.values.end_time}
-                    onChange={(value) => recurringForm.setFieldValue('end_time', value)}
                     label="End time"
+                    value={recurringForm.values.end_time}
+                    onChange={timeChange((val) =>
+                      recurringForm.setFieldValue('end_time', toTimeString(val))
+                    )}
+                    onBlur={() => recurringForm.validateField('end_time')}
                     withSeconds={false}
                     format="12"
+                    inputMode="numeric"
                     amLabel="AM"
                     pmLabel="PM"
                   />

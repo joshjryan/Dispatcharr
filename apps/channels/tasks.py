@@ -1145,9 +1145,12 @@ def sync_recurring_rule_impl(rule_id: int, drop_existing: bool = True, horizon_d
     end_limit = rule.end_date
     horizon = now + timedelta(days=horizon_days)
     start_window = max(start_limit, now.date())
-    end_window = horizon.date()
-    if end_limit and end_limit < end_window:
+    if drop_existing and end_limit:
         end_window = end_limit
+    else:
+        end_window = horizon.date()
+        if end_limit and end_limit < end_window:
+            end_window = end_limit
     if end_window < start_window:
         return 0
     total_created = 0
@@ -1163,7 +1166,9 @@ def sync_recurring_rule_impl(rule_id: int, drop_existing: bool = True, horizon_d
             end_dt = timezone.make_aware(datetime.combine(target_date, rule.end_time), tz)
         except Exception:
             continue
-        if end_dt <= start_dt or start_dt <= now:
+        if end_dt <= start_dt:
+            end_dt = end_dt + timedelta(days=1)
+        if start_dt <= now:
             continue
         exists = Recording.objects.filter(
             channel=rule.channel,

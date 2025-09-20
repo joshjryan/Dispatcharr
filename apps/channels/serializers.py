@@ -528,26 +528,28 @@ class RecurringRecordingRuleSerializer(serializers.ModelSerializer):
         return sorted(set(cleaned))
 
     def validate(self, attrs):
-        from django.utils import timezone
         start = attrs.get("start_time") or getattr(self.instance, "start_time", None)
         end = attrs.get("end_time") or getattr(self.instance, "end_time", None)
         if start and end and end <= start:
             raise serializers.ValidationError("End time must be after start time")
         start_date = attrs.get("start_date") if "start_date" in attrs else getattr(self.instance, "start_date", None)
         end_date = attrs.get("end_date") if "end_date" in attrs else getattr(self.instance, "end_date", None)
+        if start_date is None:
+            existing_start = getattr(self.instance, "start_date", None)
+            if existing_start is None:
+                raise serializers.ValidationError("Start date is required")
         if start_date and end_date and end_date < start_date:
             raise serializers.ValidationError("End date must be on or after start date")
+        if end_date is None:
+            existing_end = getattr(self.instance, "end_date", None)
+            if existing_end is None:
+                raise serializers.ValidationError("End date is required")
         # Normalize empty strings to None for dates
         if attrs.get("end_date") == "":
             attrs["end_date"] = None
         if attrs.get("start_date") == "":
             attrs["start_date"] = None
-        if attrs.get("start_date") is None and not getattr(self.instance, "start_date", None):
-            attrs["start_date"] = timezone.localdate()
         return super().validate(attrs)
 
     def create(self, validated_data):
-        from django.utils import timezone
-        if not validated_data.get("start_date"):
-            validated_data["start_date"] = timezone.localdate()
         return super().create(validated_data)
