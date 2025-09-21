@@ -1,5 +1,11 @@
 // frontend/src/pages/Guide.js
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import React, {
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import dayjs from 'dayjs';
 import API from '../api';
 import useChannelsStore from '../store/channels';
@@ -204,26 +210,28 @@ const GuideRow = React.memo(({ index, style, data }) => {
             channelPrograms.map((program) => renderProgram(program))
           ) : (
             <>
-              {Array.from({ length: Math.ceil(24 / 2) }).map((_, placeholderIndex) => (
-                <Box
-                  key={`placeholder-${channel.id}-${placeholderIndex}`}
-                  style={{
-                    position: 'absolute',
-                    left: placeholderIndex * (HOUR_WIDTH * 2),
-                    top: 0,
-                    width: HOUR_WIDTH * 2,
-                    height: rowHeight - 4,
-                    border: '1px dashed #2D3748',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#4A5568',
-                  }}
-                >
-                  <Text size="sm">No program data</Text>
-                </Box>
-              ))}
+              {Array.from({ length: Math.ceil(24 / 2) }).map(
+                (_, placeholderIndex) => (
+                  <Box
+                    key={`placeholder-${channel.id}-${placeholderIndex}`}
+                    style={{
+                      position: 'absolute',
+                      left: placeholderIndex * (HOUR_WIDTH * 2),
+                      top: 0,
+                      width: HOUR_WIDTH * 2,
+                      height: rowHeight - 4,
+                      border: '1px dashed #2D3748',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#4A5568',
+                    }}
+                  >
+                    <Text size="sm">No program data</Text>
+                  </Box>
+                )
+              )}
             </>
           )}
         </Box>
@@ -435,29 +443,33 @@ export default function TVChannelGuide({ startDate, endDate }) {
 
   const [timeFormatSetting] = useLocalStorage('time-format', '12h');
   const [dateFormatSetting] = useLocalStorage('date-format', 'mdy');
+  // Use user preference for time format
   const timeFormat = timeFormatSetting === '12h' ? 'h:mm A' : 'HH:mm';
   const dateFormat = dateFormatSetting === 'mdy' ? 'MMMM D' : 'D MMMM';
 
   // Format day label using relative terms when possible (Today, Tomorrow, etc)
-  const formatDayLabel = useCallback((time) => {
-    const today = dayjs().startOf('day');
-    const tomorrow = today.add(1, 'day');
-    const weekLater = today.add(7, 'day');
+  const formatDayLabel = useCallback(
+    (time) => {
+      const today = dayjs().startOf('day');
+      const tomorrow = today.add(1, 'day');
+      const weekLater = today.add(7, 'day');
 
-    const day = time.startOf('day');
+      const day = time.startOf('day');
 
-    if (day.isSame(today, 'day')) {
-      return 'Today';
-    } else if (day.isSame(tomorrow, 'day')) {
-      return 'Tomorrow';
-    } else if (day.isBefore(weekLater)) {
-      // Within a week, show day name
-      return time.format('dddd');
-    } else {
-      // Beyond a week, show month and day
-      return time.format(dateFormat);
-    }
-  }, [dateFormat]);
+      if (day.isSame(today, 'day')) {
+        return 'Today';
+      } else if (day.isSame(tomorrow, 'day')) {
+        return 'Tomorrow';
+      } else if (day.isBefore(weekLater)) {
+        // Within a week, show day name
+        return time.format('dddd');
+      } else {
+        // Beyond a week, show month and day
+        return time.format(dateFormat);
+      }
+    },
+    [dateFormat]
+  );
 
   // Hourly marks with day labels
   const hourTimeline = useMemo(() => {
@@ -503,7 +515,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
         return;
       }
 
-      if (timelineRef.current && timelineRef.current.scrollLeft !== scrollLeft) {
+      if (
+        timelineRef.current &&
+        timelineRef.current.scrollLeft !== scrollLeft
+      ) {
         isSyncingScroll.current = true;
         timelineRef.current.scrollLeft = scrollLeft;
         requestAnimationFrame(() => {
@@ -533,38 +548,35 @@ export default function TVChannelGuide({ startDate, endDate }) {
     return (minutesSinceStart / MINUTE_INCREMENT) * MINUTE_BLOCK_WIDTH;
   }, [now, start, end]);
 
-  const syncScrollLeft = useCallback(
-    (nextLeft, behavior = 'auto') => {
-      const guideNode = guideRef.current;
-      const timelineNode = timelineRef.current;
+  const syncScrollLeft = useCallback((nextLeft, behavior = 'auto') => {
+    const guideNode = guideRef.current;
+    const timelineNode = timelineRef.current;
 
-      isSyncingScroll.current = true;
+    isSyncingScroll.current = true;
 
-      if (guideNode) {
-        if (typeof guideNode.scrollTo === 'function') {
-          guideNode.scrollTo({ left: nextLeft, behavior });
-        } else {
-          guideNode.scrollLeft = nextLeft;
-        }
+    if (guideNode) {
+      if (typeof guideNode.scrollTo === 'function') {
+        guideNode.scrollTo({ left: nextLeft, behavior });
+      } else {
+        guideNode.scrollLeft = nextLeft;
       }
+    }
 
-      if (timelineNode) {
-        if (typeof timelineNode.scrollTo === 'function') {
-          timelineNode.scrollTo({ left: nextLeft, behavior });
-        } else {
-          timelineNode.scrollLeft = nextLeft;
-        }
+    if (timelineNode) {
+      if (typeof timelineNode.scrollTo === 'function') {
+        timelineNode.scrollTo({ left: nextLeft, behavior });
+      } else {
+        timelineNode.scrollLeft = nextLeft;
       }
+    }
 
-      guideScrollLeftRef.current = nextLeft;
-      setGuideScrollLeft(nextLeft);
+    guideScrollLeftRef.current = nextLeft;
+    setGuideScrollLeft(nextLeft);
 
-      requestAnimationFrame(() => {
-        isSyncingScroll.current = false;
-      });
-    },
-    []
-  );
+    requestAnimationFrame(() => {
+      isSyncingScroll.current = false;
+    });
+  }, []);
 
   // Scroll to the nearest half-hour mark ONLY on initial load
   useEffect(() => {
@@ -651,7 +663,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
     try {
       await useChannelsStore.getState().fetchRecordings();
     } catch (error) {
-      console.warn('Failed to refresh recordings after saving series rule', error);
+      console.warn(
+        'Failed to refresh recordings after saving series rule',
+        error
+      );
     }
     notifications.show({
       title: mode === 'new' ? 'Record new episodes' : 'Record all episodes',
@@ -706,7 +721,8 @@ export default function TVChannelGuide({ startDate, endDate }) {
     (program, event) => {
       event.stopPropagation();
 
-      const programStartMs = program.startMs ?? dayjs(program.start_time).valueOf();
+      const programStartMs =
+        program.startMs ?? dayjs(program.start_time).valueOf();
       const startOffsetMinutes = (programStartMs - start.valueOf()) / 60000;
       const leftPx =
         (startOffsetMinutes / MINUTE_INCREMENT) * MINUTE_BLOCK_WIDTH;
@@ -753,8 +769,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
         : now.startOf('hour').add(30, 'minute');
     const nowOffset = roundedNow.diff(start, 'minute');
     const scrollPosition =
-      (nowOffset / MINUTE_INCREMENT) * MINUTE_BLOCK_WIDTH -
-      MINUTE_BLOCK_WIDTH;
+      (nowOffset / MINUTE_INCREMENT) * MINUTE_BLOCK_WIDTH - MINUTE_BLOCK_WIDTH;
 
     const scrollPos = Math.max(scrollPosition, 0);
     syncScrollLeft(scrollPos, 'smooth');
@@ -844,8 +859,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
 
       const gapSize = 2;
       const widthPx =
-        (durationMinutes / MINUTE_INCREMENT) * MINUTE_BLOCK_WIDTH -
-        gapSize * 2;
+        (durationMinutes / MINUTE_INCREMENT) * MINUTE_BLOCK_WIDTH - gapSize * 2;
 
       const recording = recordingsByProgramId.get(program.id);
 
@@ -955,7 +969,8 @@ export default function TVChannelGuide({ startDate, endDate }) {
                   overflow: 'hidden',
                 }}
               >
-                {programStart.format(timeFormat)} - {programEnd.format(timeFormat)}
+                {programStart.format(timeFormat)} -{' '}
+                {programEnd.format(timeFormat)}
               </Text>
             </Box>
 
@@ -1039,10 +1054,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     [hourTimeline]
   );
 
-  const virtualizedHeight = useMemo(
-    () => guideHeight || 600,
-    [guideHeight]
-  );
+  const virtualizedHeight = useMemo(() => guideHeight || 600, [guideHeight]);
 
   const virtualizedWidth = useMemo(() => {
     if (guideWidth) {
@@ -1507,9 +1519,32 @@ export default function TVChannelGuide({ startDate, endDate }) {
           }}
         >
           <Flex direction="column" gap="sm">
-            <Button onClick={() => { recordOne(recordChoiceProgram); setRecordChoiceOpen(false); }}>Just this one</Button>
-            <Button variant="light" onClick={() => { saveSeriesRule(recordChoiceProgram, 'all'); setRecordChoiceOpen(false); }}>Every episode</Button>
-            <Button variant="light" onClick={() => { saveSeriesRule(recordChoiceProgram, 'new'); setRecordChoiceOpen(false); }}>New episodes only</Button>
+            <Button
+              onClick={() => {
+                recordOne(recordChoiceProgram);
+                setRecordChoiceOpen(false);
+              }}
+            >
+              Just this one
+            </Button>
+            <Button
+              variant="light"
+              onClick={() => {
+                saveSeriesRule(recordChoiceProgram, 'all');
+                setRecordChoiceOpen(false);
+              }}
+            >
+              Every episode
+            </Button>
+            <Button
+              variant="light"
+              onClick={() => {
+                saveSeriesRule(recordChoiceProgram, 'new');
+                setRecordChoiceOpen(false);
+              }}
+            >
+              New episodes only
+            </Button>
             {recordingForProgram && (
               <>
                 <Button
@@ -1524,7 +1559,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
                     try {
                       await useChannelsStore.getState().fetchRecordings();
                     } catch (error) {
-                      console.warn('Failed to refresh recordings after delete', error);
+                      console.warn(
+                        'Failed to refresh recordings after delete',
+                        error
+                      );
                     }
                     setRecordChoiceOpen(false);
                   }}
@@ -1542,7 +1580,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
                         scope: 'title',
                       });
                     } catch (error) {
-                      console.warn('Failed to remove scheduled series recordings', error);
+                      console.warn(
+                        'Failed to remove scheduled series recordings',
+                        error
+                      );
                     }
                     try {
                       await API.deleteSeriesRule(recordChoiceProgram.tvg_id);
@@ -1552,7 +1593,10 @@ export default function TVChannelGuide({ startDate, endDate }) {
                     try {
                       await useChannelsStore.getState().fetchRecordings();
                     } catch (error) {
-                      console.warn('Failed to refresh recordings after series delete', error);
+                      console.warn(
+                        'Failed to refresh recordings after series delete',
+                        error
+                      );
                     }
                     setRecordChoiceOpen(false);
                   }}
@@ -1562,7 +1606,17 @@ export default function TVChannelGuide({ startDate, endDate }) {
               </>
             )}
             {existingRuleMode && (
-              <Button color="red" variant="subtle" onClick={async () => { await API.deleteSeriesRule(recordChoiceProgram.tvg_id); setExistingRuleMode(null); setRecordChoiceOpen(false); }}>Remove series rule ({existingRuleMode})</Button>
+              <Button
+                color="red"
+                variant="subtle"
+                onClick={async () => {
+                  await API.deleteSeriesRule(recordChoiceProgram.tvg_id);
+                  setExistingRuleMode(null);
+                  setRecordChoiceOpen(false);
+                }}
+              >
+                Remove series rule ({existingRuleMode})
+              </Button>
             )}
           </Flex>
         </Modal>
@@ -1586,56 +1640,78 @@ export default function TVChannelGuide({ startDate, endDate }) {
         >
           <Stack gap="sm">
             {(!rules || rules.length === 0) && (
-              <Text size="sm" c="dimmed">No series rules configured</Text>
+              <Text size="sm" c="dimmed">
+                No series rules configured
+              </Text>
             )}
-            {rules && rules.map((r) => (
-              <Flex key={`${r.tvg_id}-${r.mode}`} justify="space-between" align="center">
-                <Text size="sm">{r.title || r.tvg_id} — {r.mode === 'new' ? 'New episodes' : 'Every episode'}</Text>
-                <Group gap="xs">
-                  <Button
-                    size="xs"
-                    variant="subtle"
-                    onClick={async () => {
-                      await API.evaluateSeriesRules(r.tvg_id);
-                      try {
-                        await useChannelsStore.getState().fetchRecordings();
-                      } catch (error) {
-                        console.warn('Failed to refresh recordings after evaluation', error);
-                      }
-                      notifications.show({ title: 'Evaluated', message: 'Checked for episodes' });
-                    }}
-                  >
-                    Evaluate Now
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="orange"
-                    onClick={async () => {
-                      await API.bulkRemoveSeriesRecordings({
-                        tvg_id: r.tvg_id,
-                        title: r.title,
-                        scope: 'title',
-                      });
-                      try {
-                        await API.deleteSeriesRule(r.tvg_id);
-                      } catch (error) {
-                        console.warn('Failed to delete series rule during removal', error);
-                      }
-                      try {
-                        await useChannelsStore.getState().fetchRecordings();
-                      } catch (error) {
-                        console.warn('Failed to refresh recordings after bulk removal', error);
-                      }
-                      const updated = await API.listSeriesRules();
-                      setRules(updated);
-                    }}
-                  >
-                    Remove this series (scheduled)
-                  </Button>
-                </Group>
-              </Flex>
-            ))}
+            {rules &&
+              rules.map((r) => (
+                <Flex
+                  key={`${r.tvg_id}-${r.mode}`}
+                  justify="space-between"
+                  align="center"
+                >
+                  <Text size="sm">
+                    {r.title || r.tvg_id} —{' '}
+                    {r.mode === 'new' ? 'New episodes' : 'Every episode'}
+                  </Text>
+                  <Group gap="xs">
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      onClick={async () => {
+                        await API.evaluateSeriesRules(r.tvg_id);
+                        try {
+                          await useChannelsStore.getState().fetchRecordings();
+                        } catch (error) {
+                          console.warn(
+                            'Failed to refresh recordings after evaluation',
+                            error
+                          );
+                        }
+                        notifications.show({
+                          title: 'Evaluated',
+                          message: 'Checked for episodes',
+                        });
+                      }}
+                    >
+                      Evaluate Now
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="orange"
+                      onClick={async () => {
+                        await API.bulkRemoveSeriesRecordings({
+                          tvg_id: r.tvg_id,
+                          title: r.title,
+                          scope: 'title',
+                        });
+                        try {
+                          await API.deleteSeriesRule(r.tvg_id);
+                        } catch (error) {
+                          console.warn(
+                            'Failed to delete series rule during removal',
+                            error
+                          );
+                        }
+                        try {
+                          await useChannelsStore.getState().fetchRecordings();
+                        } catch (error) {
+                          console.warn(
+                            'Failed to refresh recordings after bulk removal',
+                            error
+                          );
+                        }
+                        const updated = await API.listSeriesRules();
+                        setRules(updated);
+                      }}
+                    >
+                      Remove this series (scheduled)
+                    </Button>
+                  </Group>
+                </Flex>
+              ))}
           </Stack>
         </Modal>
       )}
