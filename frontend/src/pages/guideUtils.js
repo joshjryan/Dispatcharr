@@ -11,7 +11,11 @@ export function buildChannelIdMap(channels, tvgsById) {
       : null;
     const tvgId = tvgRecord?.tvg_id ?? channel.uuid;
     if (tvgId) {
-      map.set(String(tvgId), channel.id);
+      const tvgKey = String(tvgId);
+      if (!map.has(tvgKey)) {
+        map.set(tvgKey, []);
+      }
+      map.get(tvgKey).push(channel.id);
     }
   });
   return map;
@@ -24,22 +28,26 @@ export function mapProgramsByChannel(programs, channelIdByTvgId) {
 
   const map = new Map();
   programs.forEach((program) => {
-    const channelId = channelIdByTvgId.get(String(program.tvg_id));
-    if (!channelId) {
+    const channelIds = channelIdByTvgId.get(String(program.tvg_id));
+    if (!channelIds || channelIds.length === 0) {
       return;
-    }
-
-    if (!map.has(channelId)) {
-      map.set(channelId, []);
     }
 
     const startMs = program.startMs ?? dayjs(program.start_time).valueOf();
     const endMs = program.endMs ?? dayjs(program.end_time).valueOf();
 
-    map.get(channelId).push({
+    const programData = {
       ...program,
       startMs,
       endMs,
+    };
+
+    // Add this program to all channels that share the same TVG ID
+    channelIds.forEach((channelId) => {
+      if (!map.has(channelId)) {
+        map.set(channelId, []);
+      }
+      map.get(channelId).push(programData);
     });
   });
 

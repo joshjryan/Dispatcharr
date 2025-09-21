@@ -207,7 +207,9 @@ const GuideRow = React.memo(({ index, style, data }) => {
           }}
         >
           {channelPrograms.length > 0 ? (
-            channelPrograms.map((program) => renderProgram(program))
+            channelPrograms.map((program) =>
+              renderProgram(program, undefined, channel)
+            )
           ) : (
             <>
               {Array.from({ length: Math.ceil(24 / 2) }).map(
@@ -599,11 +601,12 @@ export default function TVChannelGuide({ startDate, endDate }) {
 
   const findChannelByTvgId = useCallback(
     (tvgId) => {
-      const channelId = channelIdByTvgId.get(String(tvgId));
-      if (!channelId) {
+      const channelIds = channelIdByTvgId.get(String(tvgId));
+      if (!channelIds || channelIds.length === 0) {
         return null;
       }
-      return channelById.get(channelId) || null;
+      // Return the first channel that matches this TVG ID
+      return channelById.get(channelIds[0]) || null;
     },
     [channelById, channelIdByTvgId]
   );
@@ -844,7 +847,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
     [start, syncScrollLeft]
   );
   const renderProgram = useCallback(
-    (program, channelStart = start) => {
+    (program, channelStart = start, channel = null) => {
       const programStartMs =
         program.startMs ?? dayjs(program.start_time).valueOf();
       const programEndMs = program.endMs ?? dayjs(program.end_time).valueOf();
@@ -887,7 +890,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
       return (
         <Box
           className="guide-program-container"
-          key={`${program.tvg_id}-${program.start_time}`}
+          key={`${channel?.id || 'unknown'}-${program.id || `${program.tvg_id}-${program.start_time}`}`}
           style={{
             position: 'absolute',
             left: leftPx + gapSize,
