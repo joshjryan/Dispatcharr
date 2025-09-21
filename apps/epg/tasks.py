@@ -893,7 +893,7 @@ def parse_channels_only(source):
                         display_name = None
                         icon_url = None
                         for child in elem:
-                            if child.tag == 'display-name' and child.text:
+                            if display_name is None and child.tag == 'display-name' and child.text:
                                 display_name = child.text.strip()
                             elif child.tag == 'icon':
                                 raw_icon_url = child.get('src', '').strip()
