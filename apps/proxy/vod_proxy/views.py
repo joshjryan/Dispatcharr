@@ -176,14 +176,15 @@ class VODStreamView(View):
                 logger.error(f"[VOD-ERROR] No stream URL available for {content_type} {content_id}")
                 return HttpResponse("No stream URL available", status=503)
 
-            # Get M3U profile
-            m3u_profile = self._get_m3u_profile(m3u_account, profile_id)
+            # Get M3U profile (returns profile and current connection count)
+            profile_result = self._get_m3u_profile(m3u_account, profile_id, session_id)
 
-            if not m3u_profile:
+            if not profile_result or not profile_result[0]:
                 logger.error(f"[VOD-ERROR] No suitable M3U profile found for {content_type} {content_id}")
                 return HttpResponse("No available stream", status=503)
 
-            logger.info(f"[VOD-PROFILE] Using M3U profile: {m3u_profile.id} (max_streams: {m3u_profile.max_streams}, current: {m3u_profile.current_viewers})")
+            m3u_profile, current_connections = profile_result
+            logger.info(f"[VOD-PROFILE] Using M3U profile: {m3u_profile.id} (max_streams: {m3u_profile.max_streams}, current: {current_connections})")
 
             # Connection tracking is handled by the connection manager
             # Transform URL based on profile
@@ -279,11 +280,13 @@ class VODStreamView(View):
                 logger.error(f"[VOD-HEAD] No stream URL available for {content_type} {content_id}")
                 return HttpResponse("No stream URL available", status=503)
 
-            # Get M3U profile
-            m3u_profile = self._get_m3u_profile(m3u_account, profile_id)
-            if not m3u_profile:
-                logger.error(f"[VOD-HEAD] No M3U profile found")
-                return HttpResponse("Profile not found", status=404)
+            # Get M3U profile (returns profile and current connection count)
+            profile_result = self._get_m3u_profile(m3u_account, profile_id, session_id)
+            if not profile_result or not profile_result[0]:
+                logger.error(f"[VOD-HEAD] No M3U profile found or all profiles at capacity")
+                return HttpResponse("No available stream", status=503)
+
+            m3u_profile, current_connections = profile_result
 
             # Transform URL if needed
             final_stream_url = self._transform_url(stream_url, m3u_profile)
@@ -517,21 +520,63 @@ class VODStreamView(View):
             logger.error(f"[VOD-URL] Error getting stream URL from relation: {e}", exc_info=True)
             return None
 
-    def _get_m3u_profile(self, m3u_account, profile_id):
-        """Get appropriate M3U profile for streaming using Redis-based viewer counts"""
+    def _get_m3u_profile(self, m3u_account, profile_id, session_id=None):
+        """Get appropriate M3U profile for streaming using Redis-based viewer counts
+
+        Args:
+            m3u_account: M3UAccount instance
+            profile_id: Optional specific profile ID requested
+            session_id: Optional session ID to check for existing connections
+
+        Returns:
+            tuple: (M3UAccountProfile, current_connections) or None if no profile found
+        """
         try:
             from core.utils import RedisClient
             redis_client = RedisClient.get_client()
 
             if not redis_client:
                 logger.warning("Redis not available, falling back to default profile")
-                return M3UAccountProfile.objects.filter(
+                default_profile = M3UAccountProfile.objects.filter(
                     m3u_account=m3u_account,
                     is_active=True,
                     is_default=True
                 ).first()
+                return (default_profile, 0) if default_profile else None
 
-            # If specific profile requested, try to use it
+            # Check if this session already has an active connection
+            if session_id:
+                persistent_connection_key = f"vod_persistent_connection:{session_id}"
+                connection_data = redis_client.hgetall(persistent_connection_key)
+
+                if connection_data:
+                    # Decode Redis hash data
+                    decoded_data = {}
+                    for k, v in connection_data.items():
+                        k_str = k.decode('utf-8') if isinstance(k, bytes) else k
+                        v_str = v.decode('utf-8') if isinstance(v, bytes) else v
+                        decoded_data[k_str] = v_str
+
+                    existing_profile_id = decoded_data.get('m3u_profile_id')
+                    if existing_profile_id:
+                        try:
+                            existing_profile = M3UAccountProfile.objects.get(
+                                id=int(existing_profile_id),
+                                m3u_account=m3u_account,
+                                is_active=True
+                            )
+                            # Get current connections for logging
+                            profile_connections_key = f"profile_connections:{existing_profile.id}"
+                            current_connections = int(redis_client.get(profile_connections_key) or 0)
+
+                            logger.info(f"[PROFILE-SELECTION] Session {session_id} reusing existing profile {existing_profile.id}: {current_connections}/{existing_profile.max_streams} connections")
+                            return (existing_profile, current_connections)
+                        except (M3UAccountProfile.DoesNotExist, ValueError):
+                            logger.warning(f"[PROFILE-SELECTION] Session {session_id} has invalid profile ID {existing_profile_id}, selecting new profile")
+                        except Exception as e:
+                            logger.warning(f"[PROFILE-SELECTION] Error checking existing profile for session {session_id}: {e}")
+                    else:
+                        logger.debug(f"[PROFILE-SELECTION] Session {session_id} exists but has no profile ID stored")            # If specific profile requested, try to use it
             if profile_id:
                 try:
                     profile = M3UAccountProfile.objects.get(
@@ -545,7 +590,7 @@ class VODStreamView(View):
 
                     if profile.max_streams == 0 or current_connections < profile.max_streams:
                         logger.info(f"[PROFILE-SELECTION] Using requested profile {profile.id}: {current_connections}/{profile.max_streams} connections")
-                        return profile
+                        return (profile, current_connections)
                     else:
                         logger.warning(f"[PROFILE-SELECTION] Requested profile {profile.id} is at capacity: {current_connections}/{profile.max_streams}")
                 except M3UAccountProfile.DoesNotExist:
@@ -572,13 +617,13 @@ class VODStreamView(View):
                 # Check if profile has available connection slots
                 if profile.max_streams == 0 or current_connections < profile.max_streams:
                     logger.info(f"[PROFILE-SELECTION] Selected profile {profile.id} ({profile.name}): {current_connections}/{profile.max_streams} connections")
-                    return profile
+                    return (profile, current_connections)
                 else:
                     logger.debug(f"[PROFILE-SELECTION] Profile {profile.id} at capacity: {current_connections}/{profile.max_streams}")
 
-            # All profiles are at capacity, fallback to default profile
-            logger.warning(f"[PROFILE-SELECTION] All profiles at capacity, using default profile {default_profile.id}")
-            return default_profile
+            # All profiles are at capacity - return None to trigger error response
+            logger.error(f"[PROFILE-SELECTION] All profiles at capacity for M3U account {m3u_account.id}, rejecting request")
+            return None
 
         except Exception as e:
             logger.error(f"Error getting M3U profile: {e}")
