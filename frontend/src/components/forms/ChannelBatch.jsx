@@ -272,7 +272,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const logoOptions = useMemo(() => {
     return [
       { id: '-1', name: '(no change)' },
-      { id: '0', name: '(remove logo)' },
+      { id: '0', name: 'Use Default', isDefault: true },
       ...Object.values(channelLogos),
     ];
   }, [channelLogos]);
@@ -550,72 +550,83 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                           style={{ width: '100%' }}
                           ref={logoListRef}
                         >
-                          {({ index, style }) => (
-                            <div
-                              style={{
-                                ...style,
-                                cursor: 'pointer',
-                                padding: '5px',
-                                borderRadius: '4px',
-                              }}
-                              onClick={() => {
-                                setSelectedLogoId(filteredLogos[index].id);
-                                form.setValues({
-                                  logo: filteredLogos[index].name,
-                                });
-                                setLogoPopoverOpened(false);
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor =
-                                  'rgb(68, 68, 68)';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor =
-                                  'transparent';
-                              }}
-                            >
-                              <Center
+                          {({ index, style }) => {
+                            const item = filteredLogos[index];
+                            return (
+                              <div
                                 style={{
-                                  flexDirection: 'column',
-                                  gap: '2px',
+                                  ...style,
+                                  cursor: 'pointer',
+                                  padding: '5px',
+                                  borderRadius: '4px',
+                                }}
+                                onClick={() => {
+                                  setSelectedLogoId(item.id);
+                                  form.setValues({
+                                    logo: item.name,
+                                  });
+                                  setLogoPopoverOpened(false);
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    'rgb(68, 68, 68)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    'transparent';
                                 }}
                               >
-                                {filteredLogos[index].id > 0 ? (
-                                  <img
-                                    src={
-                                      filteredLogos[index].cache_url || logo
-                                    }
-                                    height="30"
-                                    style={{
-                                      maxWidth: 80,
-                                      objectFit: 'contain',
-                                    }}
-                                    alt={filteredLogos[index].name || 'Logo'}
-                                    onError={(e) => {
-                                      if (e.target.src !== logo) {
-                                        e.target.src = logo;
-                                      }
-                                    }}
-                                  />
-                                ) : (
-                                  <Box h={30} />
-                                )}
-                                <Text
-                                  size="xs"
-                                  c="dimmed"
-                                  ta="center"
+                                <Center
                                   style={{
-                                    maxWidth: 80,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
+                                    flexDirection: 'column',
+                                    gap: '2px',
                                   }}
                                 >
-                                  {filteredLogos[index].name}
-                                </Text>
-                              </Center>
-                            </div>
-                          )}
+                                  {item.isDefault ? (
+                                    <img
+                                      src={logo}
+                                      height="30"
+                                      style={{
+                                        maxWidth: 80,
+                                        objectFit: 'contain',
+                                      }}
+                                      alt="Default Logo"
+                                    />
+                                  ) : item.id > 0 ? (
+                                    <img
+                                      src={item.cache_url || logo}
+                                      height="30"
+                                      style={{
+                                        maxWidth: 80,
+                                        objectFit: 'contain',
+                                      }}
+                                      alt={item.name || 'Logo'}
+                                      onError={(e) => {
+                                        if (e.target.src !== logo) {
+                                          e.target.src = logo;
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <Box h={30} />
+                                  )}
+                                  <Text
+                                    size="xs"
+                                    c="dimmed"
+                                    ta="center"
+                                    style={{
+                                      maxWidth: 80,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {item.name}
+                                  </Text>
+                                </Center>
+                              </div>
+                            );
+                          }}
                         </List>
                       )}
                     </ScrollArea>
