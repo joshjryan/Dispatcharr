@@ -518,8 +518,19 @@ class VODStreamView(View):
             return None
 
     def _get_m3u_profile(self, m3u_account, profile_id):
-        """Get appropriate M3U profile for streaming"""
+        """Get appropriate M3U profile for streaming using Redis-based viewer counts"""
         try:
+            from core.utils import RedisClient
+            redis_client = RedisClient.get_client()
+
+            if not redis_client:
+                logger.warning("Redis not available, falling back to default profile")
+                return M3UAccountProfile.objects.filter(
+                    m3u_account=m3u_account,
+                    is_active=True,
+                    is_default=True
+                ).first()
+
             # If specific profile requested, try to use it
             if profile_id:
                 try:
@@ -528,24 +539,46 @@ class VODStreamView(View):
                         m3u_account=m3u_account,
                         is_active=True
                     )
-                    if profile.current_viewers < profile.max_streams or profile.max_streams == 0:
-                        return profile
-                except M3UAccountProfile.DoesNotExist:
-                    pass
+                    # Check Redis-based current connections
+                    profile_connections_key = f"profile_connections:{profile.id}"
+                    current_connections = int(redis_client.get(profile_connections_key) or 0)
 
-            # Find available profile ordered by current usage (least loaded first)
-            profiles = M3UAccountProfile.objects.filter(
+                    if profile.max_streams == 0 or current_connections < profile.max_streams:
+                        logger.info(f"[PROFILE-SELECTION] Using requested profile {profile.id}: {current_connections}/{profile.max_streams} connections")
+                        return profile
+                    else:
+                        logger.warning(f"[PROFILE-SELECTION] Requested profile {profile.id} is at capacity: {current_connections}/{profile.max_streams}")
+                except M3UAccountProfile.DoesNotExist:
+                    logger.warning(f"[PROFILE-SELECTION] Requested profile {profile_id} not found")
+
+            # Get active profiles ordered by priority (default first)
+            m3u_profiles = M3UAccountProfile.objects.filter(
                 m3u_account=m3u_account,
                 is_active=True
-            ).order_by('current_viewers')
+            )
+
+            default_profile = m3u_profiles.filter(is_default=True).first()
+            if not default_profile:
+                logger.error(f"[PROFILE-SELECTION] No default profile found for M3U account {m3u_account.id}")
+                return None
+
+            # Check profiles in order: default first, then others
+            profiles = [default_profile] + list(m3u_profiles.filter(is_default=False))
 
             for profile in profiles:
-                # Check if profile has available connection slots
-                if profile.current_viewers < profile.max_streams or profile.max_streams == 0:
-                    return profile
+                profile_connections_key = f"profile_connections:{profile.id}"
+                current_connections = int(redis_client.get(profile_connections_key) or 0)
 
-            # Fallback to default profile even if over limit
-            return profiles.filter(is_default=True).first()
+                # Check if profile has available connection slots
+                if profile.max_streams == 0 or current_connections < profile.max_streams:
+                    logger.info(f"[PROFILE-SELECTION] Selected profile {profile.id} ({profile.name}): {current_connections}/{profile.max_streams} connections")
+                    return profile
+                else:
+                    logger.debug(f"[PROFILE-SELECTION] Profile {profile.id} at capacity: {current_connections}/{profile.max_streams}")
+
+            # All profiles are at capacity, fallback to default profile
+            logger.warning(f"[PROFILE-SELECTION] All profiles at capacity, using default profile {default_profile.id}")
+            return default_profile
 
         except Exception as e:
             logger.error(f"Error getting M3U profile: {e}")
