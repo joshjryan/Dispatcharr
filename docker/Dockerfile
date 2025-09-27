@@ -7,9 +7,14 @@ ARG BASE_TAG=base
 FROM node:20 AS frontend-builder
 WORKDIR /app/frontend
 COPY ./frontend /app/frontend
-RUN corepack enable && corepack prepare yarn@stable --activate && \
-    yarn install && yarn build && \
-    rm -rf node_modules .cache
+
+RUN corepack enable && corepack prepare yarn@stable --activate
+
+RUN yarn install
+
+RUN yarn build
+
+RUN rm -rf node_modules .cache
 
 # --- Redeclare build arguments for the next stage ---
 ARG REPO_OWNER
