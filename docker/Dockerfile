@@ -10,7 +10,7 @@ COPY ./frontend /app/frontend
 
 RUN corepack enable && corepack prepare yarn@stable --activate
 
-RUN yarn install
+RUN yarn install --ignore-optional || yarn install --ignore-scripts
 
 RUN yarn build
 
