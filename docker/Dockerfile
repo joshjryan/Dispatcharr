@@ -6,10 +6,17 @@ ARG BASE_TAG=base
 # --- Build frontend ---
 FROM node:24 AS frontend-builder
 
+# Make builds platform-aware for buildx caching and optional native deps
+ARG TARGETPLATFORM
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 # include platform marker so install layer is different per platform
+RUN echo "platform=${TARGETPLATFORM:-$(uname -m)}" > .platform
 RUN npm ci --prefer-offline --no-audit --unsafe-perm || (rm -rf node_modules package-lock.json && npm install --unsafe-perm)
+
+# Ensure platform-specific optional native modules are present (rebuild or reinstall if necessary)
+RUN npm rebuild || (rm -rf node_modules package-lock.json && npm install --unsafe-perm)
+
 COPY frontend/ ./
 RUN npm run build
 RUN rm -rf node_modules .cache
