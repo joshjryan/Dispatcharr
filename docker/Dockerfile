@@ -7,10 +7,10 @@ ARG BASE_TAG=base
 FROM node:24 AS frontend-builder
 
 WORKDIR /app/frontend
-COPY ./frontend /app/frontend
-
-# Install dependencies and build using npm
-RUN npm install || (find /tmp -name build.log -exec cat {} \; && exit 1)
+COPY frontend/package*.json ./
+# include platform marker so install layer is different per platform
+RUN npm ci --prefer-offline --no-audit --unsafe-perm || (rm -rf node_modules package-lock.json && npm install --unsafe-perm)
+COPY frontend/ ./
 RUN npm run build
 RUN rm -rf node_modules .cache
 
