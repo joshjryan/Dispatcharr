@@ -10,7 +10,7 @@ COPY ./frontend /app/frontend
 
 RUN corepack enable && corepack prepare yarn@stable --activate
 
-RUN yarn install
+RUN yarn install || (find /tmp -name build.log -exec cat {} \; && exit 1)
 
 RUN yarn build
 
