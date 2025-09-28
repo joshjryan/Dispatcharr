@@ -2,19 +2,27 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ dev ]
+    branches: [dev]
   pull_request:
-    branches: [ dev ]
-  workflow_dispatch:  # Allow manual triggering
+    branches: [dev]
+  workflow_dispatch:
 
-# Add explicit permissions for the workflow
 permissions:
-  contents: write    # For managing releases and pushing tags
-  packages: write    # For publishing to GitHub Container Registry
+  contents: write
+  packages: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  docker:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [amd64, arm64]
+        include:
+          - platform: amd64
+            runner: ubuntu-24.04
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -61,15 +69,12 @@ jobs:
       - name: Set repository and image metadata
         id: meta
         run: |
-          # Get lowercase repository owner
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           echo "repo_owner=${REPO_OWNER}" >> $GITHUB_OUTPUT
 
-          # Get repository name
           REPO_NAME=$(echo "${{ github.repository }}" | cut -d '/' -f 2 | tr '[:upper:]' '[:lower:]')
           echo "repo_name=${REPO_NAME}" >> $GITHUB_OUTPUT
 
-          # Determine branch name
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "branch_tag=latest" >> $GITHUB_OUTPUT
             echo "is_main=true" >> $GITHUB_OUTPUT
@@ -77,13 +82,11 @@ jobs:
             echo "branch_tag=dev" >> $GITHUB_OUTPUT
             echo "is_main=false" >> $GITHUB_OUTPUT
           else
-            # For other branches, use the branch name
             BRANCH=$(echo "${{ github.ref }}" | sed 's/refs\/heads\///' | sed 's/[^a-zA-Z0-9]/-/g')
             echo "branch_tag=${BRANCH}" >> $GITHUB_OUTPUT
             echo "is_main=false" >> $GITHUB_OUTPUT
           fi
 
-          # Determine if this is from a fork
           if [[ "${{ github.event.pull_request.head.repo.fork }}" == "true" ]]; then
             echo "is_fork=true" >> $GITHUB_OUTPUT
           else
