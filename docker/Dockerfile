@@ -6,9 +6,6 @@ ARG BASE_TAG=base
 # --- Build frontend ---
 FROM node:24 AS frontend-builder
 
-# Install dependencies for building frontend assets
-RUN apt-get update && apt-get install -y make g++ build-essential
-
 WORKDIR /app/frontend
 COPY ./frontend /app/frontend
 
