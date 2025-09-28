@@ -4,7 +4,7 @@ ARG REPO_NAME=dispatcharr
 ARG BASE_TAG=base
 
 # --- Build frontend ---
-FROM node:24-slim AS frontend-builder
+FROM node:24 AS frontend-builder
 WORKDIR /app/frontend
 COPY ./frontend /app/frontend
 
