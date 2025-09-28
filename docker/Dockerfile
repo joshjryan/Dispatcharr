@@ -4,7 +4,7 @@ ARG REPO_NAME=dispatcharr
 ARG BASE_TAG=base
 
 # --- Build frontend ---
-FROM node:24 AS frontend-builder
+FROM node:20 AS frontend-builder
 
 # Make builds platform-aware for buildx caching and optional native deps
 ARG TARGETPLATFORM
