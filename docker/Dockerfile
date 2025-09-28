@@ -9,12 +9,9 @@ FROM node:24 AS frontend-builder
 WORKDIR /app/frontend
 COPY ./frontend /app/frontend
 
-RUN corepack enable && corepack prepare yarn@stable --activate
-
-RUN yarn install || (find /tmp -name build.log -exec cat {} \; && exit 1)
-
-RUN yarn build
-
+# Install dependencies and build using npm
+RUN npm install || (find /tmp -name build.log -exec cat {} \; && exit 1)
+RUN npm run build
 RUN rm -rf node_modules .cache
 
 # --- Redeclare build arguments for the next stage ---
