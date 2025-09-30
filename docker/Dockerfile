@@ -6,22 +6,13 @@ ARG BASE_TAG=base
 # --- Build frontend ---
 
 FROM node:24 AS frontend-builder
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+
 WORKDIR /app/frontend
 COPY ./frontend /app/frontend
-RUN set -eux; \
-    # remove any node_modules that may have been copied from the host (x86)
-    rm -rf node_modules || true; \
-    # When building under emulation (buildx qemu) ensure npm downloads
-    # the esbuild binary for the target platform rather than the host.
-    # Also increase Node's memory for the build to avoid EPIPE/OOM
-    export NODE_OPTIONS="--max-old-space-size=4096"; \
-    # If TARGETOS/TARGETARCH are provided by buildx, use those so this Dockerfile
-    # is multi-arch friendly; otherwise fall back to linux/amd64 defaults.
-    npm_config_platform="$TARGETOS" npm_config_arch="$TARGETARCH" npm install --no-audit --progress=false; \
-    # Run build with the increased memory setting in the environment
-    NODE_OPTIONS="$NODE_OPTIONS" npm run build; \
+# remove any node_modules that may have been copied from the host (x86)
+RUN rm -rf node_modules || true; \
+    npm install --no-audit --progress=false;
+RUN    npm run build; \
     rm -rf node_modules .cache
 
 # --- Redeclare build arguments for the next stage ---
