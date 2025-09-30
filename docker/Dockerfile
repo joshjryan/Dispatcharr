@@ -4,22 +4,16 @@ ARG REPO_NAME=dispatcharr
 ARG BASE_TAG=base
 
 # --- Build frontend ---
-FROM node:20 AS frontend-builder
 
-# Make builds platform-aware for buildx caching and optional native deps
-ARG TARGETPLATFORM
+FROM node:24 AS frontend-builder
 WORKDIR /app/frontend
-COPY frontend/package*.json ./
-# include platform marker so install layer is different per platform
-RUN echo "platform=${TARGETPLATFORM:-$(uname -m)}" > .platform
-RUN npm ci --prefer-offline --no-audit --unsafe-perm || (rm -rf node_modules package-lock.json && npm install --unsafe-perm)
-
-# Ensure platform-specific optional native modules are present (rebuild or reinstall if necessary)
-RUN npm rebuild || (rm -rf node_modules package-lock.json && npm install --unsafe-perm)
-
-COPY frontend/ ./
-RUN npm run build
-RUN rm -rf node_modules .cache
+COPY ./frontend /app/frontend
+RUN set -eux; \
+    # remove any node_modules that may have been copied from the host (x86)
+    rm -rf node_modules || true; \
+    npm install --no-audit --progress=false; \
+    npm run build; \
+    rm -rf node_modules .cache
 
 # --- Redeclare build arguments for the next stage ---
 ARG REPO_OWNER
