@@ -98,7 +98,10 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          platforms: linux/amd64,linux/arm64
+          # Build only the platform for this matrix job to avoid running amd64
+          # stages under qemu on an arm64 runner (and vice-versa). This makes
+          # the matrix runner's platform the one built by buildx.
+          platforms: linux/${{ matrix.platform }}
           tags: |
             ghcr.io/${{ steps.meta.outputs.repo_owner }}/${{ steps.meta.outputs.repo_name }}:${{ steps.meta.outputs.branch_tag }}
             ghcr.io/${{ steps.meta.outputs.repo_owner }}/${{ steps.meta.outputs.repo_name }}:${{ steps.version.outputs.version }}-${{ steps.timestamp.outputs.timestamp }}
