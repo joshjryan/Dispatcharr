@@ -21,7 +21,7 @@ jobs:
       branch_tag: ${{ steps.meta.outputs.branch_tag }}
       version: ${{ steps.version.outputs.version }}
       timestamp: ${{ steps.timestamp.outputs.timestamp }}
-      sha_short: ${{ steps.version.outputs.sha_short }}
+
     steps:
       - uses: actions/checkout@v3
         with:
@@ -39,7 +39,6 @@ jobs:
         run: |
           VERSION=$(python -c "import version; print(version.__version__)")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Set repository and image metadata
         id: meta
@@ -134,10 +133,8 @@ jobs:
           tags: |
             ghcr.io/${{ needs.prepare.outputs.repo_owner }}/${{ needs.prepare.outputs.repo_name }}:${{ needs.prepare.outputs.branch_tag }}-${{ matrix.platform }}
             ghcr.io/${{ needs.prepare.outputs.repo_owner }}/${{ needs.prepare.outputs.repo_name }}:${{ needs.prepare.outputs.version }}-${{ needs.prepare.outputs.timestamp }}-${{ matrix.platform }}
-            ghcr.io/${{ needs.prepare.outputs.repo_owner }}/${{ needs.prepare.outputs.repo_name }}:${{ needs.prepare.outputs.sha_short }}-${{ matrix.platform }}
             docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${{ needs.prepare.outputs.repo_name }}:${{ needs.prepare.outputs.branch_tag }}-${{ matrix.platform }}
             docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${{ needs.prepare.outputs.repo_name }}:${{ needs.prepare.outputs.version }}-${{ needs.prepare.outputs.timestamp }}-${{ matrix.platform }}
-            docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${{ needs.prepare.outputs.repo_name }}:${{ needs.prepare.outputs.sha_short }}-${{ matrix.platform }}
           build-args: |
             REPO_OWNER=${{ needs.prepare.outputs.repo_owner }}
             REPO_NAME=${{ needs.prepare.outputs.repo_name }}
@@ -178,7 +175,6 @@ jobs:
           BRANCH_TAG=${{ needs.prepare.outputs.branch_tag }}
           VERSION=${{ needs.prepare.outputs.version }}
           TIMESTAMP=${{ needs.prepare.outputs.timestamp }}
-          SHA=${{ needs.prepare.outputs.sha_short }}
 
           echo "Creating multi-arch manifest for ${OWNER}/${REPO}"
 
@@ -190,16 +186,9 @@ jobs:
           docker buildx imagetools create --tag ghcr.io/${OWNER}/${REPO}:${VERSION}-${TIMESTAMP} \
             ghcr.io/${OWNER}/${REPO}:${VERSION}-${TIMESTAMP}-amd64 ghcr.io/${OWNER}/${REPO}:${VERSION}-${TIMESTAMP}-arm64
 
-          # short sha tag
-          docker buildx imagetools create --tag ghcr.io/${OWNER}/${REPO}:${SHA} \
-            ghcr.io/${OWNER}/${REPO}:${SHA}-amd64 ghcr.io/${OWNER}/${REPO}:${SHA}-arm64
-
           # also create Docker Hub manifests using the same username
           docker buildx imagetools create --tag docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${BRANCH_TAG} \
             docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${BRANCH_TAG}-amd64 docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${BRANCH_TAG}-arm64
 
           docker buildx imagetools create --tag docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${VERSION}-${TIMESTAMP} \
             docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${VERSION}-${TIMESTAMP}-amd64 docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${VERSION}-${TIMESTAMP}-arm64
-
-          docker buildx imagetools create --tag docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${SHA} \
-            docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${SHA}-amd64 docker.io/${{ secrets.DOCKERHUB_ORGANIZATION }}/${REPO}:${SHA}-arm64
