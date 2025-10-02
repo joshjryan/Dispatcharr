@@ -56,7 +56,7 @@ const SettingsPage = () => {
 
   // Add a new state to track the dialog type
   const [rehashDialogType, setRehashDialogType] = useState(null); // 'save' or 'rehash'
-  
+
   // Store pending changed settings when showing the dialog
   const [pendingChangedSettings, setPendingChangedSettings] = useState(null);
 
@@ -329,7 +329,7 @@ const SettingsPage = () => {
         });
       }
     }
-    
+
     // Clear the pending values
     setPendingChangedSettings(null);
   };
@@ -411,7 +411,7 @@ const SettingsPage = () => {
                 data={[
                   {
                     value: '12h',
-                    label: '12h hour time',
+                    label: '12 hour time',
                   },
                   {
                     value: '24h',
