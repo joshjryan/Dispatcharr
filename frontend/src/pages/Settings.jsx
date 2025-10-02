@@ -651,6 +651,10 @@ const SettingsPage = () => {
                           value: 'tvg_id',
                           label: 'TVG-ID',
                         },
+                        {
+                          value: 'm3u_id',
+                          label: 'M3U ID',
+                        },
                       ]}
                       {...form.getInputProps('m3u-hash-key')}
                       key={form.key('m3u-hash-key')}
