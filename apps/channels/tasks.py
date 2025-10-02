@@ -2256,7 +2256,9 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
 
         for i in range(0, total_streams, batch_size):
             batch_stream_ids = stream_ids[i:i + batch_size]
-            batch_streams = Stream.objects.filter(id__in=batch_stream_ids)
+            # Fetch streams and preserve the order from batch_stream_ids
+            batch_streams_dict = {stream.id: stream for stream in Stream.objects.filter(id__in=batch_stream_ids)}
+            batch_streams = [batch_streams_dict[stream_id] for stream_id in batch_stream_ids if stream_id in batch_streams_dict]
 
             # Send progress update
             send_websocket_update('updates', 'update', {
