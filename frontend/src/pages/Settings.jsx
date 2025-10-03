@@ -57,6 +57,9 @@ const SettingsPage = () => {
   // Add a new state to track the dialog type
   const [rehashDialogType, setRehashDialogType] = useState(null); // 'save' or 'rehash'
 
+  // Store pending changed settings when showing the dialog
+  const [pendingChangedSettings, setPendingChangedSettings] = useState(null);
+
   // UI / local storage settings
   const [tableSize, setTableSize] = useLocalStorage('table-size', 'default');
   const [timeFormat, setTimeFormat] = useLocalStorage('time-format', '12h');
@@ -201,6 +204,8 @@ const SettingsPage = () => {
 
     // If M3U hash key changed, show warning (unless suppressed)
     if (m3uHashKeyChanged && !isWarningSuppressed('rehash-streams')) {
+      // Store the changed settings before showing dialog
+      setPendingChangedSettings(changedSettings);
       setRehashDialogType('save'); // Set dialog type to save
       setRehashConfirmOpen(true);
       return;
@@ -305,23 +310,28 @@ const SettingsPage = () => {
   const executeSettingsSaveAndRehash = async () => {
     setRehashConfirmOpen(false);
 
-    // First save the settings
-    const values = form.getValues();
-    const changedSettings = {};
+    // Use the stored pending values that were captured before the dialog was shown
+    const changedSettings = pendingChangedSettings || {};
 
-    for (const settingKey in values) {
-      if (String(values[settingKey]) !== String(settings[settingKey].value)) {
-        changedSettings[settingKey] = `${values[settingKey]}`;
+    // Update each changed setting in the backend (create if missing)
+    for (const updatedKey in changedSettings) {
+      const existing = settings[updatedKey];
+      if (existing && existing.id) {
+        await API.updateSetting({
+          ...existing,
+          value: changedSettings[updatedKey],
+        });
+      } else {
+        await API.createSetting({
+          key: updatedKey,
+          name: updatedKey.replace(/-/g, ' '),
+          value: changedSettings[updatedKey],
+        });
       }
     }
 
-    // Update each changed setting in the backend
-    for (const updatedKey in changedSettings) {
-      await API.updateSetting({
-        ...settings[updatedKey],
-        value: changedSettings[updatedKey],
-      });
-    }
+    // Clear the pending values
+    setPendingChangedSettings(null);
   };
 
   const executeRehashStreamsOnly = async () => {
@@ -401,7 +411,7 @@ const SettingsPage = () => {
                 data={[
                   {
                     value: '12h',
-                    label: '12h hour time',
+                    label: '12 hour time',
                   },
                   {
                     value: '24h',
@@ -651,6 +661,10 @@ const SettingsPage = () => {
                           value: 'tvg_id',
                           label: 'TVG-ID',
                         },
+                        {
+                          value: 'm3u_id',
+                          label: 'M3U ID',
+                        },
                       ]}
                       {...form.getInputProps('m3u-hash-key')}
                       key={form.key('m3u-hash-key')}
@@ -872,6 +886,8 @@ const SettingsPage = () => {
         onClose={() => {
           setRehashConfirmOpen(false);
           setRehashDialogType(null);
+          // Clear pending values when dialog is cancelled
+          setPendingChangedSettings(null);
         }}
         onConfirm={handleRehashConfirm}
         title={

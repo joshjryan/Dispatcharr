@@ -4,17 +4,16 @@ ARG REPO_NAME=dispatcharr
 ARG BASE_TAG=base
 
 # --- Build frontend ---
-FROM node:20 AS frontend-builder
+
+FROM node:24 AS frontend-builder
+
 WORKDIR /app/frontend
 COPY ./frontend /app/frontend
-
-RUN corepack enable && corepack prepare yarn@stable --activate
-
-RUN yarn install
-
-RUN yarn build
-
-RUN rm -rf node_modules .cache
+# remove any node_modules that may have been copied from the host (x86)
+RUN rm -rf node_modules || true; \
+    npm install --no-audit --progress=false;
+RUN    npm run build; \
+    rm -rf node_modules .cache
 
 # --- Redeclare build arguments for the next stage ---
 ARG REPO_OWNER
