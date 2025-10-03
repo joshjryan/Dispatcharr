@@ -877,7 +877,7 @@ def parse_channels_only(source):
 
             # Change iterparse to look for both channel and programme elements
             logger.debug(f"Creating iterparse context for channels and programmes")
-            channel_parser = etree.iterparse(source_file, events=('end',), tag=('channel', 'programme'), remove_blank_text=True)
+            channel_parser = etree.iterparse(source_file, events=('end',), tag=('channel', 'programme'), remove_blank_text=True, recover=True)
             if process:
                 logger.debug(f"[parse_channels_only] Memory after creating iterparse: {process.memory_info().rss / 1024 / 1024:.2f} MB")
 
