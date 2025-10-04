@@ -106,13 +106,12 @@ const LogoForm = ({ logo = null, isOpen, onClose, onSuccess }) => {
           onSuccess?.({ type: 'create', logo: newLogo }); // Call onSuccess for creates
         } else {
           // File was uploaded and logo was already created
-          // Note: API.uploadLogo already calls addLogo() in the store, so no need to call onSuccess
           notifications.show({
             title: 'Success',
             message: 'Logo uploaded successfully',
             color: 'green',
           });
-          // No onSuccess call needed - API.uploadLogo already updated the store
+          onSuccess?.({ type: 'create', logo: uploadResponse });
         }
         onClose();
       } catch (error) {
