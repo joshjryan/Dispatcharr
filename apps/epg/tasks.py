@@ -875,17 +875,15 @@ def parse_channels_only(source):
             if process:
                 logger.debug(f"[parse_channels_only] Memory after opening file: {process.memory_info().rss / 1024 / 1024:.2f} MB")
 
-            # Use iterparse to find the <tv> element
+            # Change iterparse to look for both channel and programme elements
             logger.debug(f"Creating iterparse context for channels and programmes")
-            tv_finder = etree.iterparse(source_file, events=('start',), tag='tv', remove_blank_text=True, recover=True)
-            _, tv_root = next(tv_finder)
+            channel_parser = etree.iterparse(source_file, events=('end',), tag=('channel', 'programme'), remove_blank_text=True, recover=True)
             if process:
                 logger.debug(f"[parse_channels_only] Memory after creating iterparse: {process.memory_info().rss / 1024 / 1024:.2f} MB")
 
             channel_count = 0
             total_elements_processed = 0  # Track total elements processed, not just channels
-
-            for elem in tv_root.iter('channel', 'programme'):
+            for _, elem in channel_parser:
                 total_elements_processed += 1
                 # Only process channel elements
                 if elem.tag == 'channel':
