@@ -2711,3 +2711,98 @@ def set_channels_logos_from_epg(self, channel_ids):
             'error': str(e)
         })
         raise
+
+
+@shared_task(bind=True)
+def set_channels_tvg_ids_from_epg(self, channel_ids):
+    """
+    Celery task to set channel TVG-IDs from EPG data for multiple channels
+    """
+    from core.utils import send_websocket_update
+
+    task_id = self.request.id
+    total_channels = len(channel_ids)
+    updated_count = 0
+    errors = []
+
+    try:
+        logger.info(f"Starting EPG TVG-ID setting task for {total_channels} channels")
+
+        # Send initial progress
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_tvg_id_setting_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_channels,
+            'status': 'running',
+            'message': 'Starting EPG TVG-ID setting...'
+        })
+
+        batch_size = 100
+        for i in range(0, total_channels, batch_size):
+            batch_ids = channel_ids[i:i + batch_size]
+            batch_updates = []
+
+            # Get channels and their EPG data
+            channels = Channel.objects.filter(id__in=batch_ids).select_related('epg_data')
+
+            for channel in channels:
+                try:
+                    if channel.epg_data and channel.epg_data.tvg_id:
+                        if channel.tvg_id != channel.epg_data.tvg_id:
+                            channel.tvg_id = channel.epg_data.tvg_id
+                            batch_updates.append(channel)
+                            updated_count += 1
+                except Exception as e:
+                    errors.append(f"Channel {channel.id}: {str(e)}")
+                    logger.error(f"Error processing channel {channel.id}: {e}")
+
+            # Bulk update the batch
+            if batch_updates:
+                Channel.objects.bulk_update(batch_updates, ['tvg_id'])
+
+            # Send progress update
+            progress = min(i + batch_size, total_channels)
+            send_websocket_update('updates', 'update', {
+                'type': 'epg_tvg_id_setting_progress',
+                'task_id': task_id,
+                'progress': progress,
+                'total': total_channels,
+                'status': 'running',
+                'message': f'Updated {updated_count} channel TVG-IDs...',
+                'updated_count': updated_count
+            })
+
+        # Send completion notification
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_tvg_id_setting_progress',
+            'task_id': task_id,
+            'progress': total_channels,
+            'total': total_channels,
+            'status': 'completed',
+            'message': f'Successfully updated {updated_count} channel TVG-IDs from EPG data',
+            'updated_count': updated_count,
+            'error_count': len(errors),
+            'errors': errors
+        })
+
+        logger.info(f"EPG TVG-ID setting task completed. Updated {updated_count} channels")
+        return {
+            'status': 'completed',
+            'updated_count': updated_count,
+            'error_count': len(errors),
+            'errors': errors
+        }
+
+    except Exception as e:
+        logger.error(f"EPG TVG-ID setting task failed: {e}")
+        send_websocket_update('updates', 'update', {
+            'type': 'epg_tvg_id_setting_progress',
+            'task_id': task_id,
+            'progress': 0,
+            'total': total_channels,
+            'status': 'failed',
+            'message': f'Task failed: {str(e)}',
+            'error': str(e)
+        })
+        raise

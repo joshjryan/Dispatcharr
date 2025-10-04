@@ -263,6 +263,34 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
     }
   };
 
+  const handleSetTvgIdFromEpg = () => {
+    const epgDataId = formik.values.epg_data_id;
+    if (!epgDataId) {
+      notifications.show({
+        title: 'No EPG Selected',
+        message: 'Please select an EPG source first.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    const tvg = tvgsById[epgDataId];
+    if (tvg && tvg.tvg_id) {
+      formik.setFieldValue('tvg_id', tvg.tvg_id);
+      notifications.show({
+        title: 'Success',
+        message: `TVG-ID set to "${tvg.tvg_id}"`,
+        color: 'green',
+      });
+    } else {
+      notifications.show({
+        title: 'No TVG-ID Available',
+        message: 'No TVG-ID found in the selected EPG data.',
+        color: 'orange',
+      });
+    }
+  };
+
   const formik = useFormik({
     initialValues: {
       name: '',
@@ -823,7 +851,23 @@ const ChannelForm = ({ channel = null, isOpen, onClose }) => {
               <TextInput
                 id="tvg_id"
                 name="tvg_id"
-                label="TVG-ID"
+                label={
+                  <Group gap="xs">
+                    <span>TVG-ID</span>
+                    {formik.values.epg_data_id && (
+                      <Button
+                        size="xs"
+                        variant="transparent"
+                        onClick={handleSetTvgIdFromEpg}
+                        title="Set TVG-ID from EPG data"
+                        p={0}
+                        h="auto"
+                      >
+                        Use EPG TVG-ID
+                      </Button>
+                    )}
+                  </Group>
+                }
                 value={formik.values.tvg_id}
                 onChange={formik.handleChange}
                 error={formik.errors.tvg_id ? formik.touched.tvg_id : ''}

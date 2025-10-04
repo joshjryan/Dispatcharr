@@ -202,6 +202,40 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     }
   };
 
+  const handleSetTvgIdsFromEpg = async () => {
+    if (!channelIds || channelIds.length === 0) {
+      notifications.show({
+        title: 'No Channels Selected',
+        message: 'No channels to update.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    try {
+      // Start the backend task
+      await API.setChannelTvgIdsFromEpg(channelIds);
+
+      // The task will send WebSocket updates for progress
+      // Just show that it started successfully
+      notifications.show({
+        title: 'Task Started',
+        message: `Started setting TVG-IDs from EPG for ${channelIds.length} channels. Progress will be shown in notifications.`,
+        color: 'blue',
+      });
+
+      // Close the modal since the task is now running in background
+      onClose();
+    } catch (error) {
+      console.error('Failed to start EPG TVG-ID setting task:', error);
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to start EPG TVG-ID setting task.',
+        color: 'red',
+      });
+    }
+  };
+
   // useEffect(() => {
   //   // const sameStreamProfile = channels.every(
   //   //   (channel) => channel.stream_profile_id == channels[0].stream_profile_id
@@ -317,9 +351,17 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                   >
                     Set Logos from EPG
                   </Button>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={handleSetTvgIdsFromEpg}
+                    style={{ flex: 1 }}
+                  >
+                    Set TVG-IDs from EPG
+                  </Button>
                 </Group>
                 <Text size="xs" c="dimmed" mt="xs">
-                  Updates channel names and logos based on their assigned EPG
+                  Updates channel names, logos, and TVG-IDs based on their assigned EPG
                   data
                 </Text>
               </Paper>
