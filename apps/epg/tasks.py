@@ -1242,7 +1242,7 @@ def parse_programs_for_tvg_id(epg_id):
             source_file = open(file_path, 'rb')
 
             # Stream parse the file using lxml's iterparse
-            program_parser = etree.iterparse(source_file, events=('end',), tag='programme',  remove_blank_text=True)
+            program_parser = etree.iterparse(source_file, events=('end',), tag='programme',  remove_blank_text=True, recover=True)
 
             for _, elem in program_parser:
                 if elem.get('channel') == epg.tvg_id:
