@@ -236,6 +236,38 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
     }
   };
 
+  const handleClearEpgs = async () => {
+    if (!channelIds || channelIds.length === 0) {
+      notifications.show({
+        title: 'No Channels Selected',
+        message: 'No channels to update.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    try {
+      // Clear EPG assignments (set to null/dummy) using existing batchSetEPG API
+      const associations = channelIds.map(id => ({
+        channel_id: id,
+        epg_data_id: null
+      }));
+      
+      await API.batchSetEPG(associations);
+
+      // batchSetEPG already shows a notification and refreshes channels
+      // Close the modal
+      onClose();
+    } catch (error) {
+      console.error('Failed to clear EPG assignments:', error);
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to clear EPG assignments.',
+        color: 'red',
+      });
+    }
+  };
+
   // useEffect(() => {
   //   // const sameStreamProfile = channels.every(
   //   //   (channel) => channel.stream_profile_id == channels[0].stream_profile_id
@@ -360,9 +392,20 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                     Set TVG-IDs from EPG
                   </Button>
                 </Group>
+                <Group gap="xs" wrap="nowrap" mt="xs">
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="red"
+                    onClick={handleClearEpgs}
+                    style={{ flex: 1 }}
+                  >
+                    Clear EPG (Set to Dummy)
+                  </Button>
+                </Group>
                 <Text size="xs" c="dimmed" mt="xs">
                   Updates channel names, logos, and TVG-IDs based on their assigned EPG
-                  data
+                  data, or clear EPG assignments to use dummy EPG
                 </Text>
               </Paper>
 
