@@ -29,6 +29,8 @@ import { FixedSizeList as List } from 'react-window';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { USER_LEVELS, USER_LEVEL_LABELS } from '../../constants';
+import ConfirmationDialog from '../ConfirmationDialog';
+import useWarningsStore from '../../store/warnings';
 
 const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const theme = useMantineTheme();
@@ -48,6 +50,14 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const [groupPopoverOpened, setGroupPopoverOpened] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
   const groupOptions = Object.values(channelGroups);
+
+  // Confirmation dialog states
+  const [confirmSetNamesOpen, setConfirmSetNamesOpen] = useState(false);
+  const [confirmSetLogosOpen, setConfirmSetLogosOpen] = useState(false);
+  const [confirmSetTvgIdsOpen, setConfirmSetTvgIdsOpen] = useState(false);
+  const [confirmClearEpgsOpen, setConfirmClearEpgsOpen] = useState(false);
+  const isWarningSuppressed = useWarningsStore((s) => s.isWarningSuppressed);
+  const suppressWarning = useWarningsStore((s) => s.suppressWarning);
 
   const form = useForm({
     mode: 'uncontrolled',
@@ -144,6 +154,15 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       return;
     }
 
+    // Skip warning if suppressed
+    if (isWarningSuppressed('batch-set-names-from-epg')) {
+      return executeSetNamesFromEpg();
+    }
+
+    setConfirmSetNamesOpen(true);
+  };
+
+  const executeSetNamesFromEpg = async () => {
     try {
       // Start the backend task
       await API.setChannelNamesFromEpg(channelIds);
@@ -157,6 +176,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       });
 
       // Close the modal since the task is now running in background
+      setConfirmSetNamesOpen(false);
       onClose();
     } catch (error) {
       console.error('Failed to start EPG name setting task:', error);
@@ -165,6 +185,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
         message: 'Failed to start EPG name setting task.',
         color: 'red',
       });
+      setConfirmSetNamesOpen(false);
     }
   };
 
@@ -178,6 +199,15 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       return;
     }
 
+    // Skip warning if suppressed
+    if (isWarningSuppressed('batch-set-logos-from-epg')) {
+      return executeSetLogosFromEpg();
+    }
+
+    setConfirmSetLogosOpen(true);
+  };
+
+  const executeSetLogosFromEpg = async () => {
     try {
       // Start the backend task
       await API.setChannelLogosFromEpg(channelIds);
@@ -191,6 +221,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       });
 
       // Close the modal since the task is now running in background
+      setConfirmSetLogosOpen(false);
       onClose();
     } catch (error) {
       console.error('Failed to start EPG logo setting task:', error);
@@ -199,6 +230,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
         message: 'Failed to start EPG logo setting task.',
         color: 'red',
       });
+      setConfirmSetLogosOpen(false);
     }
   };
 
@@ -212,6 +244,15 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       return;
     }
 
+    // Skip warning if suppressed
+    if (isWarningSuppressed('batch-set-tvg-ids-from-epg')) {
+      return executeSetTvgIdsFromEpg();
+    }
+
+    setConfirmSetTvgIdsOpen(true);
+  };
+
+  const executeSetTvgIdsFromEpg = async () => {
     try {
       // Start the backend task
       await API.setChannelTvgIdsFromEpg(channelIds);
@@ -225,6 +266,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       });
 
       // Close the modal since the task is now running in background
+      setConfirmSetTvgIdsOpen(false);
       onClose();
     } catch (error) {
       console.error('Failed to start EPG TVG-ID setting task:', error);
@@ -233,6 +275,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
         message: 'Failed to start EPG TVG-ID setting task.',
         color: 'red',
       });
+      setConfirmSetTvgIdsOpen(false);
     }
   };
 
@@ -246,17 +289,27 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       return;
     }
 
+    // Skip warning if suppressed
+    if (isWarningSuppressed('batch-clear-epgs')) {
+      return executeClearEpgs();
+    }
+
+    setConfirmClearEpgsOpen(true);
+  };
+
+  const executeClearEpgs = async () => {
     try {
       // Clear EPG assignments (set to null/dummy) using existing batchSetEPG API
-      const associations = channelIds.map(id => ({
+      const associations = channelIds.map((id) => ({
         channel_id: id,
-        epg_data_id: null
+        epg_data_id: null,
       }));
-      
+
       await API.batchSetEPG(associations);
 
       // batchSetEPG already shows a notification and refreshes channels
       // Close the modal
+      setConfirmClearEpgsOpen(false);
       onClose();
     } catch (error) {
       console.error('Failed to clear EPG assignments:', error);
@@ -265,6 +318,7 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
         message: 'Failed to clear EPG assignments.',
         color: 'red',
       });
+      setConfirmClearEpgsOpen(false);
     }
   };
 
@@ -404,8 +458,8 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                   </Button>
                 </Group>
                 <Text size="xs" c="dimmed" mt="xs">
-                  Updates channel names, logos, and TVG-IDs based on their assigned EPG
-                  data, or clear EPG assignments to use dummy EPG
+                  Updates channel names, logos, and TVG-IDs based on their
+                  assigned EPG data, or clear EPG assignments to use dummy EPG
                 </Text>
               </Paper>
 
@@ -580,6 +634,90 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
       <ChannelGroupForm
         isOpen={channelGroupModelOpen}
         onClose={handleChannelGroupModalClose}
+      />
+
+      <ConfirmationDialog
+        opened={confirmSetNamesOpen}
+        onClose={() => setConfirmSetNamesOpen(false)}
+        onConfirm={executeSetNamesFromEpg}
+        title="Confirm Set Names from EPG"
+        message={
+          <div style={{ whiteSpace: 'pre-line' }}>
+            {`Are you sure you want to set names from EPG for ${channelIds?.length || 0} selected channels?
+
+This will replace the current channel names with the names from their assigned EPG data.
+
+This action cannot be undone.`}
+          </div>
+        }
+        confirmLabel="Set Names"
+        cancelLabel="Cancel"
+        actionKey="batch-set-names-from-epg"
+        onSuppressChange={suppressWarning}
+        size="md"
+      />
+
+      <ConfirmationDialog
+        opened={confirmSetLogosOpen}
+        onClose={() => setConfirmSetLogosOpen(false)}
+        onConfirm={executeSetLogosFromEpg}
+        title="Confirm Set Logos from EPG"
+        message={
+          <div style={{ whiteSpace: 'pre-line' }}>
+            {`Are you sure you want to set logos from EPG for ${channelIds?.length || 0} selected channels?
+
+This will replace the current channel logos with logos from their assigned EPG data. New logos will be created if needed.
+
+This action cannot be undone.`}
+          </div>
+        }
+        confirmLabel="Set Logos"
+        cancelLabel="Cancel"
+        actionKey="batch-set-logos-from-epg"
+        onSuppressChange={suppressWarning}
+        size="md"
+      />
+
+      <ConfirmationDialog
+        opened={confirmSetTvgIdsOpen}
+        onClose={() => setConfirmSetTvgIdsOpen(false)}
+        onConfirm={executeSetTvgIdsFromEpg}
+        title="Confirm Set TVG-IDs from EPG"
+        message={
+          <div style={{ whiteSpace: 'pre-line' }}>
+            {`Are you sure you want to set TVG-IDs from EPG for ${channelIds?.length || 0} selected channels?
+
+This will replace the current TVG-IDs with the TVG-IDs from their assigned EPG data.
+
+This action cannot be undone.`}
+          </div>
+        }
+        confirmLabel="Set TVG-IDs"
+        cancelLabel="Cancel"
+        actionKey="batch-set-tvg-ids-from-epg"
+        onSuppressChange={suppressWarning}
+        size="md"
+      />
+
+      <ConfirmationDialog
+        opened={confirmClearEpgsOpen}
+        onClose={() => setConfirmClearEpgsOpen(false)}
+        onConfirm={executeClearEpgs}
+        title="Confirm Clear EPG Assignments"
+        message={
+          <div style={{ whiteSpace: 'pre-line' }}>
+            {`Are you sure you want to clear EPG assignments for ${channelIds?.length || 0} selected channels?
+
+This will set all selected channels to use dummy EPG data.
+
+This action cannot be undone.`}
+          </div>
+        }
+        confirmLabel="Clear EPGs"
+        cancelLabel="Cancel"
+        actionKey="batch-clear-epgs"
+        onSuppressChange={suppressWarning}
+        size="md"
       />
     </>
   );
