@@ -95,7 +95,22 @@ def generate_m3u(request, profile_name=None, user=None):
     # Options: 'channel_number' (default), 'tvg_id', 'gracenote'
     tvg_id_source = request.GET.get('tvg_id_source', 'channel_number').lower()
 
-    m3u_content = "#EXTM3U\n"
+    # Build EPG URL with query parameters if needed
+    epg_base_url = build_absolute_uri_with_port(request, reverse('output:epg_endpoint', args=[profile_name]) if profile_name else reverse('output:epg_endpoint'))
+
+    # Optionally preserve certain query parameters
+    preserved_params = ['tvg_id_source', 'cachedlogos', 'days']
+    query_params = {k: v for k, v in request.GET.items() if k in preserved_params}
+    if query_params:
+        from urllib.parse import urlencode
+        epg_url = f"{epg_base_url}?{urlencode(query_params)}"
+    else:
+        epg_url = epg_base_url
+
+    # Add x-tvg-url and url-tvg attribute for EPG URL
+    m3u_content = f'#EXTM3U x-tvg-url="{epg_url}" url-tvg="{epg_url}"\n'
+
+    # Start building M3U content
     for channel in channels:
         group_title = channel.channel_group.name if channel.channel_group else "Default"
 
