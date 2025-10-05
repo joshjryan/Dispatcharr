@@ -29,14 +29,11 @@ import { FixedSizeList as List } from 'react-window';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { USER_LEVELS, USER_LEVEL_LABELS } from '../../constants';
-<<<<<<< HEAD
 import { useChannelLogoSelection } from '../../hooks/useSmartLogos';
 import LazyLogo from '../LazyLogo';
 import logo from '../../images/logo.png';
-=======
 import ConfirmationDialog from '../ConfirmationDialog';
 import useWarningsStore from '../../store/warnings';
->>>>>>> Main-Project/dev
 
 const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const theme = useMantineTheme();
@@ -68,10 +65,8 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const [groupFilter, setGroupFilter] = useState('');
   const groupOptions = Object.values(channelGroups);
 
-<<<<<<< HEAD
   const [logoPopoverOpened, setLogoPopoverOpened] = useState(false);
   const [logoFilter, setLogoFilter] = useState('');
-=======
   // Confirmation dialog states
   const [confirmSetNamesOpen, setConfirmSetNamesOpen] = useState(false);
   const [confirmSetLogosOpen, setConfirmSetLogosOpen] = useState(false);
@@ -79,7 +74,6 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
   const [confirmClearEpgsOpen, setConfirmClearEpgsOpen] = useState(false);
   const isWarningSuppressed = useWarningsStore((s) => s.isWarningSuppressed);
   const suppressWarning = useWarningsStore((s) => s.suppressWarning);
->>>>>>> Main-Project/dev
 
   const form = useForm({
     mode: 'uncontrolled',
@@ -784,7 +778,6 @@ const ChannelBatchForm = ({ channelIds, isOpen, onClose }) => {
                   />
                 )}
               </Group>
-
 
               <Select
                 id="stream_profile_id"
