@@ -45,45 +45,48 @@ def generate_m3u(request, profile_name=None, user=None):
     The stream URL now points to the new stream_view that uses StreamProfile.
     Supports both GET and POST methods for compatibility with IPTVSmarters.
     """
+    logger.debug("Generating M3U for profile: %s, user: %s", profile_name, user.username if user else "Anonymous")
     # Check if this is a POST request with data (which we don't want to allow)
     if request.method == "POST" and request.body:
         return HttpResponseForbidden("POST requests with content are not allowed")
 
     if user is not None:
         if user.user_level == 0:
-            filters = {
-                "channelprofilemembership__enabled": True,
-                "user_level__lte": user.user_level,
-            }
+            user_profile_count = user.channel_profiles.count()
 
-            if user.channel_profiles.count() != 0:
-                channel_profiles = user.channel_profiles.all()
-                filters["channelprofilemembership__channel_profile__in"] = (
-                    channel_profiles
-                )
-
-            channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
+            # If user has ALL profiles or NO profiles, give unrestricted access
+            if user_profile_count == 0:
+                # No profile filtering - user sees all channels based on user_level
+                channels = Channel.objects.filter(user_level__lte=user.user_level).order_by("channel_number")
+            else:
+                # User has specific limited profiles assigned
+                filters = {
+                    "channelprofilemembership__enabled": True,
+                    "user_level__lte": user.user_level,
+                    "channelprofilemembership__channel_profile__in": user.channel_profiles.all()
+                }
+                channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
         else:
             channels = Channel.objects.filter(user_level__lte=user.user_level).order_by(
                 "channel_number"
             )
 
-
-    if profile_name is not None:
-        channel_profile = ChannelProfile.objects.get(name=profile_name)
-        channels = Channel.objects.filter(
-            channelprofilemembership__channel_profile=channel_profile,
-            channelprofilemembership__enabled=True
-        ).order_by('channel_number')
     else:
         if profile_name is not None:
             channel_profile = ChannelProfile.objects.get(name=profile_name)
             channels = Channel.objects.filter(
                 channelprofilemembership__channel_profile=channel_profile,
-                channelprofilemembership__enabled=True,
-            ).order_by("channel_number")
+                channelprofilemembership__enabled=True
+            ).order_by('channel_number')
         else:
-            channels = Channel.objects.order_by("channel_number")
+            if profile_name is not None:
+                channel_profile = ChannelProfile.objects.get(name=profile_name)
+                channels = Channel.objects.filter(
+                    channelprofilemembership__channel_profile=channel_profile,
+                    channelprofilemembership__enabled=True,
+                ).order_by("channel_number")
+            else:
+                channels = Channel.objects.order_by("channel_number")
 
     # Check if the request wants to use direct logo URLs instead of cache
     use_cached_logos = request.GET.get('cachedlogos', 'true').lower() != 'false'
@@ -315,18 +318,20 @@ def generate_epg(request, profile_name=None, user=None):
         # Get channels based on user/profile
         if user is not None:
             if user.user_level == 0:
-                filters = {
-                    "channelprofilemembership__enabled": True,
-                    "user_level__lte": user.user_level,
-                }
+                user_profile_count = user.channel_profiles.count()
 
-                if user.channel_profiles.count() != 0:
-                    channel_profiles = user.channel_profiles.all()
-                    filters["channelprofilemembership__channel_profile__in"] = (
-                        channel_profiles
-                    )
-
-                channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
+                # If user has ALL profiles or NO profiles, give unrestricted access
+                if user_profile_count == 0:
+                    # No profile filtering - user sees all channels based on user_level
+                    channels = Channel.objects.filter(user_level__lte=user.user_level).order_by("channel_number")
+                else:
+                    # User has specific limited profiles assigned
+                    filters = {
+                        "channelprofilemembership__enabled": True,
+                        "user_level__lte": user.user_level,
+                        "channelprofilemembership__channel_profile__in": user.channel_profiles.all()
+                    }
+                    channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
             else:
                 channels = Channel.objects.filter(user_level__lte=user.user_level).order_by(
                     "channel_number"
@@ -863,19 +868,22 @@ def xc_get_live_categories(user):
     response = []
 
     if user.user_level == 0:
-        filters = {
-            "channels__channelprofilemembership__enabled": True,
-            "channels__user_level": 0,
-        }
+        user_profile_count = user.channel_profiles.count()
 
-        if user.channel_profiles.count() != 0:
-            # Only get data from active profile
-            channel_profiles = user.channel_profiles.all()
-            filters["channels__channelprofilemembership__channel_profile__in"] = (
-                channel_profiles
-            )
-
-        channel_groups = ChannelGroup.objects.filter(**filters).distinct().order_by(Lower("name"))
+        # If user has ALL profiles or NO profiles, give unrestricted access
+        if user_profile_count == 0:
+            # No profile filtering - user sees all channel groups
+            channel_groups = ChannelGroup.objects.filter(
+                channels__isnull=False, channels__user_level__lte=user.user_level
+            ).distinct().order_by(Lower("name"))
+        else:
+            # User has specific limited profiles assigned
+            filters = {
+                "channels__channelprofilemembership__enabled": True,
+                "channels__user_level": 0,
+                "channels__channelprofilemembership__channel_profile__in": user.channel_profiles.all()
+            }
+            channel_groups = ChannelGroup.objects.filter(**filters).distinct().order_by(Lower("name"))
     else:
         channel_groups = ChannelGroup.objects.filter(
             channels__isnull=False, channels__user_level__lte=user.user_level
@@ -897,20 +905,25 @@ def xc_get_live_streams(request, user, category_id=None):
     streams = []
 
     if user.user_level == 0:
-        filters = {
-            "channelprofilemembership__enabled": True,
-            "user_level__lte": user.user_level,
-        }
+        user_profile_count = user.channel_profiles.count()
 
-        if user.channel_profiles.count() > 0:
-            # Only get data from active profile
-            channel_profiles = user.channel_profiles.all()
-            filters["channelprofilemembership__channel_profile__in"] = channel_profiles
-
-        if category_id is not None:
-            filters["channel_group__id"] = category_id
-
-        channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
+        # If user has ALL profiles or NO profiles, give unrestricted access
+        if user_profile_count == 0:
+            # No profile filtering - user sees all channels based on user_level
+            filters = {"user_level__lte": user.user_level}
+            if category_id is not None:
+                filters["channel_group__id"] = category_id
+            channels = Channel.objects.filter(**filters).order_by("channel_number")
+        else:
+            # User has specific limited profiles assigned
+            filters = {
+                "channelprofilemembership__enabled": True,
+                "user_level__lte": user.user_level,
+                "channelprofilemembership__channel_profile__in": user.channel_profiles.all()
+            }
+            if category_id is not None:
+                filters["channel_group__id"] = category_id
+            channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
     else:
         if not category_id:
             channels = Channel.objects.filter(user_level__lte=user.user_level).order_by("channel_number")
@@ -956,18 +969,25 @@ def xc_get_epg(request, user, short=False):
 
     channel = None
     if user.user_level < 10:
-        filters = {
-            "id": channel_id,
-            "channelprofilemembership__enabled": True,
-            "user_level__lte": user.user_level,
-        }
+        user_profile_count = user.channel_profiles.count()
 
-        if user.channel_profiles.count() > 0:
-            channel_profiles = user.channel_profiles.all()
-            filters["channelprofilemembership__channel_profile__in"] = channel_profiles
+        # If user has ALL profiles or NO profiles, give unrestricted access
+        if user_profile_count == 0:
+            # No profile filtering - user sees all channels based on user_level
+            channel = Channel.objects.filter(
+                id=channel_id,
+                user_level__lte=user.user_level
+            ).first()
+        else:
+            # User has specific limited profiles assigned
+            filters = {
+                "id": channel_id,
+                "channelprofilemembership__enabled": True,
+                "user_level__lte": user.user_level,
+                "channelprofilemembership__channel_profile__in": user.channel_profiles.all()
+            }
+            channel = Channel.objects.filter(**filters).distinct().first()
 
-        # Use filter().first() with distinct instead of get_object_or_404 to handle multiple profile memberships
-        channel = Channel.objects.filter(**filters).distinct().first()
         if not channel:
             raise Http404()
     else:
