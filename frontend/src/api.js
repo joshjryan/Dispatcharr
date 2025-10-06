@@ -1896,6 +1896,83 @@ export default class API {
     }
   }
 
+  static async updateRecording(id, values) {
+    try {
+      const response = await request(`${host}/api/channels/recordings/${id}/`, {
+        method: 'PATCH',
+        body: values,
+      });
+      useChannelsStore.getState().fetchRecordings();
+      return response;
+    } catch (e) {
+      errorNotification(`Failed to update recording ${id}`, e);
+    }
+  }
+
+  static async getComskipConfig() {
+    try {
+      return await request(`${host}/api/channels/dvr/comskip-config/`);
+    } catch (e) {
+      errorNotification('Failed to retrieve comskip configuration', e);
+    }
+  }
+
+  static async uploadComskipIni(file) {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      return await request(`${host}/api/channels/dvr/comskip-config/`, {
+        method: 'POST',
+        body: formData,
+      });
+    } catch (e) {
+      errorNotification('Failed to upload comskip.ini', e);
+    }
+  }
+
+  static async listRecurringRules() {
+    try {
+      const response = await request(`${host}/api/channels/recurring-rules/`);
+      return response;
+    } catch (e) {
+      errorNotification('Failed to retrieve recurring DVR rules', e);
+    }
+  }
+
+  static async createRecurringRule(payload) {
+    try {
+      const response = await request(`${host}/api/channels/recurring-rules/`, {
+        method: 'POST',
+        body: payload,
+      });
+      return response;
+    } catch (e) {
+      errorNotification('Failed to create recurring DVR rule', e);
+    }
+  }
+
+  static async updateRecurringRule(ruleId, payload) {
+    try {
+      const response = await request(`${host}/api/channels/recurring-rules/${ruleId}/`, {
+        method: 'PATCH',
+        body: payload,
+      });
+      return response;
+    } catch (e) {
+      errorNotification(`Failed to update recurring rule ${ruleId}`, e);
+    }
+  }
+
+  static async deleteRecurringRule(ruleId) {
+    try {
+      await request(`${host}/api/channels/recurring-rules/${ruleId}/`, {
+        method: 'DELETE',
+      });
+    } catch (e) {
+      errorNotification(`Failed to delete recurring rule ${ruleId}`, e);
+    }
+  }
+
   static async deleteRecording(id) {
     try {
       await request(`${host}/api/channels/recordings/${id}/`, { method: 'DELETE' });

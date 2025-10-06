@@ -1,4 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import API from '../api';
 import useSettingsStore from '../store/settings';
 import useUserAgentsStore from '../store/userAgents';
@@ -11,6 +17,7 @@ import {
   Center,
   Flex,
   Group,
+  FileInput,
   MultiSelect,
   Select,
   Stack,
@@ -20,6 +27,7 @@ import {
   NumberInput,
 } from '@mantine/core';
 import { isNotEmpty, useForm } from '@mantine/form';
+import { notifications } from '@mantine/notifications';
 import UserAgentsTable from '../components/tables/UserAgentsTable';
 import StreamProfilesTable from '../components/tables/StreamProfilesTable';
 import useLocalStorage from '../hooks/useLocalStorage';
@@ -32,6 +40,140 @@ import {
 } from '../constants';
 import ConfirmationDialog from '../components/ConfirmationDialog';
 import useWarningsStore from '../store/warnings';
+
+const TIMEZONE_FALLBACKS = [
+  'UTC',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Phoenix',
+  'America/Anchorage',
+  'Pacific/Honolulu',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Madrid',
+  'Europe/Warsaw',
+  'Europe/Moscow',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Australia/Sydney',
+];
+
+const getSupportedTimeZones = () => {
+  try {
+    if (typeof Intl.supportedValuesOf === 'function') {
+      return Intl.supportedValuesOf('timeZone');
+    }
+  } catch (error) {
+    console.warn('Unable to enumerate supported time zones:', error);
+  }
+  return TIMEZONE_FALLBACKS;
+};
+
+const getTimeZoneOffsetMinutes = (date, timeZone) => {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    const parts = dtf.formatToParts(date).reduce((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
+      return acc;
+    }, {});
+    const asUTC = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second)
+    );
+    return (asUTC - date.getTime()) / 60000;
+  } catch (error) {
+    console.warn(`Failed to compute offset for ${timeZone}:`, error);
+    return 0;
+  }
+};
+
+const formatOffset = (minutes) => {
+  const rounded = Math.round(minutes);
+  const sign = rounded < 0 ? '-' : '+';
+  const absolute = Math.abs(rounded);
+  const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
+  const mins = String(absolute % 60).padStart(2, '0');
+  return `UTC${sign}${hours}:${mins}`;
+};
+
+const buildTimeZoneOptions = (preferredZone) => {
+  const zones = getSupportedTimeZones();
+  const referenceYear = new Date().getUTCFullYear();
+  const janDate = new Date(Date.UTC(referenceYear, 0, 1, 12, 0, 0));
+  const julDate = new Date(Date.UTC(referenceYear, 6, 1, 12, 0, 0));
+
+  const options = zones
+    .map((zone) => {
+      const janOffset = getTimeZoneOffsetMinutes(janDate, zone);
+      const julOffset = getTimeZoneOffsetMinutes(julDate, zone);
+      const currentOffset = getTimeZoneOffsetMinutes(new Date(), zone);
+      const minOffset = Math.min(janOffset, julOffset);
+      const maxOffset = Math.max(janOffset, julOffset);
+      const usesDst = minOffset !== maxOffset;
+      const labelParts = [`now ${formatOffset(currentOffset)}`];
+      if (usesDst) {
+        labelParts.push(
+          `DST range ${formatOffset(minOffset)} to ${formatOffset(maxOffset)}`
+        );
+      }
+      return {
+        value: zone,
+        label: `${zone} (${labelParts.join(' | ')})`,
+        numericOffset: minOffset,
+      };
+    })
+    .sort((a, b) => {
+      if (a.numericOffset !== b.numericOffset) {
+        return a.numericOffset - b.numericOffset;
+      }
+      return a.value.localeCompare(b.value);
+    });
+  if (
+    preferredZone &&
+    !options.some((option) => option.value === preferredZone)
+  ) {
+    const currentOffset = getTimeZoneOffsetMinutes(new Date(), preferredZone);
+    options.push({
+      value: preferredZone,
+      label: `${preferredZone} (now ${formatOffset(currentOffset)})`,
+      numericOffset: currentOffset,
+    });
+    options.sort((a, b) => {
+      if (a.numericOffset !== b.numericOffset) {
+        return a.numericOffset - b.numericOffset;
+      }
+      return a.value.localeCompare(b.value);
+    });
+  }
+  return options;
+};
+
+const getDefaultTimeZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (error) {
+    return 'UTC';
+  }
+};
 
 const SettingsPage = () => {
   const settings = useSettingsStore((s) => s.settings);
@@ -59,11 +201,51 @@ const SettingsPage = () => {
 
   // Store pending changed settings when showing the dialog
   const [pendingChangedSettings, setPendingChangedSettings] = useState(null);
+  const [comskipFile, setComskipFile] = useState(null);
+  const [comskipUploadLoading, setComskipUploadLoading] = useState(false);
+  const [comskipConfig, setComskipConfig] = useState({
+    path: '',
+    exists: false,
+  });
 
   // UI / local storage settings
   const [tableSize, setTableSize] = useLocalStorage('table-size', 'default');
   const [timeFormat, setTimeFormat] = useLocalStorage('time-format', '12h');
   const [dateFormat, setDateFormat] = useLocalStorage('date-format', 'mdy');
+  const [timeZone, setTimeZone] = useLocalStorage(
+    'time-zone',
+    getDefaultTimeZone()
+  );
+  const timeZoneOptions = useMemo(
+    () => buildTimeZoneOptions(timeZone),
+    [timeZone]
+  );
+  const timeZoneSyncedRef = useRef(false);
+
+  const persistTimeZoneSetting = useCallback(
+    async (tzValue) => {
+      try {
+        const existing = settings['system-time-zone'];
+        if (existing && existing.id) {
+          await API.updateSetting({ ...existing, value: tzValue });
+        } else {
+          await API.createSetting({
+            key: 'system-time-zone',
+            name: 'System Time Zone',
+            value: tzValue,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to persist time zone setting', error);
+        notifications.show({
+          title: 'Failed to update time zone',
+          message: 'Could not save the selected time zone. Please try again.',
+          color: 'red',
+        });
+      }
+    },
+    [settings]
+  );
 
   const regionChoices = REGION_CHOICES;
 
@@ -80,6 +262,7 @@ const SettingsPage = () => {
       'dvr-tv-fallback-template': '',
       'dvr-movie-fallback-template': '',
       'dvr-comskip-enabled': false,
+      'dvr-comskip-custom-path': '',
       'dvr-pre-offset-minutes': 0,
       'dvr-post-offset-minutes': 0,
     },
@@ -158,6 +341,12 @@ const SettingsPage = () => {
       );
 
       form.setValues(formValues);
+      if (formValues['dvr-comskip-custom-path']) {
+        setComskipConfig((prev) => ({
+          path: formValues['dvr-comskip-custom-path'],
+          exists: prev.exists,
+        }));
+      }
 
       const networkAccessSettings = JSON.parse(
         settings['network-access'].value || '{}'
@@ -177,8 +366,39 @@ const SettingsPage = () => {
           console.error('Error parsing proxy settings:', error);
         }
       }
+
+      const tzSetting = settings['system-time-zone'];
+      if (tzSetting?.value) {
+        timeZoneSyncedRef.current = true;
+        setTimeZone((prev) =>
+          prev === tzSetting.value ? prev : tzSetting.value
+        );
+      } else if (!timeZoneSyncedRef.current && timeZone) {
+        timeZoneSyncedRef.current = true;
+        persistTimeZoneSetting(timeZone);
+      }
     }
-  }, [settings]);
+  }, [settings, timeZone, setTimeZone, persistTimeZoneSetting]);
+
+  useEffect(() => {
+    const loadComskipConfig = async () => {
+      try {
+        const response = await API.getComskipConfig();
+        if (response) {
+          setComskipConfig({
+            path: response.path || '',
+            exists: Boolean(response.exists),
+          });
+          if (response.path) {
+            form.setFieldValue('dvr-comskip-custom-path', response.path);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load comskip config', error);
+      }
+    };
+    loadComskipConfig();
+  }, []);
 
   const onSubmit = async () => {
     const values = form.getValues();
@@ -263,6 +483,39 @@ const SettingsPage = () => {
     setProxySettingsSaved(true);
   };
 
+  const onComskipUpload = async () => {
+    if (!comskipFile) {
+      return;
+    }
+
+    setComskipUploadLoading(true);
+    try {
+      const response = await API.uploadComskipIni(comskipFile);
+      if (response?.path) {
+        notifications.show({
+          title: 'comskip.ini uploaded',
+          message: response.path,
+          autoClose: 3000,
+          color: 'green',
+        });
+        form.setFieldValue('dvr-comskip-custom-path', response.path);
+        useSettingsStore.getState().updateSetting({
+          ...(settings['dvr-comskip-custom-path'] || {
+            key: 'dvr-comskip-custom-path',
+            name: 'DVR Comskip Custom Path',
+          }),
+          value: response.path,
+        });
+        setComskipConfig({ path: response.path, exists: true });
+      }
+    } catch (error) {
+      console.error('Failed to upload comskip.ini', error);
+    } finally {
+      setComskipUploadLoading(false);
+      setComskipFile(null);
+    }
+  };
+
   const resetProxySettingsToDefaults = () => {
     const defaultValues = {
       buffering_timeout: 15,
@@ -296,13 +549,19 @@ const SettingsPage = () => {
   const onUISettingsChange = (name, value) => {
     switch (name) {
       case 'table-size':
-        setTableSize(value);
+        if (value) setTableSize(value);
         break;
       case 'time-format':
-        setTimeFormat(value);
+        if (value) setTimeFormat(value);
         break;
       case 'date-format':
-        setDateFormat(value);
+        if (value) setDateFormat(value);
+        break;
+      case 'time-zone':
+        if (value) {
+          setTimeZone(value);
+          persistTimeZoneSetting(value);
+        }
         break;
     }
   };
@@ -434,6 +693,14 @@ const SettingsPage = () => {
                   },
                 ]}
               />
+              <Select
+                label="Time zone"
+                searchable
+                nothingFoundMessage="No matches"
+                value={timeZone}
+                onChange={(val) => onUISettingsChange('time-zone', val)}
+                data={timeZoneOptions}
+              />
             </Accordion.Panel>
           </Accordion.Item>
 
@@ -459,6 +726,46 @@ const SettingsPage = () => {
                           'dvr-comskip-enabled'
                         }
                       />
+                      <TextInput
+                        label="Custom comskip.ini path"
+                        description="Leave blank to use the built-in defaults."
+                        placeholder="/app/docker/comskip.ini"
+                        {...form.getInputProps('dvr-comskip-custom-path')}
+                        key={form.key('dvr-comskip-custom-path')}
+                        id={
+                          settings['dvr-comskip-custom-path']?.id ||
+                          'dvr-comskip-custom-path'
+                        }
+                        name={
+                          settings['dvr-comskip-custom-path']?.key ||
+                          'dvr-comskip-custom-path'
+                        }
+                      />
+                      <Group align="flex-end" gap="sm">
+                        <FileInput
+                          placeholder="Select comskip.ini"
+                          accept=".ini"
+                          value={comskipFile}
+                          onChange={setComskipFile}
+                          clearable
+                          disabled={comskipUploadLoading}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          variant="light"
+                          onClick={onComskipUpload}
+                          disabled={!comskipFile || comskipUploadLoading}
+                        >
+                          {comskipUploadLoading
+                            ? 'Uploading...'
+                            : 'Upload comskip.ini'}
+                        </Button>
+                      </Group>
+                      <Text size="xs" c="dimmed">
+                        {comskipConfig.exists && comskipConfig.path
+                          ? `Using ${comskipConfig.path}`
+                          : 'No custom comskip.ini uploaded.'}
+                      </Text>
                       <NumberInput
                         label="Start early (minutes)"
                         description="Begin recording this many minutes before the scheduled start."
