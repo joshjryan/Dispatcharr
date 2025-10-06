@@ -166,7 +166,7 @@ def generate_m3u(request, profile_name=None, user=None):
         # Determine the stream URL based on the direct parameter
         if use_direct_urls:
             # Try to get the first stream's direct URL
-            first_stream = channel.streams.first()
+            first_stream = channel.streams.order_by('channelstream__order').first()
             if first_stream and first_stream.url:
                 # Use the direct stream URL
                 stream_url = first_stream.url
