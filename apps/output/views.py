@@ -62,7 +62,7 @@ def generate_m3u(request, profile_name=None, user=None):
                     channel_profiles
                 )
 
-            channels = Channel.objects.filter(**filters).order_by("channel_number")
+            channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
         else:
             channels = Channel.objects.filter(user_level__lte=user.user_level).order_by(
                 "channel_number"
@@ -326,7 +326,7 @@ def generate_epg(request, profile_name=None, user=None):
                         channel_profiles
                     )
 
-                channels = Channel.objects.filter(**filters).order_by("channel_number")
+                channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
             else:
                 channels = Channel.objects.filter(user_level__lte=user.user_level).order_by(
                     "channel_number"
@@ -910,7 +910,7 @@ def xc_get_live_streams(request, user, category_id=None):
         if category_id is not None:
             filters["channel_group__id"] = category_id
 
-        channels = Channel.objects.filter(**filters).order_by("channel_number")
+        channels = Channel.objects.filter(**filters).distinct().order_by("channel_number")
     else:
         if not category_id:
             channels = Channel.objects.filter(user_level__lte=user.user_level).order_by("channel_number")
@@ -966,7 +966,10 @@ def xc_get_epg(request, user, short=False):
             channel_profiles = user.channel_profiles.all()
             filters["channelprofilemembership__channel_profile__in"] = channel_profiles
 
-        channel = get_object_or_404(Channel, **filters)
+        # Use filter().first() with distinct instead of get_object_or_404 to handle multiple profile memberships
+        channel = Channel.objects.filter(**filters).distinct().first()
+        if not channel:
+            raise Http404()
     else:
         channel = get_object_or_404(Channel, id=channel_id)
 
