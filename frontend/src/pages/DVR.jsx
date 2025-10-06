@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ActionIcon,
   Box,
@@ -36,8 +36,11 @@ import {
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
 import relativeTime from 'dayjs/plugin/relativeTime';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
 import useChannelsStore from '../store/channels';
 import useSettingsStore from '../store/settings';
+import useLocalStorage from '../hooks/useLocalStorage';
 import useVideoStore from '../store/useVideoStore';
 import RecordingForm from '../components/forms/Recording';
 import { notifications } from '@mantine/notifications';
@@ -47,6 +50,47 @@ import { useForm } from '@mantine/form';
 
 dayjs.extend(duration);
 dayjs.extend(relativeTime);
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const useUserTimeZone = () => {
+  const settings = useSettingsStore((s) => s.settings);
+  const [timeZone, setTimeZone] = useLocalStorage(
+    'time-zone',
+    dayjs.tz?.guess
+      ? dayjs.tz.guess()
+      : Intl.DateTimeFormat().resolvedOptions().timeZone
+  );
+
+  useEffect(() => {
+    const tz = settings?.['system-time-zone']?.value;
+    if (tz && tz !== timeZone) {
+      setTimeZone(tz);
+    }
+  }, [settings, timeZone, setTimeZone]);
+
+  return timeZone;
+};
+
+const useTimeHelpers = () => {
+  const timeZone = useUserTimeZone();
+
+  const toUserTime = useCallback(
+    (value) => {
+      if (!value) return dayjs.invalid();
+      try {
+        return dayjs(value).tz(timeZone);
+      } catch (error) {
+        return dayjs(value);
+      }
+    },
+    [timeZone]
+  );
+
+  const userNow = useCallback(() => dayjs().tz(timeZone), [timeZone]);
+
+  return { timeZone, toUserTime, userNow };
+};
 
 const RECURRING_DAY_OPTIONS = [
   { value: 6, label: 'Sun' },
@@ -61,7 +105,9 @@ const RECURRING_DAY_OPTIONS = [
 // Short preview that triggers the details modal when clicked
 const RecordingSynopsis = ({ description, onOpen }) => {
   const truncated = description?.length > 140;
-  const preview = truncated ? `${description.slice(0, 140).trim()}...` : description;
+  const preview = truncated
+    ? `${description.slice(0, 140).trim()}...`
+    : description;
   if (!description) return null;
   return (
     <Text
@@ -77,9 +123,20 @@ const RecordingSynopsis = ({ description, onOpen }) => {
   );
 };
 
-const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl, onWatchLive, onWatchRecording, env_mode, onEdit }) => {
+const RecordingDetailsModal = ({
+  opened,
+  onClose,
+  recording,
+  channel,
+  posterUrl,
+  onWatchLive,
+  onWatchRecording,
+  env_mode,
+  onEdit,
+}) => {
   const allRecordings = useChannelsStore((s) => s.recordings);
   const channelMap = useChannelsStore((s) => s.channels);
+  const { toUserTime, userNow } = useTimeHelpers();
   const [childOpen, setChildOpen] = React.useState(false);
   const [childRec, setChildRec] = React.useState(null);
 
@@ -88,13 +145,17 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
   const program = customProps.program || {};
   const recordingName = program.title || 'Custom Recording';
   const description = program.description || customProps.description || '';
-  const start = dayjs(safeRecording.start_time);
-  const end = dayjs(safeRecording.end_time);
+  const start = toUserTime(safeRecording.start_time);
+  const end = toUserTime(safeRecording.end_time);
   const stats = customProps.stream_info || {};
 
   const statRows = [
     ['Video Codec', stats.video_codec],
-    ['Resolution', stats.resolution || (stats.width && stats.height ? `${stats.width}x${stats.height}` : null)],
+    [
+      'Resolution',
+      stats.resolution ||
+        (stats.width && stats.height ? `${stats.width}x${stats.height}` : null),
+    ],
     ['FPS', stats.source_fps],
     ['Video Bitrate', stats.video_bitrate && `${stats.video_bitrate} kb/s`],
     ['Audio Codec', stats.audio_codec],
@@ -104,34 +165,48 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
   ].filter(([, v]) => v !== null && v !== undefined && v !== '');
 
   // Rating (if available)
-  const rating = customProps.rating || customProps.rating_value || (program && program.custom_properties && program.custom_properties.rating);
+  const rating =
+    customProps.rating ||
+    customProps.rating_value ||
+    (program && program.custom_properties && program.custom_properties.rating);
   const ratingSystem = customProps.rating_system || 'MPAA';
 
   const fileUrl = customProps.file_url || customProps.output_file_url;
-  const canWatchRecording = (customProps.status === 'completed' || customProps.status === 'interrupted') && Boolean(fileUrl);
+  const canWatchRecording =
+    (customProps.status === 'completed' ||
+      customProps.status === 'interrupted') &&
+    Boolean(fileUrl);
 
   // Prefix in dev (Vite) if needed
   let resolvedPosterUrl = posterUrl;
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
+  if (
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.DEV
+  ) {
     if (resolvedPosterUrl && resolvedPosterUrl.startsWith('/')) {
       resolvedPosterUrl = `${window.location.protocol}//${window.location.hostname}:5656${resolvedPosterUrl}`;
     }
   }
 
-  const isSeriesGroup = Boolean(safeRecording._group_count && safeRecording._group_count > 1);
+  const isSeriesGroup = Boolean(
+    safeRecording._group_count && safeRecording._group_count > 1
+  );
   const upcomingEpisodes = React.useMemo(() => {
     if (!isSeriesGroup) return [];
-    const arr = Array.isArray(allRecordings) ? allRecordings : Object.values(allRecordings || {});
+    const arr = Array.isArray(allRecordings)
+      ? allRecordings
+      : Object.values(allRecordings || {});
     const tvid = program.tvg_id || '';
     const titleKey = (program.title || '').toLowerCase();
     const filtered = arr.filter((r) => {
-        const cp = r.custom_properties || {};
-        const pr = cp.program || {};
-        if ((pr.tvg_id || '') !== tvid) return false;
-        if ((pr.title || '').toLowerCase() !== titleKey) return false;
-        const st = dayjs(r.start_time);
-        return st.isAfter(dayjs());
-      });
+      const cp = r.custom_properties || {};
+      const pr = cp.program || {};
+      if ((pr.tvg_id || '') !== tvid) return false;
+      if ((pr.title || '').toLowerCase() !== titleKey) return false;
+      const st = toUserTime(r.start_time);
+      return st.isAfter(userNow());
+    });
     // Deduplicate by program.id if present, else by time+title
     const seen = new Set();
     const deduped = [];
@@ -141,54 +216,117 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
       // Prefer season/episode or onscreen code; else fall back to sub_title; else program id/slot
       const season = cp.season ?? pr?.custom_properties?.season;
       const episode = cp.episode ?? pr?.custom_properties?.episode;
-      const onscreen = cp.onscreen_episode ?? pr?.custom_properties?.onscreen_episode;
+      const onscreen =
+        cp.onscreen_episode ?? pr?.custom_properties?.onscreen_episode;
       let key = null;
       if (season != null && episode != null) key = `se:${season}:${episode}`;
       else if (onscreen) key = `onscreen:${String(onscreen).toLowerCase()}`;
       else if (pr.sub_title) key = `sub:${(pr.sub_title || '').toLowerCase()}`;
       else if (pr.id != null) key = `id:${pr.id}`;
-      else key = `slot:${r.channel}|${r.start_time}|${r.end_time}|${(pr.title||'')}`;
+      else
+        key = `slot:${r.channel}|${r.start_time}|${r.end_time}|${pr.title || ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
       deduped.push(r);
     }
-    return deduped.sort((a, b) => dayjs(a.start_time) - dayjs(b.start_time));
-  }, [allRecordings, isSeriesGroup, program.tvg_id, program.title]);
+    return deduped.sort(
+      (a, b) => toUserTime(a.start_time) - toUserTime(b.start_time)
+    );
+  }, [
+    allRecordings,
+    isSeriesGroup,
+    program.tvg_id,
+    program.title,
+    toUserTime,
+    userNow,
+  ]);
 
   if (!recording) return null;
 
   const EpisodeRow = ({ rec }) => {
     const cp = rec.custom_properties || {};
     const pr = cp.program || {};
-    const start = dayjs(rec.start_time);
-    const end = dayjs(rec.end_time);
+    const start = toUserTime(rec.start_time);
+    const end = toUserTime(rec.end_time);
     const season = cp.season ?? pr?.custom_properties?.season;
     const episode = cp.episode ?? pr?.custom_properties?.episode;
-    const onscreen = cp.onscreen_episode ?? pr?.custom_properties?.onscreen_episode;
-    const se = season && episode ? `S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}` : (onscreen || null);
+    const onscreen =
+      cp.onscreen_episode ?? pr?.custom_properties?.onscreen_episode;
+    const se =
+      season && episode
+        ? `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+        : onscreen || null;
     const posterLogoId = cp.poster_logo_id;
-    let purl = posterLogoId ? `/api/channels/logos/${posterLogoId}/cache/` : cp.poster_url || posterUrl || '/logo.png';
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV && purl && purl.startsWith('/')) {
+    let purl = posterLogoId
+      ? `/api/channels/logos/${posterLogoId}/cache/`
+      : cp.poster_url || posterUrl || '/logo.png';
+    if (
+      typeof import.meta !== 'undefined' &&
+      import.meta.env &&
+      import.meta.env.DEV &&
+      purl &&
+      purl.startsWith('/')
+    ) {
       purl = `${window.location.protocol}//${window.location.hostname}:5656${purl}`;
     }
     const onRemove = async (e) => {
       e?.stopPropagation?.();
-      try { await API.deleteRecording(rec.id); } catch (error) { console.error('Failed to delete upcoming recording', error); }
-      try { await useChannelsStore.getState().fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings after delete', error); }
+      try {
+        await API.deleteRecording(rec.id);
+      } catch (error) {
+        console.error('Failed to delete upcoming recording', error);
+      }
+      try {
+        await useChannelsStore.getState().fetchRecordings();
+      } catch (error) {
+        console.error('Failed to refresh recordings after delete', error);
+      }
     };
     return (
-      <Card withBorder radius="md" padding="sm" style={{ backgroundColor: '#27272A', cursor: 'pointer' }} onClick={() => { setChildRec(rec); setChildOpen(true); }}>
+      <Card
+        withBorder
+        radius="md"
+        padding="sm"
+        style={{ backgroundColor: '#27272A', cursor: 'pointer' }}
+        onClick={() => {
+          setChildRec(rec);
+          setChildOpen(true);
+        }}
+      >
         <Flex gap="sm" align="center">
-          <Image src={purl} w={64} h={64} fit="contain" radius="sm" alt={pr.title || recordingName} fallbackSrc="/logo.png" />
+          <Image
+            src={purl}
+            w={64}
+            h={64}
+            fit="contain"
+            radius="sm"
+            alt={pr.title || recordingName}
+            fallbackSrc="/logo.png"
+          />
           <Stack gap={4} style={{ flex: 1 }}>
             <Group justify="space-between">
-              <Text fw={600} size="sm" lineClamp={1} title={pr.sub_title || pr.title}>{pr.sub_title || pr.title}</Text>
-              {se && <Badge color="gray" variant="light">{se}</Badge>}
+              <Text
+                fw={600}
+                size="sm"
+                lineClamp={1}
+                title={pr.sub_title || pr.title}
+              >
+                {pr.sub_title || pr.title}
+              </Text>
+              {se && (
+                <Badge color="gray" variant="light">
+                  {se}
+                </Badge>
+              )}
             </Group>
-            <Text size="xs">{start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}</Text>
+            <Text size="xs">
+              {start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}
+            </Text>
           </Stack>
           <Group gap={6}>
-            <Button size="xs" color="red" variant="light" onClick={onRemove}>Remove</Button>
+            <Button size="xs" color="red" variant="light" onClick={onRemove}>
+              Remove
+            </Button>
           </Group>
         </Flex>
       </Card>
@@ -199,7 +337,11 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
     <Modal
       opened={opened}
       onClose={onClose}
-      title={isSeriesGroup ? `Series: ${recordingName}` : `${recordingName}${program.sub_title ? ` - ${program.sub_title}` : ''}`}
+      title={
+        isSeriesGroup
+          ? `Series: ${recordingName}`
+          : `${recordingName}${program.sub_title ? ` - ${program.sub_title}` : ''}`
+      }
       size="lg"
       centered
       radius="md"
@@ -214,7 +356,9 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
       {isSeriesGroup ? (
         <Stack gap={10}>
           {upcomingEpisodes.length === 0 && (
-            <Text size="sm" c="dimmed">No upcoming episodes found</Text>
+            <Text size="sm" c="dimmed">
+              No upcoming episodes found
+            </Text>
           )}
           {upcomingEpisodes.map((ep) => (
             <EpisodeRow key={`ep-${ep.id}`} rec={ep} />
@@ -225,17 +369,19 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
               onClose={() => setChildOpen(false)}
               recording={childRec}
               channel={channelMap[childRec.channel]}
-              posterUrl={(
-                childRec.custom_properties?.poster_logo_id
+              posterUrl={
+                (childRec.custom_properties?.poster_logo_id
                   ? `/api/channels/logos/${childRec.custom_properties.poster_logo_id}/cache/`
-                  : childRec.custom_properties?.poster_url || channelMap[childRec.channel]?.logo?.cache_url
-              ) || '/logo.png'}
+                  : childRec.custom_properties?.poster_url ||
+                    channelMap[childRec.channel]?.logo?.cache_url) ||
+                '/logo.png'
+              }
               env_mode={env_mode}
               onWatchLive={() => {
                 const rec = childRec;
-                const now = dayjs();
-                const s = dayjs(rec.start_time);
-                const e = dayjs(rec.end_time);
+                const now = userNow();
+                const s = toUserTime(rec.start_time);
+                const e = toUserTime(rec.end_time);
                 if (now.isAfter(s) && now.isBefore(e)) {
                   const ch = channelMap[rec.channel];
                   if (!ch) return;
@@ -247,77 +393,142 @@ const RecordingDetailsModal = ({ opened, onClose, recording, channel, posterUrl,
                 }
               }}
               onWatchRecording={() => {
-                let fileUrl = childRec.custom_properties?.file_url || childRec.custom_properties?.output_file_url;
+                let fileUrl =
+                  childRec.custom_properties?.file_url ||
+                  childRec.custom_properties?.output_file_url;
                 if (!fileUrl) return;
                 if (env_mode === 'dev' && fileUrl.startsWith('/')) {
                   fileUrl = `${window.location.protocol}//${window.location.hostname}:5656${fileUrl}`;
                 }
-                useVideoStore.getState().showVideo(fileUrl, 'vod', { name: childRec.custom_properties?.program?.title || 'Recording', logo: { url: (childRec.custom_properties?.poster_logo_id ? `/api/channels/logos/${childRec.custom_properties.poster_logo_id}/cache/` : channelMap[childRec.channel]?.logo?.cache_url) || '/logo.png' } });
+                useVideoStore.getState().showVideo(fileUrl, 'vod', {
+                  name:
+                    childRec.custom_properties?.program?.title || 'Recording',
+                  logo: {
+                    url:
+                      (childRec.custom_properties?.poster_logo_id
+                        ? `/api/channels/logos/${childRec.custom_properties.poster_logo_id}/cache/`
+                        : channelMap[childRec.channel]?.logo?.cache_url) ||
+                      '/logo.png',
+                  },
+                });
               }}
             />
           )}
         </Stack>
       ) : (
-      <Flex gap="lg" align="flex-start">
-        <Image src={resolvedPosterUrl} w={180} h={240} fit="contain" radius="sm" alt={recordingName} fallbackSrc="/logo.png" />
-        <Stack gap={8} style={{ flex: 1 }}>
-          <Group justify="space-between" align="center">
-            <Text c="dimmed" size="sm">{channel ? `${channel.channel_number} • ${channel.name}` : '—'}</Text>
-            <Group gap={8}>
-              {onWatchLive && (
-                <Button size="xs" variant="light" onClick={(e) => { e.stopPropagation?.(); onWatchLive(); }}>Watch Live</Button>
-              )}
-              {onWatchRecording && (
-                <Button size="xs" variant="default" onClick={(e) => { e.stopPropagation?.(); onWatchRecording(); }} disabled={!canWatchRecording}>Watch</Button>
-              )}
-              {onEdit && start.isAfter(dayjs()) && (
-                <Button
-                  size="xs"
-                  variant="light"
-                  color="blue"
-                  onClick={(e) => {
-                    e.stopPropagation?.();
-                    onEdit(recording);
-                  }}
-                >
-                  Edit
-                </Button>
-              )}
-              {customProps.status === 'completed' && (!customProps?.comskip || customProps?.comskip?.status !== 'completed') && (
-                <Button size="xs" variant="light" color="teal" onClick={async (e) => {
-                  e.stopPropagation?.();
-                  try {
-                    await API.runComskip(recording.id);
-                    notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 });
-                  } catch (error) {
-                    console.error('Failed to run comskip', error);
-                  }
-                }}>Remove commercials</Button>
-              )}
+        <Flex gap="lg" align="flex-start">
+          <Image
+            src={resolvedPosterUrl}
+            w={180}
+            h={240}
+            fit="contain"
+            radius="sm"
+            alt={recordingName}
+            fallbackSrc="/logo.png"
+          />
+          <Stack gap={8} style={{ flex: 1 }}>
+            <Group justify="space-between" align="center">
+              <Text c="dimmed" size="sm">
+                {channel ? `${channel.channel_number} • ${channel.name}` : '—'}
+              </Text>
+              <Group gap={8}>
+                {onWatchLive && (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={(e) => {
+                      e.stopPropagation?.();
+                      onWatchLive();
+                    }}
+                  >
+                    Watch Live
+                  </Button>
+                )}
+                {onWatchRecording && (
+                  <Button
+                    size="xs"
+                    variant="default"
+                    onClick={(e) => {
+                      e.stopPropagation?.();
+                      onWatchRecording();
+                    }}
+                    disabled={!canWatchRecording}
+                  >
+                    Watch
+                  </Button>
+                )}
+                {onEdit && start.isAfter(userNow()) && (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="blue"
+                    onClick={(e) => {
+                      e.stopPropagation?.();
+                      onEdit(recording);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                )}
+                {customProps.status === 'completed' &&
+                  (!customProps?.comskip ||
+                    customProps?.comskip?.status !== 'completed') && (
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="teal"
+                      onClick={async (e) => {
+                        e.stopPropagation?.();
+                        try {
+                          await API.runComskip(recording.id);
+                          notifications.show({
+                            title: 'Removing commercials',
+                            message: 'Queued comskip for this recording',
+                            color: 'blue.5',
+                            autoClose: 2000,
+                          });
+                        } catch (error) {
+                          console.error('Failed to run comskip', error);
+                        }
+                      }}
+                    >
+                      Remove commercials
+                    </Button>
+                  )}
+              </Group>
             </Group>
-          </Group>
-          <Text size="sm">{start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}</Text>
-          {rating && (
-            <Group gap={8}>
-              <Badge color="yellow" title={ratingSystem}>{rating}</Badge>
-            </Group>
-          )}
-          {description && (
-            <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{description}</Text>
-          )}
-          {statRows.length > 0 && (
-            <Stack gap={4} pt={6}>
-              <Text fw={600} size="sm">Stream Stats</Text>
-              {statRows.map(([k, v]) => (
-                <Group key={k} justify="space-between">
-                  <Text size="xs" c="dimmed">{k}</Text>
-                  <Text size="xs">{v}</Text>
-                </Group>
-              ))}
-            </Stack>
-          )}
-        </Stack>
-      </Flex>
+            <Text size="sm">
+              {start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}
+            </Text>
+            {rating && (
+              <Group gap={8}>
+                <Badge color="yellow" title={ratingSystem}>
+                  {rating}
+                </Badge>
+              </Group>
+            )}
+            {description && (
+              <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+                {description}
+              </Text>
+            )}
+            {statRows.length > 0 && (
+              <Stack gap={4} pt={6}>
+                <Text fw={600} size="sm">
+                  Stream Stats
+                </Text>
+                {statRows.map(([k, v]) => (
+                  <Group key={k} justify="space-between">
+                    <Text size="xs" c="dimmed">
+                      {k}
+                    </Text>
+                    <Text size="xs">{v}</Text>
+                  </Group>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </Flex>
       )}
     </Modal>
   );
@@ -346,6 +557,7 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
   const fetchRecurringRules = useChannelsStore((s) => s.fetchRecurringRules);
   const fetchRecordings = useChannelsStore((s) => s.fetchRecordings);
   const recordings = useChannelsStore((s) => s.recordings);
+  const { toUserTime, userNow } = useTimeHelpers();
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -363,7 +575,10 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
       }
       return aNum - bNum;
     });
-    return list.map((item) => ({ value: `${item.id}`, label: item.name || `Channel ${item.id}` }));
+    return list.map((item) => ({
+      value: `${item.id}`,
+      label: item.name || `Channel ${item.id}`,
+    }));
   }, [channels]);
 
   const form = useForm({
@@ -380,12 +595,21 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
     },
     validate: {
       channel_id: (value) => (value ? null : 'Select a channel'),
-      days_of_week: (value) => (value && value.length ? null : 'Pick at least one day'),
+      days_of_week: (value) =>
+        value && value.length ? null : 'Pick at least one day',
       end_time: (value, values) => {
         if (!value) return 'Select an end time';
-        const startValue = dayjs(values.start_time, ['HH:mm', 'hh:mm A', 'h:mm A'], true);
+        const startValue = dayjs(
+          values.start_time,
+          ['HH:mm', 'hh:mm A', 'h:mm A'],
+          true
+        );
         const endValue = dayjs(value, ['HH:mm', 'hh:mm A', 'h:mm A'], true);
-        if (startValue.isValid() && endValue.isValid() && endValue.diff(startValue, 'minute') === 0) {
+        if (
+          startValue.isValid() &&
+          endValue.isValid() &&
+          endValue.diff(startValue, 'minute') === 0
+        ) {
           return 'End time must differ from start time';
         }
         return null;
@@ -421,11 +645,22 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
   }, [opened, ruleId, rule]);
 
   const upcomingOccurrences = useMemo(() => {
-    const list = Array.isArray(recordings) ? recordings : Object.values(recordings || {});
+    const list = Array.isArray(recordings)
+      ? recordings
+      : Object.values(recordings || {});
+    const now = userNow();
     return list
-      .filter((rec) => rec?.custom_properties?.rule?.id === ruleId && dayjs(rec.start_time).isAfter(dayjs()))
-      .sort((a, b) => dayjs(a.start_time).valueOf() - dayjs(b.start_time).valueOf());
-  }, [recordings, ruleId]);
+      .filter(
+        (rec) =>
+          rec?.custom_properties?.rule?.id === ruleId &&
+          toUserTime(rec.start_time).isAfter(now)
+      )
+      .sort(
+        (a, b) =>
+          toUserTime(a.start_time).valueOf() -
+          toUserTime(b.start_time).valueOf()
+      );
+  }, [recordings, ruleId, toUserTime, userNow]);
 
   const handleSave = async (values) => {
     if (!rule) return;
@@ -436,8 +671,12 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
         days_of_week: (values.days_of_week || []).map((d) => Number(d)),
         start_time: toTimeString(values.start_time),
         end_time: toTimeString(values.end_time),
-        start_date: values.start_date ? dayjs(values.start_date).format('YYYY-MM-DD') : null,
-        end_date: values.end_date ? dayjs(values.end_date).format('YYYY-MM-DD') : null,
+        start_date: values.start_date
+          ? dayjs(values.start_date).format('YYYY-MM-DD')
+          : null,
+        end_date: values.end_date
+          ? dayjs(values.end_date).format('YYYY-MM-DD')
+          : null,
         name: values.rule_name?.trim() || '',
         enabled: Boolean(values.enabled),
       });
@@ -484,7 +723,9 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
       await Promise.all([fetchRecurringRules(), fetchRecordings()]);
       notifications.show({
         title: checked ? 'Recurring rule enabled' : 'Recurring rule paused',
-        message: checked ? 'Future occurrences will resume' : 'Upcoming occurrences were removed',
+        message: checked
+          ? 'Future occurrences will resume'
+          : 'Upcoming occurrences were removed',
         color: checked ? 'green' : 'yellow',
         autoClose: 2500,
       });
@@ -523,10 +764,18 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
   }
 
   return (
-    <Modal opened={opened} onClose={onClose} title={rule.name || 'Recurring Rule'} size="lg" centered>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={rule.name || 'Recurring Rule'}
+      size="lg"
+      centered
+    >
       <Stack gap="md">
         <Group justify="space-between" align="center">
-          <Text fw={600}>{channels?.[rule.channel]?.name || `Channel ${rule.channel}`}</Text>
+          <Text fw={600}>
+            {channels?.[rule.channel]?.name || `Channel ${rule.channel}`}
+          </Text>
           <Switch
             size="sm"
             checked={form.values.enabled}
@@ -554,7 +803,10 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
             <MultiSelect
               {...form.getInputProps('days_of_week')}
               label="Every"
-              data={RECURRING_DAY_OPTIONS.map((opt) => ({ value: String(opt.value), label: opt.label }))}
+              data={RECURRING_DAY_OPTIONS.map((opt) => ({
+                value: String(opt.value),
+                label: opt.label,
+              }))}
               searchable
               clearable
             />
@@ -562,7 +814,9 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               <DatePickerInput
                 label="Start date"
                 value={form.values.start_date}
-                onChange={(value) => form.setFieldValue('start_date', value || dayjs().toDate())}
+                onChange={(value) =>
+                  form.setFieldValue('start_date', value || dayjs().toDate())
+                }
                 valueFormat="MMM D, YYYY"
               />
               <DatePickerInput
@@ -577,7 +831,9 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               <TimeInput
                 label="Start time"
                 value={form.values.start_time}
-                onChange={(value) => form.setFieldValue('start_time', toTimeString(value))}
+                onChange={(value) =>
+                  form.setFieldValue('start_time', toTimeString(value))
+                }
                 withSeconds={false}
                 format="12"
                 amLabel="AM"
@@ -586,7 +842,9 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               <TimeInput
                 label="End time"
                 value={form.values.end_time}
-                onChange={(value) => form.setFieldValue('end_time', toTimeString(value))}
+                onChange={(value) =>
+                  form.setFieldValue('end_time', toTimeString(value))
+                }
                 withSeconds={false}
                 format="12"
                 amLabel="AM"
@@ -597,7 +855,12 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
               <Button type="submit" loading={saving}>
                 Save changes
               </Button>
-              <Button color="red" variant="light" loading={deleting} onClick={handleDelete}>
+              <Button
+                color="red"
+                variant="light"
+                loading={deleting}
+                onClick={handleDelete}
+              >
                 Delete rule
               </Button>
             </Group>
@@ -605,22 +868,35 @@ const RecurringRuleModal = ({ opened, onClose, ruleId, onEditOccurrence }) => {
         </form>
         <Stack gap="sm">
           <Group justify="space-between" align="center">
-            <Text fw={600} size="sm">Upcoming occurrences</Text>
+            <Text fw={600} size="sm">
+              Upcoming occurrences
+            </Text>
             <Badge color="blue.6">{upcomingOccurrences.length}</Badge>
           </Group>
           {upcomingOccurrences.length === 0 ? (
-            <Text size="sm" c="dimmed">No future airings currently scheduled.</Text>
+            <Text size="sm" c="dimmed">
+              No future airings currently scheduled.
+            </Text>
           ) : (
             <Stack gap="xs">
               {upcomingOccurrences.map((occ) => {
-                const occStart = dayjs(occ.start_time);
-                const occEnd = dayjs(occ.end_time);
+                const occStart = toUserTime(occ.start_time);
+                const occEnd = toUserTime(occ.end_time);
                 return (
-                  <Card key={`occ-${occ.id}`} withBorder padding="sm" radius="md">
+                  <Card
+                    key={`occ-${occ.id}`}
+                    withBorder
+                    padding="sm"
+                    radius="md"
+                  >
                     <Group justify="space-between" align="center">
                       <Stack gap={2} style={{ flex: 1 }}>
-                        <Text fw={600} size="sm">{occStart.format('MMM D, YYYY')}</Text>
-                        <Text size="xs" c="dimmed">{occStart.format('h:mma')} – {occEnd.format('h:mma')}</Text>
+                        <Text fw={600} size="sm">
+                          {occStart.format('MMM D, YYYY')}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {occStart.format('h:mma')} – {occEnd.format('h:mma')}
+                        </Text>
                       </Stack>
                       <Group gap={6}>
                         <Button
@@ -660,16 +936,25 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
   const env_mode = useSettingsStore((s) => s.environment.env_mode);
   const showVideo = useVideoStore((s) => s.showVideo);
   const fetchRecordings = useChannelsStore((s) => s.fetchRecordings);
+  const { toUserTime, userNow } = useTimeHelpers();
 
   const channel = channels?.[recording.channel];
 
   const deleteRecording = (id) => {
     // Optimistically remove immediately from UI
-    try { useChannelsStore.getState().removeRecording(id); } catch (error) { console.error('Failed to optimistically remove recording', error); }
+    try {
+      useChannelsStore.getState().removeRecording(id);
+    } catch (error) {
+      console.error('Failed to optimistically remove recording', error);
+    }
     // Fire-and-forget server delete; websocket will keep others in sync
     API.deleteRecording(id).catch(() => {
       // On failure, fallback to refetch to restore state
-      try { useChannelsStore.getState().fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings after delete', error); }
+      try {
+        useChannelsStore.getState().fetchRecordings();
+      } catch (error) {
+        console.error('Failed to refresh recordings after delete', error);
+      }
     });
   };
 
@@ -690,20 +975,27 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
     posterUrl = `${window.location.protocol}//${window.location.hostname}:5656${posterUrl}`;
   }
 
-  const start = dayjs(recording.start_time);
-  const end = dayjs(recording.end_time);
-  const now = dayjs();
+  const start = toUserTime(recording.start_time);
+  const end = toUserTime(recording.end_time);
+  const now = userNow();
   const status = customProps.status;
   const isTimeActive = now.isAfter(start) && now.isBefore(end);
   const isInterrupted = status === 'interrupted';
   const isInProgress = isTimeActive; // Show as recording by time, regardless of status glitches
   const isUpcoming = now.isBefore(start);
-  const isSeriesGroup = Boolean(recording._group_count && recording._group_count > 1);
+  const isSeriesGroup = Boolean(
+    recording._group_count && recording._group_count > 1
+  );
   // Season/Episode display if present
   const season = customProps.season ?? program?.custom_properties?.season;
   const episode = customProps.episode ?? program?.custom_properties?.episode;
-  const onscreen = customProps.onscreen_episode ?? program?.custom_properties?.onscreen_episode;
-  const seLabel = season && episode ? `S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}` : (onscreen || null);
+  const onscreen =
+    customProps.onscreen_episode ??
+    program?.custom_properties?.onscreen_episode;
+  const seLabel =
+    season && episode
+      ? `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+      : onscreen || null;
 
   const handleWatchLive = () => {
     if (!channel) return;
@@ -721,14 +1013,22 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
     if (env_mode === 'dev' && fileUrl.startsWith('/')) {
       fileUrl = `${window.location.protocol}//${window.location.hostname}:5656${fileUrl}`;
     }
-    showVideo(fileUrl, 'vod', { name: recordingName, logo: { url: posterUrl } });
+    showVideo(fileUrl, 'vod', {
+      name: recordingName,
+      logo: { url: posterUrl },
+    });
   };
 
   const handleRunComskip = async (e) => {
     e?.stopPropagation?.();
     try {
       await API.runComskip(recording.id);
-      notifications.show({ title: 'Removing commercials', message: 'Queued comskip for this recording', color: 'blue.5', autoClose: 2000 });
+      notifications.show({
+        title: 'Removing commercials',
+        message: 'Queued comskip for this recording',
+        color: 'blue.5',
+        autoClose: 2000,
+      });
     } catch (error) {
       console.error('Failed to queue comskip for recording', error);
     }
@@ -763,7 +1063,11 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
     } finally {
       setBusy(false);
       setCancelOpen(false);
-      try { await fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings', error); }
+      try {
+        await fetchRecordings();
+      } catch (error) {
+        console.error('Failed to refresh recordings', error);
+      }
     }
   };
 
@@ -772,13 +1076,32 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
       setBusy(true);
       const { tvg_id, title } = seriesInfo;
       if (tvg_id) {
-        try { await API.bulkRemoveSeriesRecordings({ tvg_id, title, scope: 'title' }); } catch (error) { console.error('Failed to remove series recordings', error); }
-        try { await API.deleteSeriesRule(tvg_id); } catch (error) { console.error('Failed to delete series rule', error); }
+        try {
+          await API.bulkRemoveSeriesRecordings({
+            tvg_id,
+            title,
+            scope: 'title',
+          });
+        } catch (error) {
+          console.error('Failed to remove series recordings', error);
+        }
+        try {
+          await API.deleteSeriesRule(tvg_id);
+        } catch (error) {
+          console.error('Failed to delete series rule', error);
+        }
       }
     } finally {
       setBusy(false);
       setCancelOpen(false);
-      try { await fetchRecordings(); } catch (error) { console.error('Failed to refresh recordings after series removal', error); }
+      try {
+        await fetchRecordings();
+      } catch (error) {
+        console.error(
+          'Failed to refresh recordings after series removal',
+          error
+        );
+      }
     }
   };
 
@@ -805,8 +1128,24 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
     >
       <Flex justify="space-between" align="center" style={{ paddingBottom: 8 }}>
         <Group gap={8} style={{ flex: 1, minWidth: 0 }}>
-          <Badge color={isInterrupted ? 'red.7' : isInProgress ? 'red.6' : isUpcoming ? 'yellow.6' : 'gray.6'}>
-            {isInterrupted ? 'Interrupted' : isInProgress ? 'Recording' : isUpcoming ? 'Scheduled' : 'Completed'}
+          <Badge
+            color={
+              isInterrupted
+                ? 'red.7'
+                : isInProgress
+                  ? 'red.6'
+                  : isUpcoming
+                    ? 'yellow.6'
+                    : 'gray.6'
+            }
+          >
+            {isInterrupted
+              ? 'Interrupted'
+              : isInProgress
+                ? 'Recording'
+                : isUpcoming
+                  ? 'Scheduled'
+                  : 'Completed'}
           </Badge>
           {isInterrupted && <AlertTriangle size={16} color="#ffa94d" />}
           <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
@@ -815,13 +1154,19 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
                 {recordingName}
               </Text>
               {isSeriesGroup && (
-                <Badge color="teal" variant="filled">Series</Badge>
+                <Badge color="teal" variant="filled">
+                  Series
+                </Badge>
               )}
               {isRecurringRule && (
-                <Badge color="blue" variant="light">Recurring</Badge>
+                <Badge color="blue" variant="light">
+                  Recurring
+                </Badge>
               )}
               {seLabel && !isSeriesGroup && (
-                <Badge color="gray" variant="light">{seLabel}</Badge>
+                <Badge color="gray" variant="light">
+                  {seLabel}
+                </Badge>
               )}
             </Group>
           </Stack>
@@ -854,8 +1199,12 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
         <Stack gap={6} style={{ flex: 1 }}>
           {!isSeriesGroup && subTitle && (
             <Group justify="space-between">
-              <Text size="sm" c="dimmed">Episode</Text>
-              <Text size="sm" fw={700} title={subTitle}>{subTitle}</Text>
+              <Text size="sm" c="dimmed">
+                Episode
+              </Text>
+              <Text size="sm" fw={700} title={subTitle}>
+                {subTitle}
+              </Text>
             </Group>
           )}
           <Group justify="space-between">
@@ -871,47 +1220,85 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
             <Text size="sm" c="dimmed">
               {isSeriesGroup ? 'Next recording' : 'Time'}
             </Text>
-            <Text size="sm">{start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}</Text>
+            <Text size="sm">
+              {start.format('MMM D, YYYY h:mma')} – {end.format('h:mma')}
+            </Text>
           </Group>
 
           {!isSeriesGroup && description && (
-            <RecordingSynopsis description={description} onOpen={() => onOpenDetails?.(recording)} />
+            <RecordingSynopsis
+              description={description}
+              onOpen={() => onOpenDetails?.(recording)}
+            />
           )}
 
           {isInterrupted && customProps.interrupted_reason && (
-            <Text size="xs" c="red.4">{customProps.interrupted_reason}</Text>
+            <Text size="xs" c="red.4">
+              {customProps.interrupted_reason}
+            </Text>
           )}
 
           <Group justify="flex-end" gap="xs" pt={4}>
             {isInProgress && (
-              <Button size="xs" variant="light" onClick={(e) => { e.stopPropagation(); handleWatchLive(); }}>
+              <Button
+                size="xs"
+                variant="light"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleWatchLive();
+                }}
+              >
                 Watch Live
               </Button>
             )}
 
             {!isUpcoming && (
-              <Tooltip label={customProps.file_url || customProps.output_file_url ? 'Watch recording' : 'Recording playback not available yet'}>
+              <Tooltip
+                label={
+                  customProps.file_url || customProps.output_file_url
+                    ? 'Watch recording'
+                    : 'Recording playback not available yet'
+                }
+              >
                 <Button
                   size="xs"
                   variant="default"
-                  onClick={(e) => { e.stopPropagation(); handleWatchRecording(); }}
-                  disabled={customProps.status === 'recording' || !(customProps.file_url || customProps.output_file_url)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleWatchRecording();
+                  }}
+                  disabled={
+                    customProps.status === 'recording' ||
+                    !(customProps.file_url || customProps.output_file_url)
+                  }
                 >
                   Watch
                 </Button>
               </Tooltip>
             )}
-            {!isUpcoming && customProps?.status === 'completed' && (!customProps?.comskip || customProps?.comskip?.status !== 'completed') && (
-              <Button size="xs" variant="light" color="teal" onClick={handleRunComskip}>
-                Remove commercials
-              </Button>
-            )}
+            {!isUpcoming &&
+              customProps?.status === 'completed' &&
+              (!customProps?.comskip ||
+                customProps?.comskip?.status !== 'completed') && (
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="teal"
+                  onClick={handleRunComskip}
+                >
+                  Remove commercials
+                </Button>
+              )}
           </Group>
         </Stack>
       </Flex>
       {/* If this card is a grouped upcoming series, show count */}
       {recording._group_count > 1 && (
-        <Text size="xs" c="dimmed" style={{ position: 'absolute', bottom: 6, right: 12 }}>
+        <Text
+          size="xs"
+          c="dimmed"
+          style={{ position: 'absolute', bottom: 6, right: 12 }}
+        >
           Next of {recording._group_count}
         </Text>
       )}
@@ -922,12 +1309,27 @@ const RecordingCard = ({ recording, onOpenDetails, onOpenRecurring }) => {
   // Stacked look for series groups: render two shadow layers behind the main card
   return (
     <Box style={{ position: 'relative' }}>
-      <Modal opened={cancelOpen} onClose={() => setCancelOpen(false)} title="Cancel Series" centered size="md" zIndex={9999}>
+      <Modal
+        opened={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        title="Cancel Series"
+        centered
+        size="md"
+        zIndex={9999}
+      >
         <Stack gap="sm">
           <Text>This is a series rule. What would you like to cancel?</Text>
           <Group justify="flex-end">
-            <Button variant="default" loading={busy} onClick={removeUpcomingOnly}>Only this upcoming</Button>
-            <Button color="red" loading={busy} onClick={removeSeriesAndRule}>Entire series + rule</Button>
+            <Button
+              variant="default"
+              loading={busy}
+              onClick={removeUpcomingOnly}
+            >
+              Only this upcoming
+            </Button>
+            <Button color="red" loading={busy} onClick={removeSeriesAndRule}>
+              Entire series + rule
+            </Button>
           </Group>
         </Stack>
       </Modal>
@@ -969,6 +1371,7 @@ const DVRPage = () => {
   const channels = useChannelsStore((s) => s.channels);
   const fetchChannels = useChannelsStore((s) => s.fetchChannels);
   const fetchRecurringRules = useChannelsStore((s) => s.fetchRecurringRules);
+  const { toUserTime, userNow } = useTimeHelpers();
 
   const [recordingModalOpen, setRecordingModalOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -1013,18 +1416,24 @@ const DVRPage = () => {
   }, [channels, fetchChannels, fetchRecordings, fetchRecurringRules]);
 
   // Re-render every second so time-based bucketing updates without a refresh
-  const [now, setNow] = useState(dayjs());
+  const [now, setNow] = useState(userNow());
   useEffect(() => {
-    const interval = setInterval(() => setNow(dayjs()), 1000);
+    const interval = setInterval(() => setNow(userNow()), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [userNow]);
+
+  useEffect(() => {
+    setNow(userNow());
+  }, [userNow]);
 
   // Categorize recordings
   const { inProgress, upcoming, completed } = useMemo(() => {
     const inProgress = [];
     const upcoming = [];
     const completed = [];
-    const list = Array.isArray(recordings) ? recordings : Object.values(recordings || {});
+    const list = Array.isArray(recordings)
+      ? recordings
+      : Object.values(recordings || {});
 
     // ID-based dedupe guard in case store returns duplicates
     const seenIds = new Set();
@@ -1034,8 +1443,8 @@ const DVRPage = () => {
         if (seenIds.has(k)) continue;
         seenIds.add(k);
       }
-      const s = dayjs(rec.start_time);
-      const e = dayjs(rec.end_time);
+      const s = toUserTime(rec.start_time);
+      const e = toUserTime(rec.end_time);
       const status = rec.custom_properties?.status;
       if (status === 'interrupted' || status === 'completed') {
         completed.push(rec);
@@ -1053,7 +1462,10 @@ const DVRPage = () => {
       for (const r of arr) {
         const cp = r.custom_properties || {};
         const pr = cp.program || {};
-        const sig = pr?.id != null ? `id:${pr.id}` : `slot:${r.channel}|${r.start_time}|${r.end_time}|${(pr.title||'')}`;
+        const sig =
+          pr?.id != null
+            ? `id:${pr.id}`
+            : `slot:${r.channel}|${r.start_time}|${r.end_time}|${pr.title || ''}`;
         if (sigs.has(sig)) continue;
         sigs.add(sig);
         out.push(r);
@@ -1061,11 +1473,15 @@ const DVRPage = () => {
       return out;
     };
 
-    const inProgressDedup = dedupeByProgramOrSlot(inProgress).sort((a, b) => dayjs(b.start_time) - dayjs(a.start_time));
+    const inProgressDedup = dedupeByProgramOrSlot(inProgress).sort(
+      (a, b) => toUserTime(b.start_time) - toUserTime(a.start_time)
+    );
 
     // Group upcoming by series title+tvg_id (keep only next episode)
     const grouped = new Map();
-    const upcomingDedup = dedupeByProgramOrSlot(upcoming).sort((a, b) => dayjs(a.start_time) - dayjs(b.start_time));
+    const upcomingDedup = dedupeByProgramOrSlot(upcoming).sort(
+      (a, b) => toUserTime(a.start_time) - toUserTime(b.start_time)
+    );
     for (const rec of upcomingDedup) {
       const cp = rec.custom_properties || {};
       const prog = cp.program || {};
@@ -1082,9 +1498,13 @@ const DVRPage = () => {
       item._group_count = e.count;
       return item;
     });
-    completed.sort((a, b) => dayjs(b.end_time) - dayjs(a.end_time));
-    return { inProgress: inProgressDedup, upcoming: upcomingGrouped, completed };
-  }, [recordings, now]);
+    completed.sort((a, b) => toUserTime(b.end_time) - toUserTime(a.end_time));
+    return {
+      inProgress: inProgressDedup,
+      upcoming: upcomingGrouped,
+      completed,
+    };
+  }, [recordings, now, toUserTime]);
 
   return (
     <Box style={{ padding: 10 }}>
@@ -1109,9 +1529,21 @@ const DVRPage = () => {
             <Title order={4}>Currently Recording</Title>
             <Badge color="red.6">{inProgress.length}</Badge>
           </Group>
-          <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
+          <SimpleGrid
+            cols={3}
+            spacing="md"
+            breakpoints={[
+              { maxWidth: '62rem', cols: 2 },
+              { maxWidth: '36rem', cols: 1 },
+            ]}
+          >
             {inProgress.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} onOpenRecurring={openRuleModal} />
+              <RecordingCard
+                key={`rec-${rec.id}`}
+                recording={rec}
+                onOpenDetails={openDetails}
+                onOpenRecurring={openRuleModal}
+              />
             ))}
             {inProgress.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -1126,9 +1558,21 @@ const DVRPage = () => {
             <Title order={4}>Upcoming Recordings</Title>
             <Badge color="yellow.6">{upcoming.length}</Badge>
           </Group>
-          <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
+          <SimpleGrid
+            cols={3}
+            spacing="md"
+            breakpoints={[
+              { maxWidth: '62rem', cols: 2 },
+              { maxWidth: '36rem', cols: 1 },
+            ]}
+          >
             {upcoming.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} onOpenRecurring={openRuleModal} />
+              <RecordingCard
+                key={`rec-${rec.id}`}
+                recording={rec}
+                onOpenDetails={openDetails}
+                onOpenRecurring={openRuleModal}
+              />
             ))}
             {upcoming.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -1143,9 +1587,21 @@ const DVRPage = () => {
             <Title order={4}>Previously Recorded</Title>
             <Badge color="gray.6">{completed.length}</Badge>
           </Group>
-          <SimpleGrid cols={3} spacing="md" breakpoints={[{ maxWidth: '62rem', cols: 2 }, { maxWidth: '36rem', cols: 1 }]}>
+          <SimpleGrid
+            cols={3}
+            spacing="md"
+            breakpoints={[
+              { maxWidth: '62rem', cols: 2 },
+              { maxWidth: '36rem', cols: 1 },
+            ]}
+          >
             {completed.map((rec) => (
-              <RecordingCard key={`rec-${rec.id}`} recording={rec} onOpenDetails={openDetails} onOpenRecurring={openRuleModal} />
+              <RecordingCard
+                key={`rec-${rec.id}`}
+                recording={rec}
+                onOpenDetails={openDetails}
+                onOpenRecurring={openRuleModal}
+              />
             ))}
             {completed.length === 0 && (
               <Text size="sm" c="dimmed">
@@ -1184,17 +1640,19 @@ const DVRPage = () => {
           onClose={closeDetails}
           recording={detailsRecording}
           channel={channels[detailsRecording.channel]}
-          posterUrl={(
-            detailsRecording.custom_properties?.poster_logo_id
+          posterUrl={
+            (detailsRecording.custom_properties?.poster_logo_id
               ? `/api/channels/logos/${detailsRecording.custom_properties.poster_logo_id}/cache/`
-              : detailsRecording.custom_properties?.poster_url || channels[detailsRecording.channel]?.logo?.cache_url
-          ) || '/logo.png'}
+              : detailsRecording.custom_properties?.poster_url ||
+                channels[detailsRecording.channel]?.logo?.cache_url) ||
+            '/logo.png'
+          }
           env_mode={useSettingsStore.getState().environment.env_mode}
           onWatchLive={() => {
             const rec = detailsRecording;
-            const now = dayjs();
-            const s = dayjs(rec.start_time);
-            const e = dayjs(rec.end_time);
+            const now = userNow();
+            const s = toUserTime(rec.start_time);
+            const e = toUserTime(rec.end_time);
             if (now.isAfter(s) && now.isBefore(e)) {
               // call into child RecordingCard behavior by constructing a URL like there
               const channel = channels[rec.channel];
@@ -1207,12 +1665,28 @@ const DVRPage = () => {
             }
           }}
           onWatchRecording={() => {
-            let fileUrl = detailsRecording.custom_properties?.file_url || detailsRecording.custom_properties?.output_file_url;
+            let fileUrl =
+              detailsRecording.custom_properties?.file_url ||
+              detailsRecording.custom_properties?.output_file_url;
             if (!fileUrl) return;
-            if (useSettingsStore.getState().environment.env_mode === 'dev' && fileUrl.startsWith('/')) {
+            if (
+              useSettingsStore.getState().environment.env_mode === 'dev' &&
+              fileUrl.startsWith('/')
+            ) {
               fileUrl = `${window.location.protocol}//${window.location.hostname}:5656${fileUrl}`;
             }
-            useVideoStore.getState().showVideo(fileUrl, 'vod', { name: detailsRecording.custom_properties?.program?.title || 'Recording', logo: { url: (detailsRecording.custom_properties?.poster_logo_id ? `/api/channels/logos/${detailsRecording.custom_properties.poster_logo_id}/cache/` : channels[detailsRecording.channel]?.logo?.cache_url) || '/logo.png' } });
+            useVideoStore.getState().showVideo(fileUrl, 'vod', {
+              name:
+                detailsRecording.custom_properties?.program?.title ||
+                'Recording',
+              logo: {
+                url:
+                  (detailsRecording.custom_properties?.poster_logo_id
+                    ? `/api/channels/logos/${detailsRecording.custom_properties.poster_logo_id}/cache/`
+                    : channels[detailsRecording.channel]?.logo?.cache_url) ||
+                  '/logo.png',
+              },
+            });
           }}
           onEdit={(rec) => {
             setEditRecording(rec);

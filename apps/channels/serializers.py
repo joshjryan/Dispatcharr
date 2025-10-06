@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+
 from rest_framework import serializers
 from .models import (
     Stream,
@@ -530,8 +532,6 @@ class RecurringRecordingRuleSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         start = attrs.get("start_time") or getattr(self.instance, "start_time", None)
         end = attrs.get("end_time") or getattr(self.instance, "end_time", None)
-        if start and end and end <= start:
-            raise serializers.ValidationError("End time must be after start time")
         start_date = attrs.get("start_date") if "start_date" in attrs else getattr(self.instance, "start_date", None)
         end_date = attrs.get("end_date") if "end_date" in attrs else getattr(self.instance, "end_date", None)
         if start_date is None:
@@ -544,6 +544,13 @@ class RecurringRecordingRuleSerializer(serializers.ModelSerializer):
             existing_end = getattr(self.instance, "end_date", None)
             if existing_end is None:
                 raise serializers.ValidationError("End date is required")
+        if start and end and start_date and end_date:
+            start_dt = datetime.combine(start_date, start)
+            end_dt = datetime.combine(end_date, end)
+            if end_dt <= start_dt:
+                raise serializers.ValidationError("End datetime must be after start datetime")
+        elif start and end and end == start:
+            raise serializers.ValidationError("End time must be different from start time")
         # Normalize empty strings to None for dates
         if attrs.get("end_date") == "":
             attrs["end_date"] = None

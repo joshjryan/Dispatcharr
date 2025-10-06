@@ -8,6 +8,7 @@ import time
 import json
 import subprocess
 import signal
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta
 import gc
 
@@ -1140,7 +1141,12 @@ def sync_recurring_rule_impl(rule_id: int, drop_existing: bool = True, horizon_d
     if not days:
         return 0
 
-    tz = timezone.get_current_timezone()
+    tz_name = CoreSettings.get_system_time_zone()
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        logger.warning("Invalid or unsupported time zone '%s'; falling back to Server default", tz_name)
+        tz = timezone.get_current_timezone()
     start_limit = rule.start_date or now.date()
     end_limit = rule.end_date
     horizon = now + timedelta(days=horizon_days)
@@ -2152,7 +2158,8 @@ def comskip_process_recording(recording_id: int):
         list_path = os.path.join(workdir, "concat_list.txt")
         with open(list_path, "w") as lf:
             for pth in parts:
-                lf.write(f"file '{pth}'\n")
+                escaped = pth.replace("'", "'\\''")
+                lf.write(f"file '{escaped}'\n")
 
         output_path = os.path.join(workdir, f"{os.path.splitext(os.path.basename(file_path))[0]}.cut.mkv")
         subprocess.run([
