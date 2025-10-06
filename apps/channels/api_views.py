@@ -28,6 +28,7 @@ from .models import (
     ChannelProfile,
     ChannelProfileMembership,
     Recording,
+    RecurringRecordingRule,
 )
 from .serializers import (
     StreamSerializer,
@@ -38,8 +39,17 @@ from .serializers import (
     BulkChannelProfileMembershipSerializer,
     ChannelProfileSerializer,
     RecordingSerializer,
+    RecurringRecordingRuleSerializer,
 )
-from .tasks import match_epg_channels, evaluate_series_rules, evaluate_series_rules_impl, match_single_channel_epg, match_selected_channels_epg
+from .tasks import (
+    match_epg_channels,
+    evaluate_series_rules,
+    evaluate_series_rules_impl,
+    match_single_channel_epg,
+    match_selected_channels_epg,
+    sync_recurring_rule_impl,
+    purge_recurring_rule_impl,
+)
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -49,8 +59,10 @@ from django.db.models import Q
 from django.http import StreamingHttpResponse, FileResponse, Http404
 from django.utils import timezone
 import mimetypes
+from django.conf import settings
 
 from rest_framework.pagination import PageNumberPagination
+
 
 
 logger = logging.getLogger(__name__)
@@ -1684,6 +1696,41 @@ class BulkUpdateChannelMembershipAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class RecurringRecordingRuleViewSet(viewsets.ModelViewSet):
+    queryset = RecurringRecordingRule.objects.all().select_related("channel")
+    serializer_class = RecurringRecordingRuleSerializer
+
+    def get_permissions(self):
+        return [IsAdmin()]
+
+    def perform_create(self, serializer):
+        rule = serializer.save()
+        try:
+            sync_recurring_rule_impl(rule.id, drop_existing=True)
+        except Exception as err:
+            logger.warning(f"Failed to initialize recurring rule {rule.id}: {err}")
+        return rule
+
+    def perform_update(self, serializer):
+        rule = serializer.save()
+        try:
+            if rule.enabled:
+                sync_recurring_rule_impl(rule.id, drop_existing=True)
+            else:
+                purge_recurring_rule_impl(rule.id)
+        except Exception as err:
+            logger.warning(f"Failed to resync recurring rule {rule.id}: {err}")
+        return rule
+
+    def perform_destroy(self, instance):
+        rule_id = instance.id
+        super().perform_destroy(instance)
+        try:
+            purge_recurring_rule_impl(rule_id)
+        except Exception as err:
+            logger.warning(f"Failed to purge recordings for rule {rule_id}: {err}")
+
+
 class RecordingViewSet(viewsets.ModelViewSet):
     queryset = Recording.objects.all()
     serializer_class = RecordingSerializer
@@ -1861,6 +1908,49 @@ class RecordingViewSet(viewsets.ModelViewSet):
         _safe_remove(temp_ts_path)
 
         return response
+
+
+class ComskipConfigAPIView(APIView):
+    """Upload or inspect the custom comskip.ini used by DVR processing."""
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_permissions(self):
+        return [IsAdmin()]
+
+    def get(self, request):
+        path = CoreSettings.get_dvr_comskip_custom_path()
+        exists = bool(path and os.path.exists(path))
+        return Response({"path": path, "exists": exists})
+
+    def post(self, request):
+        uploaded = request.FILES.get("file") or request.FILES.get("comskip_ini")
+        if not uploaded:
+            return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = (uploaded.name or "").lower()
+        if not name.endswith(".ini"):
+            return Response({"error": "Only .ini files are allowed"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if uploaded.size and uploaded.size > 1024 * 1024:
+            return Response({"error": "File too large (limit 1MB)"}, status=status.HTTP_400_BAD_REQUEST)
+
+        dest_dir = os.path.join(settings.MEDIA_ROOT, "comskip")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, "comskip.ini")
+
+        try:
+            with open(dest_path, "wb") as dest:
+                for chunk in uploaded.chunks():
+                    dest.write(chunk)
+        except Exception as e:
+            logger.error(f"Failed to save uploaded comskip.ini: {e}")
+            return Response({"error": "Unable to save file"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Persist path setting so DVR processing picks it up immediately
+        CoreSettings.set_dvr_comskip_custom_path(dest_path)
+
+        return Response({"success": True, "path": dest_path, "exists": os.path.exists(dest_path)})
 
 
 class BulkDeleteUpcomingRecordingsAPIView(APIView):
