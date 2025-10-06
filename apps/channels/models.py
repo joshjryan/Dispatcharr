@@ -303,6 +303,15 @@ class Channel(models.Model):
         help_text="The M3U account that auto-created this channel"
     )
 
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when this channel was created"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when this channel was last updated"
+    )
+
     def clean(self):
         # Enforce unique channel_number within a given group
         existing = Channel.objects.filter(
