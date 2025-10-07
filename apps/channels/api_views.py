@@ -747,10 +747,14 @@ class ChannelViewSet(viewsets.ModelViewSet):
             channel_data["channel_group_id"] = channel_group.id
 
         if stream.logo_url:
-            logo, _ = Logo.objects.get_or_create(
-                url=stream.logo_url, defaults={"name": stream.name or stream.tvg_id}
-            )
-            channel_data["logo_id"] = logo.id
+            # Import validation function
+            from apps.channels.tasks import validate_logo_url
+            validated_logo_url = validate_logo_url(stream.logo_url)
+            if validated_logo_url:
+                logo, _ = Logo.objects.get_or_create(
+                    url=validated_logo_url, defaults={"name": stream.name or stream.tvg_id}
+                )
+                channel_data["logo_id"] = logo.id
 
         # Attempt to find existing EPGs with the same tvg-id
         epgs = EPGData.objects.filter(tvg_id=stream.tvg_id)
