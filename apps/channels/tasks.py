@@ -30,6 +30,23 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
+# PostgreSQL btree index has a limit of ~2704 bytes (1/3 of 8KB page size)
+# We use 2000 as a safe maximum to account for multibyte characters
+def validate_logo_url(logo_url, max_length=2000):
+    """
+    Fast validation for logo URLs during bulk creation.
+    Returns None if URL is too long (would exceed PostgreSQL btree index limit),
+    original URL otherwise.
+
+    PostgreSQL btree indexes have a maximum size of ~2704 bytes. URLs longer than
+    this cannot be indexed and would cause database errors. These are typically
+    base64-encoded images embedded in URLs.
+    """
+    if logo_url and len(logo_url) > max_length:
+        logger.warning(f"Logo URL too long ({len(logo_url)} > {max_length}), skipping: {logo_url[:100]}...")
+        return None
+    return logo_url
+
 def send_epg_matching_progress(total_channels, matched_channels, current_channel_name="", stage="matching"):
     """
     Send EPG matching progress via WebSocket
@@ -2543,15 +2560,16 @@ def bulk_create_channels_from_streams(self, stream_ids, channel_profile_ids=None
                     # Store profile IDs for this channel
                     profile_map.append(channel_profile_ids)
 
-                    # Handle logo
-                    if stream.logo_url:
+                    # Handle logo - validate URL length to avoid PostgreSQL btree index errors
+                    validated_logo_url = validate_logo_url(stream.logo_url) if stream.logo_url else None
+                    if validated_logo_url:
                         logos_to_create.append(
                             Logo(
-                                url=stream.logo_url,
+                                url=validated_logo_url,
                                 name=stream.name or stream.tvg_id,
                             )
                         )
-                        logo_map.append(stream.logo_url)
+                        logo_map.append(validated_logo_url)
                     else:
                         logo_map.append(None)
 
