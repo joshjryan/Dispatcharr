@@ -23,7 +23,6 @@ import {
 } from '@mantine/core';
 import M3UGroupFilter from './M3UGroupFilter';
 import useChannelsStore from '../../store/channels';
-import usePlaylistsStore from '../../store/playlists';
 import { notifications } from '@mantine/notifications';
 import { isNotEmpty, useForm } from '@mantine/form';
 import useEPGsStore from '../../store/epgs';
@@ -40,7 +39,6 @@ const M3U = ({
 
   const userAgents = useUserAgentsStore((s) => s.userAgents);
   const fetchChannelGroups = useChannelsStore((s) => s.fetchChannelGroups);
-  const fetchPlaylists = usePlaylistsStore((s) => s.fetchPlaylists);
   const fetchEPGs = useEPGsStore((s) => s.fetchEPGs);
   const fetchCategories = useVODStore((s) => s.fetchCategories);
 
@@ -171,8 +169,14 @@ const M3U = ({
         return;
       }
 
+      // Fetch the updated playlist details (this also updates the store via API)
       const updatedPlaylist = await API.getPlaylist(newPlaylist.id);
-      await Promise.all([fetchChannelGroups(), fetchPlaylists(), fetchEPGs()]);
+
+      // Note: We don't call fetchPlaylists() here because API.addPlaylist()
+      // already added the playlist to the store. Calling fetchPlaylists() creates
+      // a race condition where the store is temporarily cleared/replaced while
+      // websocket updates for the new playlist's refresh task are arriving.
+      await Promise.all([fetchChannelGroups(), fetchEPGs()]);
 
       // If this is an XC account with VOD enabled, also fetch VOD categories
       if (values.account_type === 'XC' && values.enable_vod) {
