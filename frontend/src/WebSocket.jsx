@@ -276,11 +276,11 @@ export const WebsocketProvider = ({ children }) => {
                       'M3U refresh completed successfully:',
                       updateData
                     );
+                    fetchPlaylists(); // Refresh playlists to ensure UI is up-to-date
+                    fetchChannelProfiles(); // Ensure channel profiles are updated
                   }
 
                   updatePlaylist(updateData);
-                  fetchPlaylists(); // Refresh playlists to ensure UI is up-to-date
-                  fetchChannelProfiles(); // Ensure channel profiles are updated
                 } else {
                   // Playlist not in store yet - this happens when backend sends websocket
                   // updates immediately after creating the playlist, before the API response
