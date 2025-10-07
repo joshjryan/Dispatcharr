@@ -303,7 +303,7 @@ def process_movie_batch(account, batch, categories, relations, scan_start_time=N
 
             # Prepare movie properties
             description = movie_data.get('description') or movie_data.get('plot') or ''
-            rating = movie_data.get('rating') or movie_data.get('vote_average') or ''
+            rating = normalize_rating(movie_data.get('rating') or movie_data.get('vote_average'))
             genre = movie_data.get('genre') or movie_data.get('category_name') or ''
             duration_secs = extract_duration_from_data(movie_data)
             trailer_raw = movie_data.get('trailer') or movie_data.get('youtube_trailer') or ''
@@ -608,7 +608,7 @@ def process_series_batch(account, batch, categories, relations, scan_start_time=
 
             # Prepare series properties
             description = series_data.get('plot', '')
-            rating = series_data.get('rating', '')
+            rating = normalize_rating(series_data.get('rating'))
             genre = series_data.get('genre', '')
             logo_url = series_data.get('cover') or ''
 
@@ -896,6 +896,33 @@ def extract_duration_from_data(movie_data):
     return duration_secs
 
 
+def normalize_rating(rating_value):
+    """Normalize rating value by converting commas to decimals and validating as float"""
+    if not rating_value:
+        return None
+
+    try:
+        # Convert to string for processing
+        rating_str = str(rating_value).strip()
+
+        if not rating_str or rating_str == '':
+            return None
+
+        # Replace comma with decimal point (European format)
+        rating_str = rating_str.replace(',', '.')
+
+        # Try to convert to float
+        rating_float = float(rating_str)
+
+        # Return as string to maintain compatibility with existing code
+        # but ensure it's a valid numeric format
+        return str(rating_float)
+    except (ValueError, TypeError, AttributeError):
+        # If conversion fails, discard the rating
+        logger.debug(f"Invalid rating value discarded: {rating_value}")
+        return None
+
+
 def extract_year(date_string):
     """Extract year from date string"""
     if not date_string:
@@ -1021,9 +1048,9 @@ def refresh_series_episodes(account, series, external_series_id, episodes_data=N
                         if should_update_field(series.description, info.get('plot')):
                             series.description = extract_string_from_array_or_string(info.get('plot'))
                             updated = True
-                        if (info.get('rating') and str(info.get('rating')).strip() and
-                            (not series.rating or not str(series.rating).strip())):
-                            series.rating = info.get('rating')
+                        normalized_rating = normalize_rating(info.get('rating'))
+                        if normalized_rating and (not series.rating or not str(series.rating).strip()):
+                            series.rating = normalized_rating
                             updated = True
                         if should_update_field(series.genre, info.get('genre')):
                             series.genre = extract_string_from_array_or_string(info.get('genre'))
@@ -1124,7 +1151,7 @@ def batch_process_episodes(account, series, episodes_data, scan_start_time=None)
 
             # Extract episode metadata
             description = info.get('plot') or info.get('overview', '') if info else ''
-            rating = info.get('rating', '') if info else ''
+            rating = normalize_rating(info.get('rating')) if info else None
             air_date = extract_date_from_data(info) if info else None
             duration_secs = info.get('duration_secs') if info else None
             tmdb_id = info.get('tmdb_id') if info else None
@@ -1797,8 +1824,9 @@ def refresh_movie_advanced_data(m3u_movie_relation_id, force_refresh=False):
                 if info.get('plot') and info.get('plot') != movie.description:
                     movie.description = info.get('plot')
                     updated = True
-                if info.get('rating') and info.get('rating') != movie.rating:
-                    movie.rating = info.get('rating')
+                normalized_rating = normalize_rating(info.get('rating'))
+                if normalized_rating and normalized_rating != movie.rating:
+                    movie.rating = normalized_rating
                     updated = True
                 if info.get('genre') and info.get('genre') != movie.genre:
                     movie.genre = info.get('genre')
