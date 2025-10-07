@@ -61,7 +61,7 @@ const M3U = ({
       is_active: true,
       max_streams: 0,
       refresh_interval: 24,
-      account_type: 'STD',
+      account_type: 'XC',
       create_epg: false,
       username: '',
       password: '',
