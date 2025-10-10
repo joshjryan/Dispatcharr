@@ -342,9 +342,9 @@ def generate_epg(request, profile_name=None, user=None):
                 channels = Channel.objects.filter(
                     channelprofilemembership__channel_profile=channel_profile,
                     channelprofilemembership__enabled=True,
-                )
+                ).order_by("channel_number")
             else:
-                channels = Channel.objects.all()
+                channels = Channel.objects.all().order_by("channel_number")
 
         # Check if the request wants to use direct logo URLs instead of cache
         use_cached_logos = request.GET.get('cachedlogos', 'true').lower() != 'false'
