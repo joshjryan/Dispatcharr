@@ -51,6 +51,7 @@ import useChannelsTableStore from '../../store/channelsTable';
 import useWarningsStore from '../../store/warnings';
 import { CustomTable, useTable } from './CustomTable';
 import useLocalStorage from '../../hooks/useLocalStorage';
+import ConfirmationDialog from '../ConfirmationDialog';
 
 const StreamRowActions = ({
   theme,
@@ -199,6 +200,12 @@ const StreamsTable = () => {
   const [specificChannelNumber, setSpecificChannelNumber] = useState(1);
   const [rememberSingleChoice, setRememberSingleChoice] = useState(false);
   const [currentStreamForChannel, setCurrentStreamForChannel] = useState(null);
+
+  // Confirmation dialog state
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [streamToDelete, setStreamToDelete] = useState(null);
+  const [isBulkDelete, setIsBulkDelete] = useState(false);
 
   // const [allRowsSelected, setAllRowsSelected] = useState(false);
 
@@ -510,13 +517,49 @@ const StreamsTable = () => {
   };
 
   const deleteStream = async (id) => {
+    // Get stream details for the confirmation dialog
+    const streamObj = data.find((s) => s.id === id);
+    setStreamToDelete(streamObj);
+    setDeleteTarget(id);
+    setIsBulkDelete(false);
+
+    // Skip warning if it's been suppressed
+    if (isWarningSuppressed('delete-stream')) {
+      return executeDeleteStream(id);
+    }
+
+    setConfirmDeleteOpen(true);
+  };
+
+  const executeDeleteStream = async (id) => {
     await API.deleteStream(id);
+    fetchData();
+    // Clear the selection for the deleted stream
+    setSelectedStreamIds([]);
+    table.setSelectedTableIds([]);
+    setConfirmDeleteOpen(false);
   };
 
   const deleteStreams = async () => {
+    setIsBulkDelete(true);
+    setStreamToDelete(null);
+
+    // Skip warning if it's been suppressed
+    if (isWarningSuppressed('delete-streams')) {
+      return executeDeleteStreams();
+    }
+
+    setConfirmDeleteOpen(true);
+  };
+
+  const executeDeleteStreams = async () => {
     setIsLoading(true);
     await API.deleteStreams(selectedStreamIds);
     setIsLoading(false);
+    fetchData();
+    setSelectedStreamIds([]);
+    table.setSelectedTableIds([]);
+    setConfirmDeleteOpen(false);
   };
 
   const closeStreamForm = () => {
@@ -1175,6 +1218,39 @@ const StreamsTable = () => {
           </Group>
         </Stack>
       </Modal>
+
+      <ConfirmationDialog
+        opened={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        onConfirm={() =>
+          isBulkDelete
+            ? executeDeleteStreams()
+            : executeDeleteStream(deleteTarget)
+        }
+        title={`Confirm ${isBulkDelete ? 'Bulk ' : ''}Stream Deletion`}
+        message={
+          isBulkDelete ? (
+            `Are you sure you want to delete ${selectedStreamIds.length} stream${selectedStreamIds.length !== 1 ? 's' : ''}? This action cannot be undone.`
+          ) : streamToDelete ? (
+            <div style={{ whiteSpace: 'pre-line' }}>
+              {`Are you sure you want to delete the following stream?
+
+Name: ${streamToDelete.name}
+${streamToDelete.channel_group ? `Group: ${channelGroups[streamToDelete.channel_group]?.name || 'Unknown'}` : ''}
+${streamToDelete.m3u_account ? `M3U Account: ${playlists.find((p) => p.id === streamToDelete.m3u_account)?.name || 'Unknown'}` : ''}
+
+This action cannot be undone.`}
+            </div>
+          ) : (
+            'Are you sure you want to delete this stream? This action cannot be undone.'
+          )
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        actionKey={isBulkDelete ? 'delete-streams' : 'delete-stream'}
+        onSuppressChange={suppressWarning}
+        size="md"
+      />
     </>
   );
 };
