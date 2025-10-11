@@ -8,7 +8,7 @@ import gevent
 from typing import Set, Optional
 from apps.proxy.config import TSConfig as Config
 from redis.exceptions import ConnectionError, TimeoutError
-from .constants import EventType
+from .constants import EventType, ChannelState, ChannelMetadataField
 from .config_helper import ConfigHelper
 from .redis_keys import RedisKeys
 from .utils import get_logger
@@ -26,6 +26,7 @@ class ClientManager:
         self.lock = threading.Lock()
         self.last_active_time = time.time()
         self.worker_id = worker_id  # Store worker ID as instance variable
+        self._heartbeat_running = True  # Flag to control heartbeat thread
 
         # STANDARDIZED KEYS: Move client set under channel namespace
         self.client_set_key = RedisKeys.clients(channel_id)
@@ -77,56 +78,28 @@ class ClientManager:
             logger.debug(f"Failed to trigger stats update: {e}")
 
     def _start_heartbeat_thread(self):
-        """Start thread to regularly refresh client presence in Redis"""
+        """Start thread to regularly refresh client presence in Redis for local clients"""
         def heartbeat_task():
-            no_clients_count = 0  # Track consecutive empty cycles
-            max_empty_cycles = 3  # Exit after this many consecutive empty checks
-
             logger.debug(f"Started heartbeat thread for channel {self.channel_id} (interval: {self.heartbeat_interval}s)")
 
-            while True:
+            while self._heartbeat_running:
                 try:
-                    # Wait for the interval
-                    gevent.sleep(self.heartbeat_interval)
+                    # Wait for the interval, but check stop flag frequently for quick shutdown
+                    # Sleep in 1-second increments to allow faster response to stop signal
+                    for _ in range(int(self.heartbeat_interval)):
+                        if not self._heartbeat_running:
+                            break
+                        time.sleep(1)
+
+                    # Final check before doing work
+                    if not self._heartbeat_running:
+                        break
 
                     # Send heartbeat for all local clients
                     with self.lock:
-                        if not self.clients or not self.redis_client:
-                            # No clients left, increment our counter
-                            no_clients_count += 1
-
-                            # Check if we're in a shutdown delay period before exiting
-                            in_shutdown_delay = False
-                            if self.redis_client:
-                                try:
-                                    disconnect_key = RedisKeys.last_client_disconnect(self.channel_id)
-                                    disconnect_time_bytes = self.redis_client.get(disconnect_key)
-                                    if disconnect_time_bytes:
-                                        disconnect_time = float(disconnect_time_bytes.decode('utf-8'))
-                                        elapsed = time.time() - disconnect_time
-                                        shutdown_delay = ConfigHelper.channel_shutdown_delay()
-
-                                        if elapsed < shutdown_delay:
-                                            in_shutdown_delay = True
-                                            logger.debug(f"Channel {self.channel_id} in shutdown delay: {elapsed:.1f}s of {shutdown_delay}s elapsed")
-                                except Exception as e:
-                                    logger.debug(f"Error checking shutdown delay: {e}")
-
-                            # Only exit if we've seen no clients for several consecutive checks AND we're not in shutdown delay
-                            if no_clients_count >= max_empty_cycles and not in_shutdown_delay:
-                                logger.info(f"No clients for channel {self.channel_id} after {no_clients_count} consecutive checks and not in shutdown delay, exiting heartbeat thread")
-                                return  # This exits the thread
-
-                            # Skip this cycle if we have no clients but continue if in shutdown delay
-                            if not in_shutdown_delay:
-                                continue
-                            else:
-                                # Reset counter during shutdown delay to prevent premature exit
-                                no_clients_count = 0
-                                continue
-                        else:
-                            # Reset counter when we see clients
-                            no_clients_count = 0
+                        # Skip this cycle if we have no local clients
+                        if not self.clients:
+                            continue
 
                         # IMPROVED GHOST DETECTION: Check for stale clients before sending heartbeats
                         current_time = time.time()
@@ -197,10 +170,19 @@ class ClientManager:
                 except Exception as e:
                     logger.error(f"Error in client heartbeat thread: {e}")
 
+            logger.debug(f"Heartbeat thread exiting for channel {self.channel_id}")
+
         thread = threading.Thread(target=heartbeat_task, daemon=True)
         thread.name = f"client-heartbeat-{self.channel_id}"
         thread.start()
         logger.debug(f"Started client heartbeat thread for channel {self.channel_id} (interval: {self.heartbeat_interval}s)")
+
+    def stop(self):
+        """Stop the heartbeat thread and cleanup"""
+        logger.debug(f"Stopping ClientManager for channel {self.channel_id}")
+        self._heartbeat_running = False
+        # Give the thread a moment to exit gracefully
+        # Note: We don't join() here because it's a daemon thread and will exit on its own
 
     def _execute_redis_command(self, command_func):
         """Execute Redis command with error handling"""

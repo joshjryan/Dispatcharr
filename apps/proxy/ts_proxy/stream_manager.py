@@ -10,6 +10,7 @@ import gevent
 import re
 from typing import Optional, List
 from django.shortcuts import get_object_or_404
+from urllib3.exceptions import ReadTimeoutError
 from apps.proxy.config import TSConfig as Config
 from apps.channels.models import Channel, Stream
 from apps.m3u.models import M3UAccount, M3UAccountProfile
@@ -761,10 +762,12 @@ class StreamManager:
             self.current_session = session
 
             # Stream the URL with proper timeout handling
+            # Use same chunk timeout as socket connections for consistency
+            chunk_timeout = ConfigHelper.chunk_timeout()
             response = session.get(
                 self.url,
                 stream=True,
-                timeout=(10, 60)  # 10s connect timeout, 60s read timeout
+                timeout=(5, chunk_timeout)  # 5s connect timeout, configurable chunk timeout
             )
             self.current_response = response
 
@@ -832,6 +835,13 @@ class StreamManager:
             else:
                 # Handle direct HTTP connection
                 chunk_count = 0
+
+                # Check if response is still valid before attempting to read
+                if not self.current_response:
+                    logger.debug(f"Response object is None for channel {self.channel_id}, connection likely closed")
+                    self.connected = False
+                    return
+
                 try:
                     for chunk in self.current_response.iter_content(chunk_size=self.chunk_size):
                         # Check if we've been asked to stop
@@ -854,6 +864,17 @@ class StreamManager:
                                 if hasattr(self.buffer, 'redis_client') and self.buffer.redis_client:
                                     last_data_key = RedisKeys.last_data(self.buffer.channel_id)
                                     self.buffer.redis_client.set(last_data_key, str(time.time()), ex=60)
+                except (requests.exceptions.ReadTimeout, ReadTimeoutError, requests.exceptions.ConnectionError) as e:
+                    if self.stop_requested or self.url_switching:
+                        logger.debug(f"Expected connection error during shutdown/URL switch for channel {self.channel_id}: {e}")
+                    else:
+                        # Handle timeout errors - log and close connection, let main loop handle retry
+                        logger.warning(f"Stream read timeout for channel {self.channel_id}: {e}")
+
+                        # Close the current connection
+                        self._close_connection()
+
+                        return  # Exit this method, main loop will retry based on retry_count
                 except (AttributeError, ConnectionError) as e:
                     if self.stop_requested or self.url_switching:
                         logger.debug(f"Expected connection error during shutdown/URL switch for channel {self.channel_id}: {e}")
@@ -1274,7 +1295,7 @@ class StreamManager:
 
         try:
             # Set timeout for chunk reads
-            chunk_timeout = ConfigHelper.get('CHUNK_TIMEOUT', 10)  # Default 10 seconds
+            chunk_timeout = ConfigHelper.chunk_timeout()  # Use centralized timeout configuration
 
             try:
                 # Handle different socket types with timeout
