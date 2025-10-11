@@ -874,8 +874,14 @@ const StreamsTable = () => {
         }}
       >
         {/* Top toolbar with Remove, Assign, Auto-match, and Add buttons */}
-        <Group justify="space-between" style={{ paddingLeft: 10 }}>
-          <Box>
+        <Flex
+          justify="space-between"
+          align="center"
+          wrap="nowrap"
+          style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 10 }}
+          gap={6}
+        >
+          <Flex gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
             <Button
               leftSection={<SquarePlus size={18} />}
               variant={
@@ -909,55 +915,47 @@ const StreamsTable = () => {
             >
               Add Streams to Channel
             </Button>
-          </Box>
 
-          <Box
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              padding: 10,
-            }}
-          >
-            <Flex gap={6}>
-              <Button
-                leftSection={<SquareMinus size={18} />}
-                variant="default"
-                size="xs"
-                onClick={deleteStreams}
-                disabled={selectedStreamIds.length == 0}
-              >
-                Remove
-              </Button>
+            <Button
+              leftSection={<SquarePlus size={18} />}
+              variant="default"
+              size="xs"
+              onClick={createChannelsFromStreams}
+              p={5}
+              disabled={selectedStreamIds.length == 0}
+            >
+              {`Create Channels (${selectedStreamIds.length})`}
+            </Button>
+          </Flex>
 
-              <Button
-                leftSection={<SquarePlus size={18} />}
-                variant="default"
-                size="xs"
-                onClick={createChannelsFromStreams}
-                p={5}
-                disabled={selectedStreamIds.length == 0}
-              >
-                {`Create Channels (${selectedStreamIds.length})`}
-              </Button>
+          <Flex gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Button
+              leftSection={<SquarePlus size={18} />}
+              variant="light"
+              size="xs"
+              onClick={() => editStream()}
+              p={5}
+              color={theme.tailwind.green[5]}
+              style={{
+                borderWidth: '1px',
+                borderColor: theme.tailwind.green[5],
+                color: 'white',
+              }}
+            >
+              Create Stream
+            </Button>
 
-              <Button
-                leftSection={<SquarePlus size={18} />}
-                variant="light"
-                size="xs"
-                onClick={() => editStream()}
-                p={5}
-                color={theme.tailwind.green[5]}
-                style={{
-                  borderWidth: '1px',
-                  borderColor: theme.tailwind.green[5],
-                  color: 'white',
-                }}
-              >
-                Create Stream
-              </Button>
-            </Flex>
-          </Box>
-        </Group>
+            <Button
+              leftSection={<SquareMinus size={18} />}
+              variant="default"
+              size="xs"
+              onClick={deleteStreams}
+              disabled={selectedStreamIds.length == 0}
+            >
+              Remove
+            </Button>
+          </Flex>
+        </Flex>
 
         {initialDataCount === 0 && (
           <Center style={{ paddingTop: 20 }}>
