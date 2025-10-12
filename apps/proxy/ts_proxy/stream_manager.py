@@ -114,6 +114,9 @@ class StreamManager:
         self.stderr_reader_thread = None
         self.ffmpeg_input_phase = True  # Track if we're still reading input info
 
+        # Add HTTP reader thread property
+        self.http_reader = None
+
     def _create_session(self):
         """Create and configure requests session with optimal settings"""
         session = requests.Session()
@@ -740,9 +743,9 @@ class StreamManager:
 
 
     def _establish_http_connection(self):
-        """Establish a direct HTTP connection to the stream"""
+        """Establish HTTP connection using thread-based reader (same as transcode path)"""
         try:
-            logger.debug(f"Using TS Proxy to connect to stream: {self.url}")
+            logger.debug(f"Using HTTP streamer thread to connect to stream: {self.url}")
 
             # Check if we already have active HTTP connections
             if self.current_response or self.current_session:
@@ -759,43 +762,39 @@ class StreamManager:
                 logger.debug(f"Closing existing transcode process before establishing HTTP connection for channel {self.channel_id}")
                 self._close_socket()
 
-            # Create new session for each connection attempt
-            session = self._create_session()
-            self.current_session = session
+            # Use HTTPStreamReader to fetch stream and pipe to a readable file descriptor
+            # This allows us to use the same fetch_chunk() path as transcode
+            from .http_streamer import HTTPStreamReader
 
-            # Stream the URL with proper timeout handling
-            # Use same chunk timeout as socket connections for consistency
-            chunk_timeout = ConfigHelper.chunk_timeout()
-            response = session.get(
-                self.url,
-                stream=True,
-                timeout=(5, 10)  # 5s connect timeout, 10s read timeout
+            # Create and start the HTTP stream reader
+            self.http_reader = HTTPStreamReader(
+                url=self.url,
+                user_agent=self.user_agent,
+                chunk_size=self.chunk_size
             )
-            self.current_response = response
 
-            if response.status_code == 200:
-                self.connected = True
-                self.healthy = True
-                logger.info(f"Successfully connected to stream source for channel {self.channel_id}")
+            # Start the reader thread and get the read end of the pipe
+            pipe_fd = self.http_reader.start()
 
-                # Store connection start time for stability tracking
-                self.connection_start_time = time.time()
+            # Wrap the file descriptor in a file object (same as transcode stdout)
+            import os
+            self.socket = os.fdopen(pipe_fd, 'rb', buffering=0)
+            self.connected = True
+            self.healthy = True
 
-                # Set channel state to waiting for clients
-                self._set_waiting_for_clients()
+            logger.info(f"Successfully started HTTP streamer thread for channel {self.channel_id}")
 
-                return True
-            else:
-                logger.error(f"Failed to connect to stream for channel {self.channel_id}: HTTP {response.status_code}")
-                self._close_connection()
-                return False
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP request error: {e}")
-            self._close_connection()
-            return False
+            # Store connection start time for stability tracking
+            self.connection_start_time = time.time()
+
+            # Set channel state to waiting for clients
+            self._set_waiting_for_clients()
+
+            return True
+
         except Exception as e:
             logger.error(f"Error establishing HTTP connection for channel {self.channel_id}: {e}", exc_info=True)
-            self._close_connection()
+            self._close_socket()
             return False
 
     def _update_bytes_processed(self, chunk_size):
@@ -823,66 +822,19 @@ class StreamManager:
             logger.error(f"Error updating bytes processed: {e}")
 
     def _process_stream_data(self):
-        """Process stream data until disconnect or error"""
+        """Process stream data until disconnect or error - unified path for both transcode and HTTP"""
         try:
-            if self.transcode:
-                # Handle transcoded stream data
-                while self.running and self.connected and not self.stop_requested and not self.needs_stream_switch:
-                    if self.fetch_chunk():
-                        self.last_data_time = time.time()
-                    else:
-                        if not self.running:
-                            break
-                        gevent.sleep(0.1)  # REPLACE time.sleep(0.1)
-            else:
-                # Handle direct HTTP connection
-                chunk_count = 0
-
-                # Check if response is still valid before attempting to read
-                if not self.current_response:
-                    logger.debug(f"Response object is None for channel {self.channel_id}, connection likely closed")
-                    self.connected = False
-                    return
-
-                try:
-                    for chunk in self.current_response.iter_content(chunk_size=self.chunk_size):
-                        # Check if we've been asked to stop
-                        if self.stop_requested or self.url_switching or self.needs_stream_switch:
-                            break
-
-                        if chunk:
-                            # Track chunk size before adding to buffer
-                            chunk_size = len(chunk)
-                            self._update_bytes_processed(chunk_size)
-
-                            # Add chunk to buffer with TS packet alignment
-                            success = self.buffer.add_chunk(chunk)
-
-                            if success:
-                                self.last_data_time = time.time()
-                                chunk_count += 1
-
-                                # Update last data timestamp in Redis
-                                if hasattr(self.buffer, 'redis_client') and self.buffer.redis_client:
-                                    last_data_key = RedisKeys.last_data(self.buffer.channel_id)
-                                    self.buffer.redis_client.set(last_data_key, str(time.time()), ex=60)
-                except (requests.exceptions.ReadTimeout, ReadTimeoutError, requests.exceptions.ConnectionError) as e:
-                    if self.stop_requested or self.url_switching:
-                        logger.debug(f"Expected connection error during shutdown/URL switch for channel {self.channel_id}: {e}")
-                    else:
-                        # Handle timeout errors - log and close connection, let main loop handle retry
-                        logger.warning(f"Stream read timeout for channel {self.channel_id}: {e}")
-
-                        # Close the current connection
-                        self._close_connection()
-
-                        return  # Exit this method, main loop will retry based on retry_count
-                except (AttributeError, ConnectionError) as e:
-                    if self.stop_requested or self.url_switching:
-                        logger.debug(f"Expected connection error during shutdown/URL switch for channel {self.channel_id}: {e}")
-                    else:
-                        logger.error(f"Unexpected stream error for channel {self.channel_id}: {e}")
-                        raise
+            # Both transcode and HTTP now use the same subprocess/socket approach
+            # This gives us perfect control: check flags between chunks, timeout just returns False
+            while self.running and self.connected and not self.stop_requested and not self.needs_stream_switch:
+                if self.fetch_chunk():
+                    self.last_data_time = time.time()
+                else:
+                    # fetch_chunk() returned False - could be timeout, no data, or error
+                    if not self.running:
+                        break
+                    # Brief sleep before retry to avoid tight loop
+                    gevent.sleep(0.1)
         except Exception as e:
             logger.error(f"Error processing stream data for channel {self.channel_id}: {e}", exc_info=True)
 
@@ -1205,6 +1157,15 @@ class StreamManager:
         # First try to use _close_connection for HTTP resources
         if self.current_response or self.current_session:
             self._close_connection()
+
+        # Stop HTTP reader thread if it exists
+        if hasattr(self, 'http_reader') and self.http_reader:
+            try:
+                logger.debug(f"Stopping HTTP reader thread for channel {self.channel_id}")
+                self.http_reader.stop()
+                self.http_reader = None
+            except Exception as e:
+                logger.debug(f"Error stopping HTTP reader for channel {self.channel_id}: {e}")
 
         # Otherwise handle socket and transcode resources
         if self.socket:
