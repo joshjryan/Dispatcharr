@@ -322,7 +322,8 @@ const SettingsPage = () => {
           let val = null;
           switch (key) {
             case 'm3u-hash-key':
-              val = value.value.split(',');
+              // Split comma-separated string, filter out empty strings
+              val = value.value ? value.value.split(',').filter(v => v) : [];
               break;
             case 'dvr-pre-offset-minutes':
             case 'dvr-post-offset-minutes':
@@ -408,12 +409,26 @@ const SettingsPage = () => {
     for (const settingKey in values) {
       // Only compare against existing value if the setting exists
       const existing = settings[settingKey];
+      
+      // Convert array values (like m3u-hash-key) to comma-separated strings
+      let stringValue;
+      if (Array.isArray(values[settingKey])) {
+        stringValue = values[settingKey].join(',');
+      } else {
+        stringValue = `${values[settingKey]}`;
+      }
+      
+      // Skip empty values to avoid validation errors
+      if (!stringValue) {
+        continue;
+      }
+      
       if (!existing) {
         // Create new setting on save
-        changedSettings[settingKey] = `${values[settingKey]}`;
-      } else if (String(values[settingKey]) !== String(existing.value)) {
+        changedSettings[settingKey] = stringValue;
+      } else if (stringValue !== String(existing.value)) {
         // If the user changed the setting's value from what's in the DB:
-        changedSettings[settingKey] = `${values[settingKey]}`;
+        changedSettings[settingKey] = stringValue;
 
         // Check if M3U hash key was changed
         if (settingKey === 'm3u-hash-key') {
