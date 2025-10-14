@@ -1,4 +1,6 @@
 """Shared configuration between proxy types"""
+import time
+from django.db import connection
 
 class BaseConfig:
     DEFAULT_USER_AGENT = 'VLC/3.0.20 LibVLC/3.0.20' # Will only be used if connection to settings fail
@@ -12,13 +14,35 @@ class BaseConfig:
     BUFFERING_TIMEOUT = 15  # Seconds to wait for buffering before switching streams
     BUFFER_SPEED = 1 # What speed to condsider the stream buffering, 1x is normal speed, 2x is double speed, etc.
 
+    # Cache for proxy settings (class-level, shared across all instances)
+    _proxy_settings_cache = None
+    _proxy_settings_cache_time = 0
+    _proxy_settings_cache_ttl = 10  # Cache for 10 seconds
+
     @classmethod
     def get_proxy_settings(cls):
-        """Get proxy settings from CoreSettings JSON data with fallback to defaults"""
+        """Get proxy settings from CoreSettings JSON data with fallback to defaults (cached)"""
+        # Check if cache is still valid
+        now = time.time()
+        if cls._proxy_settings_cache is not None and (now - cls._proxy_settings_cache_time) < cls._proxy_settings_cache_ttl:
+            return cls._proxy_settings_cache
+        
+        # Cache miss or expired - fetch from database
         try:
             from core.models import CoreSettings
-            return CoreSettings.get_proxy_settings()
+            settings = CoreSettings.get_proxy_settings()
+            cls._proxy_settings_cache = settings
+            cls._proxy_settings_cache_time = now
+            
+            # Close the connection after reading settings to avoid keeping it open
+            try:
+                connection.close()
+            except Exception:
+                pass
+                
+            return settings
         except Exception:
+            # Return defaults if database query fails
             return {
                 "buffering_timeout": 15,
                 "buffering_speed": 1.0,

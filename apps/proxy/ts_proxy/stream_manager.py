@@ -9,6 +9,7 @@ import subprocess
 import gevent
 import re
 from typing import Optional, List
+from django.db import connection
 from django.shortcuts import get_object_or_404
 from urllib3.exceptions import ReadTimeoutError
 from apps.proxy.config import TSConfig as Config
@@ -383,6 +384,12 @@ class StreamManager:
                         self.buffer.redis_client.setex(stop_key, 60, "true")
                 except Exception as e:
                     logger.error(f"Failed to update channel state in Redis: {e} for channel {self.channel_id}", exc_info=True)
+
+            # Close database connection for this thread
+            try:
+                connection.close()
+            except Exception:
+                pass
 
             logger.info(f"Stream manager stopped for channel {self.channel_id}")
 
