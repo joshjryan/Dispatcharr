@@ -474,17 +474,26 @@ def stream_xc(request, username, password, channel_id):
 
     print(f"Fetchin channel with ID: {channel_id}")
     if user.user_level < 10:
-        filters = {
-            "id": int(channel_id),
-            "channelprofilemembership__enabled": True,
-            "user_level__lte": user.user_level,
-        }
+        user_profile_count = user.channel_profiles.count()
 
-        if user.channel_profiles.count() > 0:
-            channel_profiles = user.channel_profiles.all()
-            filters["channelprofilemembership__channel_profile__in"] = channel_profiles
+        # If user has ALL profiles or NO profiles, give unrestricted access
+        if user_profile_count == 0:
+            # No profile filtering - user sees all channels based on user_level
+            filters = {
+                "id": int(channel_id),
+                "user_level__lte": user.user_level
+            }
+            channel = Channel.objects.filter(**filters).first()
+        else:
+            # User has specific limited profiles assigned
+            filters = {
+                "id": int(channel_id),
+                "channelprofilemembership__enabled": True,
+                "user_level__lte": user.user_level,
+                "channelprofilemembership__channel_profile__in": user.channel_profiles.all()
+            }
+            channel = Channel.objects.filter(**filters).distinct().first()
 
-        channel = Channel.objects.filter(**filters).distinct().first()
         if not channel:
             return JsonResponse({"error": "Not found"}, status=404)
     else:
