@@ -879,7 +879,7 @@ const StreamsTable = () => {
           justify="space-between"
           align="center"
           wrap="nowrap"
-          style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 10 }}
+          style={{ padding: 10 }}
           gap={6}
         >
           <Flex gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
