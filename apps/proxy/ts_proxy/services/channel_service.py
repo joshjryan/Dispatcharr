@@ -597,6 +597,8 @@ class ChannelService:
     @staticmethod
     def _update_stream_stats_in_db(stream_id, **stats):
         """Update stream stats in database"""
+        from django.db import connection
+        
         try:
             from apps.channels.models import Stream
             from django.utils import timezone
@@ -622,6 +624,13 @@ class ChannelService:
         except Exception as e:
             logger.error(f"Error updating stream stats in database for stream {stream_id}: {e}")
             return False
+            
+        finally:
+            # Always close database connection after update
+            try:
+                connection.close()
+            except Exception:
+                pass
 
     # Helper methods for Redis operations
 

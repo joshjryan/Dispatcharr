@@ -930,6 +930,7 @@ class StreamManager:
 
         # Import both models for proper resource management
         from apps.channels.models import Stream, Channel
+        from django.db import connection
 
         # Update stream profile if we're switching streams
         if self.current_stream_id and stream_id and self.current_stream_id != stream_id:
@@ -947,8 +948,16 @@ class StreamManager:
                         logger.debug(f"Updated m3u profile for channel {self.channel_id} to use profile from stream {stream_id}")
                     else:
                         logger.warning(f"Failed to update stream profile for channel {self.channel_id}")
+                    
             except Exception as e:
                 logger.error(f"Error updating stream profile for channel {self.channel_id}: {e}")
+                
+            finally:
+                # Always close database connection after profile update
+                try:
+                    connection.close()
+                except Exception:
+                    pass
 
         # CRITICAL: Set a flag to prevent immediate reconnection with old URL
         self.url_switching = True

@@ -33,14 +33,8 @@ class BaseConfig:
             settings = CoreSettings.get_proxy_settings()
             cls._proxy_settings_cache = settings
             cls._proxy_settings_cache_time = now
-            
-            # Close the connection after reading settings to avoid keeping it open
-            try:
-                connection.close()
-            except Exception:
-                pass
-                
             return settings
+            
         except Exception:
             # Return defaults if database query fails
             return {
@@ -50,6 +44,13 @@ class BaseConfig:
                 "channel_shutdown_delay": 0,
                 "channel_init_grace_period": 5,
             }
+            
+        finally:
+            # Always close the connection after reading settings
+            try:
+                connection.close()
+            except Exception:
+                pass
 
     @classmethod
     def get_redis_chunk_ttl(cls):
