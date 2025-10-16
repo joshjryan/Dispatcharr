@@ -187,16 +187,28 @@ def batch_create_categories(categories_data, category_type, account):
 
     logger.debug(f"Found {len(existing_categories)} existing categories")
 
+    # Check if we should auto-enable new categories based on account settings
+    account_custom_props = account.custom_properties or {}
+    if category_type == 'movie':
+        auto_enable_new = account_custom_props.get("auto_enable_new_groups_vod", True)
+    else:  # series
+        auto_enable_new = account_custom_props.get("auto_enable_new_groups_series", True)
+
     # Create missing categories in batch
     new_categories = []
+
     for name in category_names:
         if name not in existing_categories:
+            # Always create new categories
             new_categories.append(VODCategory(name=name, category_type=category_type))
         else:
+            # Existing category - create relationship with enabled based on auto_enable setting
+            # (category exists globally but is new to this account)
             relations_to_create.append(M3UVODCategoryRelation(
                 category=existing_categories[name],
                 m3u_account=account,
                 custom_properties={},
+                enabled=auto_enable_new,
             ))
 
     logger.debug(f"{len(new_categories)} new categories found")
@@ -204,23 +216,67 @@ def batch_create_categories(categories_data, category_type, account):
 
     if new_categories:
         logger.debug("Creating new categories...")
-        created_categories = VODCategory.bulk_create_and_fetch(new_categories, ignore_conflicts=True)
+        created_categories = list(VODCategory.bulk_create_and_fetch(new_categories, ignore_conflicts=True))
+
+        # Create relations for newly created categories with enabled based on auto_enable setting
+        for cat in created_categories:
+            if not auto_enable_new:
+                logger.info(f"New {category_type} category '{cat.name}' created but DISABLED - auto_enable_new_groups is disabled for account {account.id}")
+
+            relations_to_create.append(
+                M3UVODCategoryRelation(
+                    category=cat,
+                    m3u_account=account,
+                    custom_properties={},
+                    enabled=auto_enable_new,
+                )
+            )
+
         # Convert to dictionary for easy lookup
         newly_created = {cat.name: cat for cat in created_categories}
-
-        relations_to_create += [
-            M3UVODCategoryRelation(
-                category=cat,
-                m3u_account=account,
-                custom_properties={},
-            ) for cat in newly_created.values()
-        ]
-
         existing_categories.update(newly_created)
 
     # Create missing relations
     logger.debug("Updating category account relations...")
     M3UVODCategoryRelation.objects.bulk_create(relations_to_create, ignore_conflicts=True)
+
+    # Delete orphaned category relationships (categories no longer in the M3U source)
+    current_category_ids = set(existing_categories[name].id for name in category_names)
+    existing_relations = M3UVODCategoryRelation.objects.filter(
+        m3u_account=account,
+        category__category_type=category_type
+    ).select_related('category')
+
+    relations_to_delete = [
+        rel for rel in existing_relations
+        if rel.category_id not in current_category_ids
+    ]
+
+    if relations_to_delete:
+        M3UVODCategoryRelation.objects.filter(
+            id__in=[rel.id for rel in relations_to_delete]
+        ).delete()
+        logger.info(f"Deleted {len(relations_to_delete)} orphaned {category_type} category relationships for account {account.id}: {[rel.category.name for rel in relations_to_delete]}")
+
+        # Check if any of the deleted relationships left categories with no remaining associations
+        orphaned_category_ids = []
+        for rel in relations_to_delete:
+            category = rel.category
+
+            # Check if this category has any remaining M3U account relationships
+            remaining_relationships = M3UVODCategoryRelation.objects.filter(
+                category=category
+            ).exists()
+
+            # If no relationships remain, it's safe to delete the category
+            if not remaining_relationships:
+                orphaned_category_ids.append(category.id)
+                logger.debug(f"Category '{category.name}' has no remaining associations and will be deleted")
+
+        # Delete orphaned categories
+        if orphaned_category_ids:
+            VODCategory.objects.filter(id__in=orphaned_category_ids).delete()
+            logger.info(f"Deleted {len(orphaned_category_ids)} orphaned {category_type} categories with no remaining associations")
 
     # 🔑 Fetch all relations for this account, for all categories
     # relations = { rel.id: rel for rel in M3UVODCategoryRelation.objects
@@ -303,7 +359,7 @@ def process_movie_batch(account, batch, categories, relations, scan_start_time=N
 
             # Prepare movie properties
             description = movie_data.get('description') or movie_data.get('plot') or ''
-            rating = movie_data.get('rating') or movie_data.get('vote_average') or ''
+            rating = normalize_rating(movie_data.get('rating') or movie_data.get('vote_average'))
             genre = movie_data.get('genre') or movie_data.get('category_name') or ''
             duration_secs = extract_duration_from_data(movie_data)
             trailer_raw = movie_data.get('trailer') or movie_data.get('youtube_trailer') or ''
@@ -608,7 +664,7 @@ def process_series_batch(account, batch, categories, relations, scan_start_time=
 
             # Prepare series properties
             description = series_data.get('plot', '')
-            rating = series_data.get('rating', '')
+            rating = normalize_rating(series_data.get('rating'))
             genre = series_data.get('genre', '')
             logo_url = series_data.get('cover') or ''
 
@@ -896,6 +952,33 @@ def extract_duration_from_data(movie_data):
     return duration_secs
 
 
+def normalize_rating(rating_value):
+    """Normalize rating value by converting commas to decimals and validating as float"""
+    if not rating_value:
+        return None
+
+    try:
+        # Convert to string for processing
+        rating_str = str(rating_value).strip()
+
+        if not rating_str or rating_str == '':
+            return None
+
+        # Replace comma with decimal point (European format)
+        rating_str = rating_str.replace(',', '.')
+
+        # Try to convert to float
+        rating_float = float(rating_str)
+
+        # Return as string to maintain compatibility with existing code
+        # but ensure it's a valid numeric format
+        return str(rating_float)
+    except (ValueError, TypeError, AttributeError):
+        # If conversion fails, discard the rating
+        logger.debug(f"Invalid rating value discarded: {rating_value}")
+        return None
+
+
 def extract_year(date_string):
     """Extract year from date string"""
     if not date_string:
@@ -1021,9 +1104,9 @@ def refresh_series_episodes(account, series, external_series_id, episodes_data=N
                         if should_update_field(series.description, info.get('plot')):
                             series.description = extract_string_from_array_or_string(info.get('plot'))
                             updated = True
-                        if (info.get('rating') and str(info.get('rating')).strip() and
-                            (not series.rating or not str(series.rating).strip())):
-                            series.rating = info.get('rating')
+                        normalized_rating = normalize_rating(info.get('rating'))
+                        if normalized_rating and (not series.rating or not str(series.rating).strip()):
+                            series.rating = normalized_rating
                             updated = True
                         if should_update_field(series.genre, info.get('genre')):
                             series.genre = extract_string_from_array_or_string(info.get('genre'))
@@ -1124,7 +1207,7 @@ def batch_process_episodes(account, series, episodes_data, scan_start_time=None)
 
             # Extract episode metadata
             description = info.get('plot') or info.get('overview', '') if info else ''
-            rating = info.get('rating', '') if info else ''
+            rating = normalize_rating(info.get('rating')) if info else None
             air_date = extract_date_from_data(info) if info else None
             duration_secs = info.get('duration_secs') if info else None
             tmdb_id = info.get('tmdb_id') if info else None
@@ -1797,8 +1880,9 @@ def refresh_movie_advanced_data(m3u_movie_relation_id, force_refresh=False):
                 if info.get('plot') and info.get('plot') != movie.description:
                     movie.description = info.get('plot')
                     updated = True
-                if info.get('rating') and info.get('rating') != movie.rating:
-                    movie.rating = info.get('rating')
+                normalized_rating = normalize_rating(info.get('rating'))
+                if normalized_rating and normalized_rating != movie.rating:
+                    movie.rating = normalized_rating
                     updated = True
                 if info.get('genre') and info.get('genre') != movie.genre:
                     movie.genre = info.get('genre')

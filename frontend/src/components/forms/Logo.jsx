@@ -210,6 +210,24 @@ const LogoForm = ({ logo = null, isOpen, onClose, onSuccess }) => {
     }
   };
 
+  const handleUrlBlur = (event) => {
+    const urlValue = event.target.value;
+    if (urlValue) {
+      try {
+        const url = new URL(urlValue);
+        const pathname = url.pathname;
+        const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+        const nameWithoutExtension = filename.replace(/\.[^/.]+$/, '');
+        if (nameWithoutExtension) {
+          formik.setFieldValue('name', nameWithoutExtension);
+        }
+      } catch (error) {
+        // If the URL is invalid, do nothing.
+        // The validation schema will catch this.
+      }
+    }
+  };
+
   // Clean up object URLs when component unmounts or preview changes
   useEffect(() => {
     return () => {
@@ -322,6 +340,7 @@ const LogoForm = ({ logo = null, isOpen, onClose, onSuccess }) => {
             placeholder="https://example.com/logo.png"
             {...formik.getFieldProps('url')}
             onChange={handleUrlChange}
+            onBlur={handleUrlBlur}
             error={formik.touched.url && formik.errors.url}
             disabled={!!selectedFile} // Disable when file is selected
           />

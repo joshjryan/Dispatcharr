@@ -134,6 +134,7 @@ else:
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "secret"),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": int(os.environ.get("POSTGRES_PORT", 5432)),
+            "CONN_MAX_AGE": DATABASE_CONN_MAX_AGE,
         }
     }
 
@@ -210,6 +211,10 @@ CELERY_BEAT_SCHEDULE = {
     "scan-files": {
         "task": "core.tasks.scan_and_process_files",  # Direct task call
         "schedule": 20.0,  # Every 20 seconds
+    },
+    "maintain-recurring-recordings": {
+        "task": "apps.channels.tasks.maintain_recurring_recordings",
+        "schedule": 3600.0,  # Once an hour ensure recurring schedules stay ahead
     },
 }
 

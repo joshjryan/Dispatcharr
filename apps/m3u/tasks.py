@@ -488,25 +488,29 @@ def process_groups(account, groups):
     }
     logger.info(f"Currently {len(existing_groups)} existing groups")
 
-    group_objs = []
+    # Check if we should auto-enable new groups based on account settings
+    account_custom_props = account.custom_properties or {}
+    auto_enable_new_groups_live = account_custom_props.get("auto_enable_new_groups_live", True)
+
+    # Separate existing groups from groups that need to be created
+    existing_group_objs = []
     groups_to_create = []
+
     for group_name, custom_props in groups.items():
-        logger.debug(f"Handling group for M3U account {account.id}: {group_name}")
-
-        if group_name not in existing_groups:
-            groups_to_create.append(
-                ChannelGroup(
-                    name=group_name,
-                )
-            )
+        if group_name in existing_groups:
+            existing_group_objs.append(existing_groups[group_name])
         else:
-            group_objs.append(existing_groups[group_name])
+            groups_to_create.append(ChannelGroup(name=group_name))
 
+    # Create new groups and fetch them back with IDs
+    newly_created_group_objs = []
     if groups_to_create:
-        logger.debug(f"Creating {len(groups_to_create)} groups")
-        created = ChannelGroup.bulk_create_and_fetch(groups_to_create)
-        logger.debug(f"Created {len(created)} groups")
-        group_objs.extend(created)
+        logger.info(f"Creating {len(groups_to_create)} new groups for account {account.id}")
+        newly_created_group_objs = list(ChannelGroup.bulk_create_and_fetch(groups_to_create))
+        logger.debug(f"Successfully created {len(newly_created_group_objs)} new groups")
+
+    # Combine all groups
+    all_group_objs = existing_group_objs + newly_created_group_objs
 
     # Get existing relationships for this account
     existing_relationships = {
@@ -536,7 +540,7 @@ def process_groups(account, groups):
             relations_to_delete.append(rel)
             logger.debug(f"Marking relationship for deletion: group '{group_name}' no longer exists in source for account {account.id}")
 
-    for group in group_objs:
+    for group in all_group_objs:
         custom_props = groups.get(group.name, {})
 
         if group.name in existing_relationships:
@@ -566,35 +570,17 @@ def process_groups(account, groups):
             else:
                 logger.debug(f"xc_id unchanged for group '{group.name}' - account {account.id}")
         else:
-            # Create new relationship - but check if there's an existing relationship that might have user settings
-            # This can happen if the group was temporarily removed and is now back
-            try:
-                potential_existing = ChannelGroupM3UAccount.objects.filter(
-                    m3u_account=account,
-                    channel_group=group
-                ).first()
+            # Create new relationship - this group is new to this M3U account
+            # Use the auto_enable setting to determine if it should start enabled
+            if not auto_enable_new_groups_live:
+                logger.info(f"Group '{group.name}' is new to account {account.id} - creating relationship but DISABLED (auto_enable_new_groups_live=False)")
 
-                if potential_existing:
-                    # Merge with existing custom properties to preserve user settings
-                    existing_custom_props = potential_existing.custom_properties or {}
-
-                    # Merge new properties with existing ones
-                    merged_custom_props = existing_custom_props.copy()
-                    merged_custom_props.update(custom_props)
-                    custom_props = merged_custom_props
-                    logger.debug(f"Merged custom properties for existing relationship: group '{group.name}' - account {account.id}")
-            except Exception as e:
-                logger.debug(f"Could not check for existing relationship: {str(e)}")
-                # Fall back to using just the new custom properties
-                pass
-
-            # Create new relationship
             relations_to_create.append(
                 ChannelGroupM3UAccount(
                     channel_group=group,
                     m3u_account=account,
                     custom_properties=custom_props,
-                    enabled=True,  # Default to enabled
+                    enabled=auto_enable_new_groups_live,
                 )
             )
 
@@ -2523,76 +2509,75 @@ def refresh_single_m3u_account(account_id):
 
             if not all_xc_streams:
                 logger.warning("No streams collected from XC groups")
-                return f"No streams found for XC account {account_id}", None
+            else:
+                # Now batch by stream count (like standard M3U processing)
+                batches = [
+                    all_xc_streams[i : i + BATCH_SIZE]
+                    for i in range(0, len(all_xc_streams), BATCH_SIZE)
+                ]
 
-            # Now batch by stream count (like standard M3U processing)
-            batches = [
-                all_xc_streams[i : i + BATCH_SIZE]
-                for i in range(0, len(all_xc_streams), BATCH_SIZE)
-            ]
+                logger.info(f"Processing {len(all_xc_streams)} XC streams in {len(batches)} batches")
 
-            logger.info(f"Processing {len(all_xc_streams)} XC streams in {len(batches)} batches")
+                # Use threading for XC stream processing - now with consistent batch sizes
+                max_workers = min(4, len(batches))
+                logger.debug(f"Using {max_workers} threads for XC stream processing")
 
-            # Use threading for XC stream processing - now with consistent batch sizes
-            max_workers = min(4, len(batches))
-            logger.debug(f"Using {max_workers} threads for XC stream processing")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit stream batch processing tasks (reuse standard M3U processing)
+                    future_to_batch = {
+                        executor.submit(process_m3u_batch_direct, account_id, batch, existing_groups, hash_keys): i
+                        for i, batch in enumerate(batches)
+                    }
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit stream batch processing tasks (reuse standard M3U processing)
-                future_to_batch = {
-                    executor.submit(process_m3u_batch_direct, account_id, batch, existing_groups, hash_keys): i
-                    for i, batch in enumerate(batches)
-                }
+                    completed_batches = 0
+                    total_batches = len(batches)
 
-                completed_batches = 0
-                total_batches = len(batches)
+                    # Process completed batches as they finish
+                    for future in as_completed(future_to_batch):
+                        batch_idx = future_to_batch[future]
+                        try:
+                            result = future.result()
+                            completed_batches += 1
 
-                # Process completed batches as they finish
-                for future in as_completed(future_to_batch):
-                    batch_idx = future_to_batch[future]
-                    try:
-                        result = future.result()
-                        completed_batches += 1
+                            # Extract stream counts from result
+                            if isinstance(result, str):
+                                try:
+                                    created_match = re.search(r"(\d+) created", result)
+                                    updated_match = re.search(r"(\d+) updated", result)
+                                    if created_match and updated_match:
+                                        created_count = int(created_match.group(1))
+                                        updated_count = int(updated_match.group(1))
+                                        streams_created += created_count
+                                        streams_updated += updated_count
+                                except (AttributeError, ValueError):
+                                    pass
 
-                        # Extract stream counts from result
-                        if isinstance(result, str):
-                            try:
-                                created_match = re.search(r"(\d+) created", result)
-                                updated_match = re.search(r"(\d+) updated", result)
-                                if created_match and updated_match:
-                                    created_count = int(created_match.group(1))
-                                    updated_count = int(updated_match.group(1))
-                                    streams_created += created_count
-                                    streams_updated += updated_count
-                            except (AttributeError, ValueError):
-                                pass
+                            # Send progress update
+                            progress = int((completed_batches / total_batches) * 100)
+                            current_elapsed = time.time() - start_time
 
-                        # Send progress update
-                        progress = int((completed_batches / total_batches) * 100)
-                        current_elapsed = time.time() - start_time
+                            if progress > 0:
+                                estimated_total = (current_elapsed / progress) * 100
+                                time_remaining = max(0, estimated_total - current_elapsed)
+                            else:
+                                time_remaining = 0
 
-                        if progress > 0:
-                            estimated_total = (current_elapsed / progress) * 100
-                            time_remaining = max(0, estimated_total - current_elapsed)
-                        else:
-                            time_remaining = 0
+                            send_m3u_update(
+                                account_id,
+                                "parsing",
+                                progress,
+                                elapsed_time=current_elapsed,
+                                time_remaining=time_remaining,
+                                streams_processed=streams_created + streams_updated,
+                            )
 
-                        send_m3u_update(
-                            account_id,
-                            "parsing",
-                            progress,
-                            elapsed_time=current_elapsed,
-                            time_remaining=time_remaining,
-                            streams_processed=streams_created + streams_updated,
-                        )
+                            logger.debug(f"XC thread batch {completed_batches}/{total_batches} completed")
 
-                        logger.debug(f"XC thread batch {completed_batches}/{total_batches} completed")
+                        except Exception as e:
+                            logger.error(f"Error in XC thread batch {batch_idx}: {str(e)}")
+                            completed_batches += 1  # Still count it to avoid hanging
 
-                    except Exception as e:
-                        logger.error(f"Error in XC thread batch {batch_idx}: {str(e)}")
-                        completed_batches += 1  # Still count it to avoid hanging
-
-            logger.info(f"XC thread-based processing completed for account {account_id}")
+                logger.info(f"XC thread-based processing completed for account {account_id}")
 
         # Ensure all database transactions are committed before cleanup
         logger.info(
@@ -2673,7 +2658,16 @@ def refresh_single_m3u_account(account_id):
     release_task_lock("refresh_single_m3u_account", account_id)
 
     # Aggressive garbage collection
-    del existing_groups, extinf_data, groups, batches
+    # Only delete variables if they exist
+    if 'existing_groups' in locals():
+        del existing_groups
+    if 'extinf_data' in locals():
+        del extinf_data
+    if 'groups' in locals():
+        del groups
+    if 'batches' in locals():
+        del batches
+
     from core.utils import cleanup_memory
 
     cleanup_memory(log_usage=True, force_collection=True)
