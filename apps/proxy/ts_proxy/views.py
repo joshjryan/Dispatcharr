@@ -128,7 +128,7 @@ def stream_ts(request, channel_id):
                 ChannelService.stop_channel(channel_id)
 
             # Use fixed retry interval and timeout
-            retry_timeout = 1.5  # 1.5 seconds total timeout
+            retry_timeout = 3  # 3 seconds total timeout
             retry_interval = 0.1  # 100ms between attempts
             wait_start_time = time.time()
 
@@ -138,9 +138,10 @@ def stream_ts(request, channel_id):
             profile_value = None
             error_reason = None
             attempt = 0
+            should_retry = True
 
             # Try to get a stream with fixed interval retries
-            while time.time() - wait_start_time < retry_timeout:
+            while should_retry and time.time() - wait_start_time < retry_timeout:
                 attempt += 1
                 stream_url, stream_user_agent, transcode, profile_value = (
                     generate_stream_url(channel_id)
@@ -152,35 +153,53 @@ def stream_ts(request, channel_id):
                     )
                     break
 
-                # If we failed because there are no streams assigned, don't retry
-                _, _, error_reason = channel.get_stream()
-                if error_reason and "maximum connection limits" not in error_reason:
-                    logger.warning(
-                        f"[{client_id}] Can't retry - error not related to connection limits: {error_reason}"
+                # On first failure, check if the error is retryable
+                if attempt == 1:
+                    _, _, error_reason = channel.get_stream()
+                    if error_reason and "maximum connection limits" not in error_reason:
+                        logger.warning(
+                            f"[{client_id}] Can't retry - error not related to connection limits: {error_reason}"
+                        )
+                        should_retry = False
+                        break
+
+                # Check if we have time remaining for another sleep cycle
+                elapsed_time = time.time() - wait_start_time
+                remaining_time = retry_timeout - elapsed_time
+
+                # If we don't have enough time for the next sleep interval, break
+                # but only after we've already made an attempt (the while condition will try one more time)
+                if remaining_time <= retry_interval:
+                    logger.info(
+                        f"[{client_id}] Insufficient time ({remaining_time:.1f}s) for another sleep cycle, will make one final attempt"
                     )
                     break
 
-                # Wait 100ms before retrying
-                elapsed_time = time.time() - wait_start_time
-                remaining_time = retry_timeout - elapsed_time
-                if remaining_time > retry_interval:
+                # Wait before retrying
+                logger.info(
+                    f"[{client_id}] Waiting {retry_interval*1000:.0f}ms for a connection to become available (attempt {attempt}, {remaining_time:.1f}s remaining)"
+                )
+                gevent.sleep(retry_interval)
+                retry_interval += 0.025  # Increase wait time by 25ms for next attempt
+
+            # Make one final attempt if we still don't have a stream, should retry, and haven't exceeded timeout
+            if stream_url is None and should_retry and time.time() - wait_start_time < retry_timeout:
+                attempt += 1
+                logger.info(
+                    f"[{client_id}] Making final attempt {attempt} at timeout boundary"
+                )
+                stream_url, stream_user_agent, transcode, profile_value = (
+                    generate_stream_url(channel_id)
+                )
+                if stream_url is not None:
                     logger.info(
-                        f"[{client_id}] Waiting {retry_interval*1000:.0f}ms for a connection to become available (attempt {attempt}, {remaining_time:.1f}s remaining)"
+                        f"[{client_id}] Successfully obtained stream on final attempt for channel {channel_id}"
                     )
-                    gevent.sleep(retry_interval)
-                    retry_interval += 0.025  # Increase wait time by 25ms for next attempt
 
             if stream_url is None:
-                # Make sure to release any stream locks that might have been acquired
-                if hasattr(channel, "streams") and channel.streams.exists():
-                    for stream in channel.streams.all():
-                        try:
-                            stream.release_stream()
-                            logger.info(
-                                f"[{client_id}] Released stream {stream.id} for channel {channel_id}"
-                            )
-                        except Exception as e:
-                            logger.error(f"[{client_id}] Error releasing stream: {e}")
+                # Release the channel's stream lock if one was acquired
+                # Note: Only call this if get_stream() actually assigned a stream
+                # In our case, if stream_url is None, no stream was ever assigned, so don't release
 
                 # Get the specific error message if available
                 wait_duration = f"{int(time.time() - wait_start_time)}s"
@@ -188,6 +207,9 @@ def stream_ts(request, channel_id):
                     error_reason
                     if error_reason
                     else "No available streams for this channel"
+                )
+                logger.info(
+                    f"[{client_id}] Failed to obtain stream after {attempt} attempts over {wait_duration}: {error_msg}"
                 )
                 return JsonResponse(
                     {"error": error_msg, "waited": wait_duration}, status=503
