@@ -16,11 +16,19 @@ import {
   Box,
   MultiSelect,
   Tooltip,
+  Popover,
+  ScrollArea,
+  Center,
 } from '@mantine/core';
 import { Info } from 'lucide-react';
 import useChannelsStore from '../../store/channels';
 import useStreamProfilesStore from '../../store/streamProfiles';
 import { CircleCheck, CircleX } from 'lucide-react';
+import { useChannelLogoSelection } from '../../hooks/useSmartLogos';
+import { FixedSizeList as List } from 'react-window';
+import LazyLogo from '../LazyLogo';
+import LogoForm from './Logo';
+import logo from '../../images/logo.png';
 
 // Custom item component for MultiSelect with tooltip
 const OptionWithTooltip = forwardRef(
@@ -46,6 +54,20 @@ const LiveGroupFilter = ({
   const fetchStreamProfiles = useStreamProfilesStore((s) => s.fetchProfiles);
   const [groupFilter, setGroupFilter] = useState('');
 
+  // Logo selection functionality
+  const {
+    logos: channelLogos,
+    ensureLogosLoaded,
+    isLoading: logosLoading,
+  } = useChannelLogoSelection();
+  const [logoModalOpen, setLogoModalOpen] = useState(false);
+  const [currentEditingGroupId, setCurrentEditingGroupId] = useState(null);
+
+  // Ensure logos are loaded when component mounts
+  useEffect(() => {
+    ensureLogosLoaded();
+  }, [ensureLogosLoaded]);
+
   // Fetch stream profiles when component mounts
   useEffect(() => {
     if (streamProfiles.length === 0) {
@@ -68,7 +90,7 @@ const LiveGroupFilter = ({
               typeof group.custom_properties === 'string'
                 ? JSON.parse(group.custom_properties)
                 : group.custom_properties;
-          } catch (e) {
+          } catch {
             customProps = {};
           }
         }
@@ -115,21 +137,27 @@ const LiveGroupFilter = ({
     );
   };
 
-  // Toggle force_dummy_epg in custom_properties for a group
-  const toggleForceDummyEPG = (id) => {
-    setGroupStates(
-      groupStates.map((state) => {
-        if (state.channel_group == id) {
-          const customProps = { ...(state.custom_properties || {}) };
-          customProps.force_dummy_epg = !customProps.force_dummy_epg;
-          return {
-            ...state,
-            custom_properties: customProps,
-          };
-        }
-        return state;
-      })
-    );
+  // Handle logo selection from LogoForm
+  const handleLogoSuccess = ({ logo }) => {
+    if (logo && logo.id && currentEditingGroupId !== null) {
+      setGroupStates(
+        groupStates.map((state) => {
+          if (state.channel_group === currentEditingGroupId) {
+            return {
+              ...state,
+              custom_properties: {
+                ...state.custom_properties,
+                custom_logo_id: logo.id,
+              },
+            };
+          }
+          return state;
+        })
+      );
+      ensureLogosLoaded(); // Refresh logos
+    }
+    setLogoModalOpen(false);
+    setCurrentEditingGroupId(null);
   };
 
   const selectAll = () => {
@@ -311,6 +339,12 @@ const LiveGroupFilter = ({
                             description:
                               'Assign a specific stream profile to all channels in this group during auto sync',
                           },
+                          {
+                            value: 'custom_logo',
+                            label: 'Custom Logo',
+                            description:
+                              'Assign a custom logo to all auto-synced channels in this group',
+                          },
                         ]}
                         itemComponent={OptionWithTooltip}
                         value={(() => {
@@ -355,6 +389,12 @@ const LiveGroupFilter = ({
                             undefined
                           ) {
                             selectedValues.push('stream_profile_assignment');
+                          }
+                          if (
+                            group.custom_properties?.custom_logo_id !==
+                            undefined
+                          ) {
+                            selectedValues.push('custom_logo');
                           }
                           return selectedValues;
                         })()}
@@ -473,6 +513,17 @@ const LiveGroupFilter = ({
                                   }
                                 } else {
                                   delete newCustomProps.stream_profile_id;
+                                }
+
+                                // Handle custom_logo
+                                if (selectedOptions.includes('custom_logo')) {
+                                  if (
+                                    newCustomProps.custom_logo_id === undefined
+                                  ) {
+                                    newCustomProps.custom_logo_id = null;
+                                  }
+                                } else {
+                                  delete newCustomProps.custom_logo_id;
                                 }
 
                                 return {
@@ -801,6 +852,242 @@ const LiveGroupFilter = ({
                           />
                         </Tooltip>
                       )}
+
+                      {/* Show logo selector only if custom_logo is selected */}
+                      {group.custom_properties?.custom_logo_id !==
+                        undefined && (
+                        <Box>
+                          <Group justify="space-between">
+                            <Popover
+                              opened={group.logoPopoverOpened || false}
+                              onChange={(opened) => {
+                                setGroupStates(
+                                  groupStates.map((state) => {
+                                    if (
+                                      state.channel_group ===
+                                      group.channel_group
+                                    ) {
+                                      return {
+                                        ...state,
+                                        logoPopoverOpened: opened,
+                                      };
+                                    }
+                                    return state;
+                                  })
+                                );
+                                if (opened) {
+                                  ensureLogosLoaded();
+                                }
+                              }}
+                              withArrow
+                            >
+                              <Popover.Target>
+                                <TextInput
+                                  label="Custom Logo"
+                                  readOnly
+                                  value={
+                                    channelLogos[
+                                      group.custom_properties?.custom_logo_id
+                                    ]?.name || 'Default'
+                                  }
+                                  onClick={() => {
+                                    setGroupStates(
+                                      groupStates.map((state) => {
+                                        if (
+                                          state.channel_group ===
+                                          group.channel_group
+                                        ) {
+                                          return {
+                                            ...state,
+                                            logoPopoverOpened: true,
+                                          };
+                                        }
+                                        return {
+                                          ...state,
+                                          logoPopoverOpened: false,
+                                        };
+                                      })
+                                    );
+                                  }}
+                                  size="xs"
+                                />
+                              </Popover.Target>
+
+                              <Popover.Dropdown
+                                onMouseDown={(e) => e.stopPropagation()}
+                              >
+                                <Group>
+                                  <TextInput
+                                    placeholder="Filter logos..."
+                                    size="xs"
+                                    value={group.logoFilter || ''}
+                                    onChange={(e) => {
+                                      const val = e.currentTarget.value;
+                                      setGroupStates(
+                                        groupStates.map((state) =>
+                                          state.channel_group ===
+                                          group.channel_group
+                                            ? {
+                                                ...state,
+                                                logoFilter: val,
+                                              }
+                                            : state
+                                        )
+                                      );
+                                    }}
+                                  />
+                                  {logosLoading && (
+                                    <Text size="xs" c="dimmed">
+                                      Loading...
+                                    </Text>
+                                  )}
+                                </Group>
+
+                                <ScrollArea style={{ height: 200 }}>
+                                  {(() => {
+                                    const logoOptions = [
+                                      { id: '0', name: 'Default' },
+                                      ...Object.values(channelLogos),
+                                    ];
+                                    const filteredLogos = logoOptions.filter(
+                                      (logo) =>
+                                        logo.name
+                                          .toLowerCase()
+                                          .includes(
+                                            (
+                                              group.logoFilter || ''
+                                            ).toLowerCase()
+                                          )
+                                    );
+
+                                    if (filteredLogos.length === 0) {
+                                      return (
+                                        <Center style={{ height: 200 }}>
+                                          <Text size="sm" c="dimmed">
+                                            {group.logoFilter
+                                              ? 'No logos match your filter'
+                                              : 'No logos available'}
+                                          </Text>
+                                        </Center>
+                                      );
+                                    }
+
+                                    return (
+                                      <List
+                                        height={200}
+                                        itemCount={filteredLogos.length}
+                                        itemSize={55}
+                                        style={{ width: '100%' }}
+                                      >
+                                        {({ index, style }) => {
+                                          const logoItem = filteredLogos[index];
+                                          return (
+                                            <div
+                                              style={{
+                                                ...style,
+                                                cursor: 'pointer',
+                                                padding: '5px',
+                                                borderRadius: '4px',
+                                              }}
+                                              onClick={() => {
+                                                setGroupStates(
+                                                  groupStates.map((state) => {
+                                                    if (
+                                                      state.channel_group ===
+                                                      group.channel_group
+                                                    ) {
+                                                      return {
+                                                        ...state,
+                                                        custom_properties: {
+                                                          ...state.custom_properties,
+                                                          custom_logo_id:
+                                                            logoItem.id,
+                                                        },
+                                                        logoPopoverOpened: false,
+                                                      };
+                                                    }
+                                                    return state;
+                                                  })
+                                                );
+                                              }}
+                                              onMouseEnter={(e) => {
+                                                e.currentTarget.style.backgroundColor =
+                                                  'rgb(68, 68, 68)';
+                                              }}
+                                              onMouseLeave={(e) => {
+                                                e.currentTarget.style.backgroundColor =
+                                                  'transparent';
+                                              }}
+                                            >
+                                              <Center
+                                                style={{
+                                                  flexDirection: 'column',
+                                                  gap: '2px',
+                                                }}
+                                              >
+                                                <img
+                                                  src={
+                                                    logoItem.cache_url || logo
+                                                  }
+                                                  height="30"
+                                                  style={{
+                                                    maxWidth: 80,
+                                                    objectFit: 'contain',
+                                                  }}
+                                                  alt={logoItem.name || 'Logo'}
+                                                  onError={(e) => {
+                                                    if (e.target.src !== logo) {
+                                                      e.target.src = logo;
+                                                    }
+                                                  }}
+                                                />
+                                                <Text
+                                                  size="xs"
+                                                  c="dimmed"
+                                                  ta="center"
+                                                  style={{
+                                                    maxWidth: 80,
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap',
+                                                  }}
+                                                >
+                                                  {logoItem.name || 'Default'}
+                                                </Text>
+                                              </Center>
+                                            </div>
+                                          );
+                                        }}
+                                      </List>
+                                    );
+                                  })()}
+                                </ScrollArea>
+                              </Popover.Dropdown>
+                            </Popover>
+
+                            <Stack gap="xs" align="center">
+                              <LazyLogo
+                                logoId={group.custom_properties?.custom_logo_id}
+                                alt="custom logo"
+                                style={{ height: 40 }}
+                              />
+                            </Stack>
+                          </Group>
+
+                          <Button
+                            onClick={() => {
+                              setCurrentEditingGroupId(group.channel_group);
+                              setLogoModalOpen(true);
+                            }}
+                            fullWidth
+                            variant="default"
+                            size="xs"
+                            mt="xs"
+                          >
+                            Upload or Create Logo
+                          </Button>
+                        </Box>
+                      )}
                     </>
                   )}
                 </Stack>
@@ -808,6 +1095,16 @@ const LiveGroupFilter = ({
             ))}
         </SimpleGrid>
       </Box>
+
+      {/* Logo Upload Modal */}
+      <LogoForm
+        isOpen={logoModalOpen}
+        onClose={() => {
+          setLogoModalOpen(false);
+          setCurrentEditingGroupId(null);
+        }}
+        onSuccess={handleLogoSuccess}
+      />
     </Stack>
   );
 };

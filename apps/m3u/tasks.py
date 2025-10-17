@@ -1557,6 +1557,7 @@ def sync_auto_channels(account_id, scan_start_time=None):
             channel_sort_order = None
             channel_sort_reverse = False
             stream_profile_id = None
+            custom_logo_id = None
             if group_relation.custom_properties:
                 group_custom_props = group_relation.custom_properties
                 force_dummy_epg = group_custom_props.get("force_dummy_epg", False)
@@ -1572,6 +1573,7 @@ def sync_auto_channels(account_id, scan_start_time=None):
                     "channel_sort_reverse", False
                 )
                 stream_profile_id = group_custom_props.get("stream_profile_id")
+                custom_logo_id = group_custom_props.get("custom_logo_id")
 
             # Determine which group to use for created channels
             target_group = channel_group
@@ -1947,7 +1949,28 @@ def sync_auto_channels(account_id, scan_start_time=None):
                             channel.save(update_fields=["epg_data"])
 
                         # Handle logo
-                        if stream.logo_url:
+                        if custom_logo_id:
+                            # Use the custom logo specified in group settings
+                            from apps.channels.models import Logo
+                            try:
+                                custom_logo = Logo.objects.get(id=custom_logo_id)
+                                channel.logo = custom_logo
+                                channel.save(update_fields=["logo"])
+                            except Logo.DoesNotExist:
+                                logger.warning(
+                                    f"Custom logo with ID {custom_logo_id} not found, falling back to stream logo"
+                                )
+                                # Fall back to stream logo if custom logo not found
+                                if stream.logo_url:
+                                    logo, _ = Logo.objects.get_or_create(
+                                        url=stream.logo_url,
+                                        defaults={
+                                            "name": stream.name or stream.tvg_id or "Unknown"
+                                        },
+                                    )
+                                    channel.logo = logo
+                                    channel.save(update_fields=["logo"])
+                        elif stream.logo_url:
                             from apps.channels.models import Logo
 
                             logo, _ = Logo.objects.get_or_create(
