@@ -1477,6 +1477,7 @@ export default function TVChannelGuide({ startDate, endDate }) {
 
           {filteredChannels.length > 0 ? (
             <VariableSizeList
+              className="guide-list-outer"
               height={virtualizedHeight}
               width={virtualizedWidth}
               itemCount={filteredChannels.length}
