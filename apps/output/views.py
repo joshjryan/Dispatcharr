@@ -905,8 +905,26 @@ def generate_epg(request, profile_name=None, user=None):
 
             # Use EPG data name for display, but channel name for pattern matching
             display_name = channel.epg_data.name if channel.epg_data else channel.name
-            # For dummy EPG pattern matching, always use the actual channel name
+            # For dummy EPG pattern matching, determine which name to use
             pattern_match_name = channel.name
+
+            # Check if we should use stream name instead of channel name
+            if channel.epg_data and channel.epg_data.epg_source:
+                epg_source = channel.epg_data.epg_source
+                if epg_source.custom_properties:
+                    custom_props = epg_source.custom_properties
+                    name_source = custom_props.get('name_source')
+
+                    if name_source == 'stream':
+                        stream_index = custom_props.get('stream_index', 1) - 1
+                        channel_streams = channel.streams.all().order_by('channelstream__order')
+
+                        if channel_streams.exists() and 0 <= stream_index < channel_streams.count():
+                            stream = list(channel_streams)[stream_index]
+                            pattern_match_name = stream.name
+                            logger.debug(f"Using stream name for parsing: {pattern_match_name} (stream index: {stream_index})")
+                        else:
+                            logger.warning(f"Stream index {stream_index} not found for channel {channel.name}, falling back to channel name")
 
             if not channel.epg_data:
                 # Use the enhanced dummy EPG generation function with defaults
