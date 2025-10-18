@@ -1828,7 +1828,25 @@ def sync_auto_channels(account_id, scan_start_time=None):
 
                         # Handle logo updates
                         current_logo = None
-                        if stream.logo_url:
+                        if custom_logo_id:
+                            # Use the custom logo specified in group settings
+                            from apps.channels.models import Logo
+                            try:
+                                current_logo = Logo.objects.get(id=custom_logo_id)
+                            except Logo.DoesNotExist:
+                                logger.warning(
+                                    f"Custom logo with ID {custom_logo_id} not found for existing channel, falling back to stream logo"
+                                )
+                                # Fall back to stream logo if custom logo not found
+                                if stream.logo_url:
+                                    current_logo, _ = Logo.objects.get_or_create(
+                                        url=stream.logo_url,
+                                        defaults={
+                                            "name": stream.name or stream.tvg_id or "Unknown"
+                                        },
+                                    )
+                        elif stream.logo_url:
+                            # No custom logo configured, use stream logo
                             from apps.channels.models import Logo
 
                             current_logo, _ = Logo.objects.get_or_create(
