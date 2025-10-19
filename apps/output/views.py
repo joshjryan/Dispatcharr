@@ -531,9 +531,13 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
                 ).date()
                 logger.debug(f"Using extracted date: {current_date}")
             else:
-                # No date extracted, use day offset from current time (existing behavior)
-                current_date = (now + timedelta(days=day)).date()
-                logger.debug(f"No date extracted, using day offset: {current_date}")
+                # No date extracted, use day offset from current time in SOURCE timezone
+                # This ensures we calculate "today" in the event's timezone, not UTC
+                # For example: 8:30 PM Central (1:30 AM UTC next day) for a 10 PM ET event
+                # should use today's date in ET, not tomorrow's date in UTC
+                now_in_source_tz = now.astimezone(source_tz)
+                current_date = (now_in_source_tz + timedelta(days=day)).date()
+                logger.debug(f"No date extracted, using day offset in {source_tz}: {current_date}")
 
             # Create a naive datetime (no timezone info) representing the event in source timezone
             event_start_naive = datetime.combine(
