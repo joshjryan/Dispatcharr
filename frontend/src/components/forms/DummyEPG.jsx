@@ -42,6 +42,7 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
         time_pattern: '',
         date_pattern: '',
         timezone: 'US/Eastern',
+        output_timezone: '',
         program_duration: 180,
         sample_title: '',
         title_template: '',
@@ -192,6 +193,7 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             custom.timezone ||
             custom.timezone_offset?.toString() ||
             'US/Eastern',
+          output_timezone: custom.output_timezone || '',
           program_duration: custom.program_duration || 180,
           sample_title: custom.sample_title || '',
           title_template: custom.title_template || '',
@@ -757,7 +759,7 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             </Box>
           )}
 
-          <Group position="right" mt="md">
+          <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={onClose}>
               Cancel
             </Button>

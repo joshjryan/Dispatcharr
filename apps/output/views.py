@@ -355,7 +355,7 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     except pytz.exceptions.UnknownTimeZoneError:
         logger.warning(f"Unknown timezone: {timezone_value}, defaulting to UTC")
         source_tz = pytz.utc
-    
+
     # Parse output timezone if provided (for display purposes)
     output_tz = None
     if output_timezone_value:
@@ -510,7 +510,7 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     if time_info:
         hour_24 = time_info['hour']
         minute = time_info['minute']
-        
+
         # If output_timezone is specified, convert the display time to that timezone
         if output_tz:
             # Create a datetime in the source timezone
