@@ -203,7 +203,7 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
 
           // Format 24-hour time string with converted time
           if (convertedMinute > 0) {
-            allGroups.time24 = `${hour24}:${convertedMinute.toString().padStart(2, '0')}`;
+            allGroups.time24 = `${hour24.toString().padStart(2, '0')}:${convertedMinute.toString().padStart(2, '0')}`;
           } else {
             allGroups.time24 = `${hour24.toString().padStart(2, '0')}:00`;
           }
@@ -227,7 +227,7 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
           // No timezone conversion - use original logic
           // Format 24-hour time string
           if (minute > 0) {
-            allGroups.time24 = `${hour24}:${minute.toString().padStart(2, '0')}`;
+            allGroups.time24 = `${hour24.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
           } else {
             allGroups.time24 = `${hour24.toString().padStart(2, '0')}:00`;
           }
