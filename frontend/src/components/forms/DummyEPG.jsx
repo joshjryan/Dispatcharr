@@ -151,6 +151,50 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
       ...result.dateGroups,
     };
 
+    // Calculate formatted time strings if time was extracted
+    if (result.timeGroups.hour) {
+      try {
+        let hour24 = parseInt(result.timeGroups.hour);
+        const minute = result.timeGroups.minute
+          ? parseInt(result.timeGroups.minute)
+          : 0;
+        const ampm = result.timeGroups.ampm?.toLowerCase();
+
+        // Convert to 24-hour if AM/PM present
+        if (ampm === 'pm' && hour24 !== 12) {
+          hour24 += 12;
+        } else if (ampm === 'am' && hour24 === 12) {
+          hour24 = 0;
+        }
+
+        // Format 24-hour time string
+        if (minute > 0) {
+          allGroups.time24 = `${hour24}:${minute.toString().padStart(2, '0')}`;
+        } else {
+          allGroups.time24 = `${hour24.toString().padStart(2, '0')}:00`;
+        }
+
+        // Convert to 12-hour format
+        const ampmDisplay = hour24 < 12 ? 'AM' : 'PM';
+        let hour12 = hour24;
+        if (hour24 === 0) {
+          hour12 = 12;
+        } else if (hour24 > 12) {
+          hour12 = hour24 - 12;
+        }
+
+        // Format 12-hour time string
+        if (minute > 0) {
+          allGroups.time = `${hour12}:${minute.toString().padStart(2, '0')} ${ampmDisplay}`;
+        } else {
+          allGroups.time = `${hour12} ${ampmDisplay}`;
+        }
+      } catch (e) {
+        // If parsing fails, leave time/time24 as placeholders
+        console.error('Error formatting time:', e);
+      }
+    }
+
     // Format title template
     if (titleTemplate && (result.titleMatch || result.timeMatch)) {
       result.formattedTitle = titleTemplate.replace(
