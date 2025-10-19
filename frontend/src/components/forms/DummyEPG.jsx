@@ -92,6 +92,10 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
       dateGroups: {},
       formattedTitle: '',
       formattedDescription: '',
+      formattedUpcomingTitle: '',
+      formattedUpcomingDescription: '',
+      formattedEndedTitle: '',
+      formattedEndedDescription: '',
       error: null,
     };
 
@@ -211,6 +215,41 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
       );
     }
 
+    // Format upcoming title template
+    if (upcomingTitleTemplate && (result.titleMatch || result.timeMatch)) {
+      result.formattedUpcomingTitle = upcomingTitleTemplate.replace(
+        /\{(\w+)\}/g,
+        (match, key) => allGroups[key] || match
+      );
+    }
+
+    // Format upcoming description template
+    if (
+      upcomingDescriptionTemplate &&
+      (result.titleMatch || result.timeMatch)
+    ) {
+      result.formattedUpcomingDescription = upcomingDescriptionTemplate.replace(
+        /\{(\w+)\}/g,
+        (match, key) => allGroups[key] || match
+      );
+    }
+
+    // Format ended title template
+    if (endedTitleTemplate && (result.titleMatch || result.timeMatch)) {
+      result.formattedEndedTitle = endedTitleTemplate.replace(
+        /\{(\w+)\}/g,
+        (match, key) => allGroups[key] || match
+      );
+    }
+
+    // Format ended description template
+    if (endedDescriptionTemplate && (result.titleMatch || result.timeMatch)) {
+      result.formattedEndedDescription = endedDescriptionTemplate.replace(
+        /\{(\w+)\}/g,
+        (match, key) => allGroups[key] || match
+      );
+    }
+
     return result;
   }, [
     titlePattern,
@@ -219,6 +258,10 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
     sampleTitle,
     titleTemplate,
     descriptionTemplate,
+    upcomingTitleTemplate,
+    upcomingDescriptionTemplate,
+    endedTitleTemplate,
+    endedDescriptionTemplate,
   ]);
 
   useEffect(() => {
@@ -791,12 +834,65 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
                       </>
                     )}
 
-                    {!titleTemplate && !descriptionTemplate && (
-                      <Text size="xs" c="dimmed" fs="italic">
-                        Add title or description templates above to see
-                        formatted output preview
-                      </Text>
+                    {upcomingTitleTemplate && (
+                      <>
+                        <Text size="xs" c="dimmed" mt="md">
+                          Upcoming Title (before event):
+                        </Text>
+                        <Text size="sm" fw={500}>
+                          {patternValidation.formattedUpcomingTitle ||
+                            '(no matching groups)'}
+                        </Text>
+                      </>
                     )}
+
+                    {upcomingDescriptionTemplate && (
+                      <>
+                        <Text size="xs" c="dimmed" mt="xs">
+                          Upcoming Description (before event):
+                        </Text>
+                        <Text size="sm" fw={500}>
+                          {patternValidation.formattedUpcomingDescription ||
+                            '(no matching groups)'}
+                        </Text>
+                      </>
+                    )}
+
+                    {endedTitleTemplate && (
+                      <>
+                        <Text size="xs" c="dimmed" mt="md">
+                          Ended Title (after event):
+                        </Text>
+                        <Text size="sm" fw={500}>
+                          {patternValidation.formattedEndedTitle ||
+                            '(no matching groups)'}
+                        </Text>
+                      </>
+                    )}
+
+                    {endedDescriptionTemplate && (
+                      <>
+                        <Text size="xs" c="dimmed" mt="xs">
+                          Ended Description (after event):
+                        </Text>
+                        <Text size="sm" fw={500}>
+                          {patternValidation.formattedEndedDescription ||
+                            '(no matching groups)'}
+                        </Text>
+                      </>
+                    )}
+
+                    {!titleTemplate &&
+                      !descriptionTemplate &&
+                      !upcomingTitleTemplate &&
+                      !upcomingDescriptionTemplate &&
+                      !endedTitleTemplate &&
+                      !endedDescriptionTemplate && (
+                        <Text size="xs" c="dimmed" fs="italic">
+                          Add title or description templates above to see
+                          formatted output preview
+                        </Text>
+                      )}
                   </>
                 )}
               </Stack>
