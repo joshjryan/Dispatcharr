@@ -527,6 +527,17 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             {...form.getInputProps('custom_properties.timezone')}
           />
 
+          <Select
+            label="Output Timezone (Optional)"
+            description="Display times in a different timezone than the event timezone. Leave empty to use the event timezone. Example: Event at 10 PM ET displayed as 9 PM CT."
+            placeholder="Same as event timezone"
+            data={timezoneOptions}
+            searchable
+            clearable
+            disabled={loadingTimezones}
+            {...form.getInputProps('custom_properties.output_timezone')}
+          />
+
           <NumberInput
             label="Program Duration (minutes)"
             description="Default duration for each program"

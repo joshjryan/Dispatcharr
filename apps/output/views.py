@@ -337,6 +337,7 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
 
     # Get timezone name (e.g., 'US/Eastern', 'US/Pacific', 'Europe/London')
     timezone_value = custom_properties.get('timezone', 'UTC')
+    output_timezone_value = custom_properties.get('output_timezone', '')  # Optional: display times in different timezone
     program_duration = custom_properties.get('program_duration', 180)  # Minutes
     title_template = custom_properties.get('title_template', '')
     description_template = custom_properties.get('description_template', '')
@@ -354,6 +355,16 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     except pytz.exceptions.UnknownTimeZoneError:
         logger.warning(f"Unknown timezone: {timezone_value}, defaulting to UTC")
         source_tz = pytz.utc
+    
+    # Parse output timezone if provided (for display purposes)
+    output_tz = None
+    if output_timezone_value:
+        try:
+            output_tz = pytz.timezone(output_timezone_value)
+            logger.debug(f"Using output timezone for display: {output_timezone_value}")
+        except pytz.exceptions.UnknownTimeZoneError:
+            logger.warning(f"Unknown output timezone: {output_timezone_value}, will use source timezone")
+            output_tz = None
 
     if not title_pattern:
         logger.warning(f"No title_pattern in custom_properties, falling back to default")
@@ -494,18 +505,29 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
 
     # Merge title groups, time groups, and date groups for template formatting
     all_groups = {**groups, **time_groups, **date_groups}
-    
+
     # Add formatted time strings for better display (handles minutes intelligently)
     if time_info:
         hour_24 = time_info['hour']
         minute = time_info['minute']
         
+        # If output_timezone is specified, convert the display time to that timezone
+        if output_tz:
+            # Create a datetime in the source timezone
+            temp_date = datetime.now(source_tz).replace(hour=hour_24, minute=minute, second=0, microsecond=0)
+            # Convert to output timezone
+            temp_date_output = temp_date.astimezone(output_tz)
+            # Extract converted hour and minute for display
+            hour_24 = temp_date_output.hour
+            minute = temp_date_output.minute
+            logger.debug(f"Converted display time from {source_tz} to {output_tz}: {hour_24}:{minute:02d}")
+
         # Format 24-hour time string - only include minutes if non-zero
         if minute > 0:
             all_groups['time24'] = f"{hour_24}:{minute:02d}"
         else:
             all_groups['time24'] = f"{hour_24:02d}:00"
-        
+
         # Convert 24-hour to 12-hour format for {time} placeholder
         # Note: hour_24 is ALWAYS in 24-hour format at this point (converted earlier if needed)
         ampm = 'AM' if hour_24 < 12 else 'PM'
@@ -514,7 +536,7 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
             hour_12 = 12
         elif hour_24 > 12:
             hour_12 = hour_24 - 12
-        
+
         # Format 12-hour time string - only include minutes if non-zero
         if minute > 0:
             all_groups['time'] = f"{hour_12}:{minute:02d} {ampm}"
