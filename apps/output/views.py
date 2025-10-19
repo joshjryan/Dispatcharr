@@ -425,7 +425,9 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
             time_groups = time_match.groupdict()
             try:
                 hour = int(time_groups.get('hour'))
-                minute = int(time_groups.get('minute', 0))
+                # Handle optional minute group - could be None if not captured
+                minute_value = time_groups.get('minute')
+                minute = int(minute_value) if minute_value is not None else 0
                 ampm = time_groups.get('ampm')
                 ampm = ampm.lower() if ampm else None
 
