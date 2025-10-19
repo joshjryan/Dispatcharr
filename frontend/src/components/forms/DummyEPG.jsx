@@ -402,7 +402,7 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             id="title_template"
             name="title_template"
             label="Title Template"
-            description="Format the EPG title using extracted groups. Example: {league} - {team1} vs {team2} @ {hour}:{minute}{ampm}"
+            description="Format the EPG title using extracted groups. Use {time} (12-hour: '10 PM') or {time24} (24-hour: '22:00'). Example: {league} - {team1} vs {team2} @ {time}"
             placeholder="{league} - {team1} vs {team2}"
             value={titleTemplate}
             onChange={(e) => {
@@ -416,8 +416,8 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             id="description_template"
             name="description_template"
             label="Description Template"
-            description="Format the EPG description using extracted groups. Example: Watch {team1} take on {team2} at {hour}:{minute}{ampm}!"
-            placeholder="Watch {team1} take on {team2} in this exciting {league} matchup at {hour}:{minute}{ampm}!"
+            description="Format the EPG description using extracted groups. Use {time} (12-hour) or {time24} (24-hour). Example: Watch {team1} take on {team2} at {time}!"
+            placeholder="Watch {team1} take on {team2} in this exciting {league} matchup at {time}!"
             minRows={2}
             value={descriptionTemplate}
             onChange={(e) => {
@@ -446,8 +446,8 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             id="upcoming_title_template"
             name="upcoming_title_template"
             label="Upcoming Title Template"
-            description="Title for programs before the event starts. Example: Coming Up: {team1} vs {team2}"
-            placeholder="Coming Up: {team1} vs {team2}"
+            description="Title for programs before the event starts. Use {time} (12-hour) or {time24} (24-hour). Example: {team1} vs {team2} starting at {time}."
+            placeholder="{team1} vs {team2} starting at {time}."
             value={upcomingTitleTemplate}
             onChange={(e) => {
               const value = e.target.value;
@@ -463,8 +463,8 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             id="upcoming_description_template"
             name="upcoming_description_template"
             label="Upcoming Description Template"
-            description="Description for programs before the event. Example: {league} game starts soon - {team1} vs {team2}"
-            placeholder="{league} game starts soon - {team1} vs {team2}"
+            description="Description for programs before the event. Use {time} (12-hour) or {time24} (24-hour). Example: Upcoming: Watch the {league} match up where the {team1} take on the {team2} at {time}!"
+            placeholder="Upcoming: Watch the {league} match up where the {team1} take on the {team2} at {time}!"
             minRows={2}
             value={upcomingDescriptionTemplate}
             onChange={(e) => {
@@ -481,8 +481,8 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             id="ended_title_template"
             name="ended_title_template"
             label="Ended Title Template"
-            description="Title for programs after the event has ended. Example: Game Over: {team1} vs {team2}"
-            placeholder="Game Over: {team1} vs {team2}"
+            description="Title for programs after the event has ended. Use {time} (12-hour) or {time24} (24-hour). Example: {team1} vs {team2} started at {time}."
+            placeholder="{team1} vs {team2} started at {time}."
             value={endedTitleTemplate}
             onChange={(e) => {
               const value = e.target.value;
@@ -498,8 +498,8 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             id="ended_description_template"
             name="ended_description_template"
             label="Ended Description Template"
-            description="Description for programs after the event. Example: {league} game has ended - {team1} vs {team2}"
-            placeholder="{league} game has ended - {team1} vs {team2}"
+            description="Description for programs after the event. Use {time} (12-hour) or {time24} (24-hour). Example: The {league} match between {team1} and {team2} started at {time}."
+            placeholder="The {league} match between {team1} and {team2} started at {time}."
             minRows={2}
             value={endedDescriptionTemplate}
             onChange={(e) => {
