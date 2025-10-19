@@ -21,6 +21,14 @@ for dir in "${DATA_DIRS[@]}" "${APP_DIRS[@]}"; do
     mkdir -p "$dir"
 done
 
+# Ensure /app itself is owned by PUID:PGID (needed for uwsgi socket creation)
+if [ "$(id -u)" = "0" ] && [ -d "/app" ]; then
+    if [ "$(stat -c '%u:%g' /app)" != "$PUID:$PGID" ]; then
+        echo "Fixing ownership for /app (non-recursive)"
+        chown $PUID:$PGID /app
+    fi
+fi
+
 sed -i "s/NGINX_PORT/${DISPATCHARR_PORT}/g" /etc/nginx/sites-enabled/default
 
 # NOTE: mac doesn't run as root, so only manage permissions
