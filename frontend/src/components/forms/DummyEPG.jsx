@@ -15,6 +15,13 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import API from '../../api';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+// Extend dayjs with timezone support
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const DummyEPGForm = ({ epg, isOpen, onClose }) => {
   // Separate state for each field to prevent focus loss
@@ -171,27 +178,71 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
           hour24 = 0;
         }
 
-        // Format 24-hour time string
-        if (minute > 0) {
-          allGroups.time24 = `${hour24}:${minute.toString().padStart(2, '0')}`;
-        } else {
-          allGroups.time24 = `${hour24.toString().padStart(2, '0')}:00`;
-        }
+        // Apply timezone conversion if output_timezone is set
+        const sourceTimezone = form.values.custom_properties?.timezone || 'UTC';
+        const outputTimezone = form.values.custom_properties?.output_timezone;
 
-        // Convert to 12-hour format
-        const ampmDisplay = hour24 < 12 ? 'AM' : 'PM';
-        let hour12 = hour24;
-        if (hour24 === 0) {
-          hour12 = 12;
-        } else if (hour24 > 12) {
-          hour12 = hour24 - 12;
-        }
+        if (outputTimezone && outputTimezone !== sourceTimezone) {
+          // Create a date in the source timezone
+          const sourceDate = dayjs()
+            .tz(sourceTimezone)
+            .set('hour', hour24)
+            .set('minute', minute)
+            .set('second', 0);
 
-        // Format 12-hour time string
-        if (minute > 0) {
-          allGroups.time = `${hour12}:${minute.toString().padStart(2, '0')} ${ampmDisplay}`;
+          // Convert to output timezone
+          const outputDate = sourceDate.tz(outputTimezone);
+
+          // Update hour and minute to the converted values
+          hour24 = outputDate.hour();
+          const convertedMinute = outputDate.minute();
+
+          // Format 24-hour time string with converted time
+          if (convertedMinute > 0) {
+            allGroups.time24 = `${hour24}:${convertedMinute.toString().padStart(2, '0')}`;
+          } else {
+            allGroups.time24 = `${hour24.toString().padStart(2, '0')}:00`;
+          }
+
+          // Convert to 12-hour format with converted time
+          const ampmDisplay = hour24 < 12 ? 'AM' : 'PM';
+          let hour12 = hour24;
+          if (hour24 === 0) {
+            hour12 = 12;
+          } else if (hour24 > 12) {
+            hour12 = hour24 - 12;
+          }
+
+          // Format 12-hour time string with converted time
+          if (convertedMinute > 0) {
+            allGroups.time = `${hour12}:${convertedMinute.toString().padStart(2, '0')} ${ampmDisplay}`;
+          } else {
+            allGroups.time = `${hour12} ${ampmDisplay}`;
+          }
         } else {
-          allGroups.time = `${hour12} ${ampmDisplay}`;
+          // No timezone conversion - use original logic
+          // Format 24-hour time string
+          if (minute > 0) {
+            allGroups.time24 = `${hour24}:${minute.toString().padStart(2, '0')}`;
+          } else {
+            allGroups.time24 = `${hour24.toString().padStart(2, '0')}:00`;
+          }
+
+          // Convert to 12-hour format
+          const ampmDisplay = hour24 < 12 ? 'AM' : 'PM';
+          let hour12 = hour24;
+          if (hour24 === 0) {
+            hour12 = 12;
+          } else if (hour24 > 12) {
+            hour12 = hour24 - 12;
+          }
+
+          // Format 12-hour time string
+          if (minute > 0) {
+            allGroups.time = `${hour12}:${minute.toString().padStart(2, '0')} ${ampmDisplay}`;
+          } else {
+            allGroups.time = `${hour12} ${ampmDisplay}`;
+          }
         }
       } catch (e) {
         // If parsing fails, leave time/time24 as placeholders
@@ -262,6 +313,8 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
     upcomingDescriptionTemplate,
     endedTitleTemplate,
     endedDescriptionTemplate,
+    form.values.custom_properties?.timezone,
+    form.values.custom_properties?.output_timezone,
   ]);
 
   useEffect(() => {
@@ -809,6 +862,14 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
                   patternValidation.dateMatch) && (
                   <>
                     <Divider label="Formatted Output Preview" mt="md" />
+
+                    {form.values.custom_properties?.output_timezone && (
+                      <Text size="xs" c="blue" mb="xs">
+                        ✓ Times are shown converted from{' '}
+                        {form.values.custom_properties?.timezone || 'UTC'} to{' '}
+                        {form.values.custom_properties?.output_timezone}
+                      </Text>
+                    )}
 
                     {titleTemplate && (
                       <>
