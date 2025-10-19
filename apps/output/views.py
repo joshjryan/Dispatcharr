@@ -416,7 +416,8 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
             logger.warning(f"Pattern was: {repr(date_pattern)}")
 
     # Try to match the channel name with the title pattern
-    title_match = title_regex.match(channel_name)
+    # Use search() instead of match() to match JavaScript behavior where .match() searches anywhere in the string
+    title_match = title_regex.search(channel_name)
     if not title_match:
         logger.debug(f"Channel name '{channel_name}' doesn't match title pattern")
         return []  # Return empty, will use default
