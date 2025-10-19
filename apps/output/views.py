@@ -348,6 +348,13 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     ended_title_template = custom_properties.get('ended_title_template', '')
     ended_description_template = custom_properties.get('ended_description_template', '')
 
+    # EPG metadata options
+    category_string = custom_properties.get('category', '')
+    # Split comma-separated categories and strip whitespace, filter out empty strings
+    categories = [cat.strip() for cat in category_string.split(',') if cat.strip()] if category_string else []
+    include_date = custom_properties.get('include_date', True)
+    include_live = custom_properties.get('include_live', False)
+
     # Parse timezone name
     try:
         source_tz = pytz.timezone(timezone_value)
@@ -656,23 +663,53 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
                     else:
                         upcoming_description = f"Upcoming: {main_event_description}"
 
+                    # Build custom_properties for upcoming programs (only date, no category/live)
+                    program_custom_properties = {}
+
+                    # Add date if requested (YYYY-MM-DD format from start time in event timezone)
+                    if include_date:
+                        # Convert UTC time to event timezone for date calculation
+                        local_time = program_start_utc.astimezone(source_tz)
+                        date_str = local_time.strftime('%Y-%m-%d')
+                        program_custom_properties['date'] = date_str
+
                     programs.append({
                         "channel_id": channel_id,
                         "start_time": program_start_utc,
                         "end_time": program_end_utc,
                         "title": upcoming_title,
                         "description": upcoming_description,
+                        "custom_properties": program_custom_properties,
                     })
 
                     current_time += timedelta(minutes=program_duration)
 
                 # Add the MAIN EVENT at the extracted time
+                # Build custom_properties for main event (includes category and live)
+                main_event_custom_properties = {}
+
+                # Add categories if provided
+                if categories:
+                    main_event_custom_properties['categories'] = categories
+
+                # Add date if requested (YYYY-MM-DD format from start time in event timezone)
+                if include_date:
+                    # Convert UTC time to event timezone for date calculation
+                    local_time = event_start_utc.astimezone(source_tz)
+                    date_str = local_time.strftime('%Y-%m-%d')
+                    main_event_custom_properties['date'] = date_str
+
+                # Add live flag if requested
+                if include_live:
+                    main_event_custom_properties['live'] = True
+
                 programs.append({
                     "channel_id": channel_id,
                     "start_time": event_start_utc,
                     "end_time": event_end_utc,
                     "title": main_event_title,
                     "description": main_event_description,
+                    "custom_properties": main_event_custom_properties,
                 })
 
                 event_happened = True
@@ -695,12 +732,23 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
                     else:
                         ended_description = f"Ended: {main_event_description}"
 
+                    # Build custom_properties for ended programs (only date, no category/live)
+                    program_custom_properties = {}
+
+                    # Add date if requested (YYYY-MM-DD format from start time in event timezone)
+                    if include_date:
+                        # Convert UTC time to event timezone for date calculation
+                        local_time = program_start_utc.astimezone(source_tz)
+                        date_str = local_time.strftime('%Y-%m-%d')
+                        program_custom_properties['date'] = date_str
+
                     programs.append({
                         "channel_id": channel_id,
                         "start_time": program_start_utc,
                         "end_time": program_end_utc,
                         "title": ended_title,
                         "description": ended_description,
+                        "custom_properties": program_custom_properties,
                     })
 
                     current_time += timedelta(minutes=program_duration)
@@ -739,12 +787,23 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
                         else:
                             program_description = f"Upcoming: {main_event_description}"
 
+                    # Build custom_properties (only date for upcoming/ended filler programs)
+                    program_custom_properties = {}
+
+                    # Add date if requested (YYYY-MM-DD format from start time in event timezone)
+                    if include_date:
+                        # Convert UTC time to event timezone for date calculation
+                        local_time = program_start_utc.astimezone(source_tz)
+                        date_str = local_time.strftime('%Y-%m-%d')
+                        program_custom_properties['date'] = date_str
+
                     programs.append({
                         "channel_id": channel_id,
                         "start_time": program_start_utc,
                         "end_time": program_end_utc,
                         "title": program_title,
                         "description": program_description,
+                        "custom_properties": program_custom_properties,
                     })
 
                     current_time += timedelta(minutes=program_duration)
@@ -774,12 +833,31 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
                 else:
                     description = title
 
+                # Build custom_properties for this program
+                program_custom_properties = {}
+
+                # Add categories if provided
+                if categories:
+                    program_custom_properties['categories'] = categories
+
+                # Add date if requested (YYYY-MM-DD format from start time in event timezone)
+                if include_date:
+                    # Convert UTC time to event timezone for date calculation
+                    local_time = program_start_utc.astimezone(source_tz)
+                    date_str = local_time.strftime('%Y-%m-%d')
+                    program_custom_properties['date'] = date_str
+
+                # Add live flag if requested
+                if include_live:
+                    program_custom_properties['live'] = True
+
                 programs.append({
                     "channel_id": channel_id,
                     "start_time": program_start_utc,
                     "end_time": program_end_utc,
                     "title": title,
                     "description": description,
+                    "custom_properties": program_custom_properties,
                 })
 
     logger.info(f"Generated {len(programs)} custom dummy programs for {channel_name}")
@@ -817,6 +895,23 @@ def generate_dummy_epg(
         )
         xml_lines.append(f"    <title>{html.escape(program['title'])}</title>")
         xml_lines.append(f"    <desc>{html.escape(program['description'])}</desc>")
+
+        # Add custom_properties if present
+        custom_data = program.get('custom_properties', {})
+
+        # Categories
+        if 'categories' in custom_data:
+            for cat in custom_data['categories']:
+                xml_lines.append(f"    <category>{html.escape(cat)}</category>")
+
+        # Date tag
+        if 'date' in custom_data:
+            xml_lines.append(f"    <date>{html.escape(custom_data['date'])}</date>")
+
+        # Live tag
+        if custom_data.get('live', False):
+            xml_lines.append(f"    <live />")
+
         xml_lines.append(f"  </programme>")
 
     return xml_lines
@@ -999,6 +1094,23 @@ def generate_epg(request, profile_name=None, user=None):
                     yield f'  <programme start="{start_str}" stop="{stop_str}" channel="{channel_id}">\n'
                     yield f"    <title>{html.escape(program['title'])}</title>\n"
                     yield f"    <desc>{html.escape(program['description'])}</desc>\n"
+
+                    # Add custom_properties if present
+                    custom_data = program.get('custom_properties', {})
+
+                    # Categories
+                    if 'categories' in custom_data:
+                        for cat in custom_data['categories']:
+                            yield f"    <category>{html.escape(cat)}</category>\n"
+
+                    # Date tag
+                    if 'date' in custom_data:
+                        yield f"    <date>{html.escape(custom_data['date'])}</date>\n"
+
+                    # Live tag
+                    if custom_data.get('live', False):
+                        yield f"    <live />\n"
+
                     yield f"  </programme>\n"
 
             else:
@@ -1023,6 +1135,23 @@ def generate_epg(request, profile_name=None, user=None):
                             yield f'  <programme start="{start_str}" stop="{stop_str}" channel="{channel_id}">\n'
                             yield f"    <title>{html.escape(program['title'])}</title>\n"
                             yield f"    <desc>{html.escape(program['description'])}</desc>\n"
+
+                            # Add custom_properties if present
+                            custom_data = program.get('custom_properties', {})
+
+                            # Categories
+                            if 'categories' in custom_data:
+                                for cat in custom_data['categories']:
+                                    yield f"    <category>{html.escape(cat)}</category>\n"
+
+                            # Date tag
+                            if 'date' in custom_data:
+                                yield f"    <date>{html.escape(custom_data['date'])}</date>\n"
+
+                            # Live tag
+                            if custom_data.get('live', False):
+                                yield f"    <live />\n"
+
                             yield f"  </programme>\n"
 
                         continue  # Skip to next channel

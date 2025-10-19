@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
+  Checkbox,
   Divider,
   Group,
   Modal,
@@ -60,6 +61,9 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
         ended_description_template: '',
         name_source: 'channel',
         stream_index: 1,
+        category: '',
+        include_date: true,
+        include_live: false,
       },
     },
     validate: {
@@ -345,6 +349,9 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
           ended_description_template: custom.ended_description_template || '',
           name_source: custom.name_source || 'channel',
           stream_index: custom.stream_index || 1,
+          category: custom.category || '',
+          include_date: custom.include_date ?? true,
+          include_live: custom.include_live ?? false,
         },
       });
 
@@ -687,6 +694,29 @@ const DummyEPGForm = ({ epg, isOpen, onClose }) => {
             min={1}
             max={1440}
             {...form.getInputProps('custom_properties.program_duration')}
+          />
+
+          <TextInput
+            label="Categories (Optional)"
+            description="EPG categories for these programs. Use commas to separate multiple (e.g., Sports, Live, HD). Note: Only added to the main event, not upcoming/ended filler programs."
+            placeholder="Sports, Live"
+            {...form.getInputProps('custom_properties.category')}
+          />
+
+          <Checkbox
+            label="Include Date Tag"
+            description="Include the <date> tag in EPG output with the program's start date (YYYY-MM-DD format). Added to all programs."
+            {...form.getInputProps('custom_properties.include_date', {
+              type: 'checkbox',
+            })}
+          />
+
+          <Checkbox
+            label="Include Live Tag"
+            description="Mark programs as live content with the <live /> tag in EPG output. Note: Only added to the main event, not upcoming/ended filler programs."
+            {...form.getInputProps('custom_properties.include_live', {
+              type: 'checkbox',
+            })}
           />
 
           {/* Testing & Preview */}
