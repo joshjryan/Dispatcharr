@@ -22,6 +22,7 @@ import logging
 from django.db.models.functions import Lower
 import os
 from apps.m3u.utils import calculate_tuner_count
+import regex
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +205,6 @@ def generate_dummy_programs(channel_id, channel_name, num_days=1, program_length
     Returns:
         List of program dictionaries
     """
-    import re
-
     # Get current time rounded to hour
     now = django_timezone.now()
     now = now.replace(minute=0, second=0, microsecond=0)
@@ -325,7 +324,6 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     Returns:
         List of program dictionaries with start_time/end_time in UTC
     """
-    import re
     import pytz
 
     logger.info(f"Generating custom dummy programs for channel: {channel_name}")
@@ -381,13 +379,15 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
 
     # Convert PCRE/JavaScript named groups (?<name>) to Python format (?P<name>)
     # This handles patterns created with JavaScript regex syntax
-    title_pattern = re.sub(r'\(\?<([^>]+)>', r'(?P<\1>', title_pattern)
+    # Use negative lookahead to avoid matching lookbehind (?<=) and negative lookbehind (?<!)
+    title_pattern = regex.sub(r'\(\?<(?![=!])([^>]+)>', r'(?P<\1>', title_pattern)
     logger.debug(f"Converted title pattern: {repr(title_pattern)}")
 
-    # Compile regex patterns
+    # Compile regex patterns using the enhanced regex module
+    # (supports variable-width lookbehinds like JavaScript)
     try:
-        title_regex = re.compile(title_pattern)
-    except re.error as e:
+        title_regex = regex.compile(title_pattern)
+    except Exception as e:
         logger.error(f"Invalid title regex pattern after conversion: {e}")
         logger.error(f"Pattern was: {repr(title_pattern)}")
         return []
@@ -395,11 +395,12 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     time_regex = None
     if time_pattern:
         # Convert PCRE/JavaScript named groups to Python format
-        time_pattern = re.sub(r'\(\?<([^>]+)>', r'(?P<\1>', time_pattern)
+        # Use negative lookahead to avoid matching lookbehind (?<=) and negative lookbehind (?<!)
+        time_pattern = regex.sub(r'\(\?<(?![=!])([^>]+)>', r'(?P<\1>', time_pattern)
         logger.debug(f"Converted time pattern: {repr(time_pattern)}")
         try:
-            time_regex = re.compile(time_pattern)
-        except re.error as e:
+            time_regex = regex.compile(time_pattern)
+        except Exception as e:
             logger.warning(f"Invalid time regex pattern after conversion: {e}")
             logger.warning(f"Pattern was: {repr(time_pattern)}")
 
@@ -407,11 +408,12 @@ def generate_custom_dummy_programs(channel_id, channel_name, now, num_days, cust
     date_regex = None
     if date_pattern:
         # Convert PCRE/JavaScript named groups to Python format
-        date_pattern = re.sub(r'\(\?<([^>]+)>', r'(?P<\1>', date_pattern)
+        # Use negative lookahead to avoid matching lookbehind (?<=) and negative lookbehind (?<!)
+        date_pattern = regex.sub(r'\(\?<(?![=!])([^>]+)>', r'(?P<\1>', date_pattern)
         logger.debug(f"Converted date pattern: {repr(date_pattern)}")
         try:
-            date_regex = re.compile(date_pattern)
-        except re.error as e:
+            date_regex = regex.compile(date_pattern)
+        except Exception as e:
             logger.warning(f"Invalid date regex pattern after conversion: {e}")
             logger.warning(f"Pattern was: {repr(date_pattern)}")
 
