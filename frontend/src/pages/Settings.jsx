@@ -192,6 +192,7 @@ const SettingsPage = () => {
     useState([]);
 
   const [proxySettingsSaved, setProxySettingsSaved] = useState(false);
+  const [generalSettingsSaved, setGeneralSettingsSaved] = useState(false);
   const [rehashingStreams, setRehashingStreams] = useState(false);
   const [rehashSuccess, setRehashSuccess] = useState(false);
   const [rehashConfirmOpen, setRehashConfirmOpen] = useState(false);
@@ -277,14 +278,16 @@ const SettingsPage = () => {
   const networkAccessForm = useForm({
     mode: 'controlled',
     initialValues: Object.keys(NETWORK_ACCESS_OPTIONS).reduce((acc, key) => {
-      acc[key] = '0.0.0.0/0';
+      acc[key] = '0.0.0.0/0,::0/0';
       return acc;
     }, {}),
     validate: Object.keys(NETWORK_ACCESS_OPTIONS).reduce((acc, key) => {
       acc[key] = (value) => {
         const cidrs = value.split(',');
+        const ipv4CidrRegex = /^([0-9]{1,3}\.){3}[0-9]{1,3}\/\d+$/;
+        const ipv6CidrRegex = /(?:(?:(?:[A-F0-9]{1,4}:){6}|(?=(?:[A-F0-9]{0,4}:){0,6}(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![:.\w]))(([0-9A-F]{1,4}:){0,5}|:)((:[0-9A-F]{1,4}){1,5}:|:)|::(?:[A-F0-9]{1,4}:){5})(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|(?:[A-F0-9]{1,4}:){7}[A-F0-9]{1,4}|(?=(?:[A-F0-9]{0,4}:){0,7}[A-F0-9]{0,4}(?![:.\w]))(([0-9A-F]{1,4}:){1,7}|:)((:[0-9A-F]{1,4}){1,7}|:)|(?:[A-F0-9]{1,4}:){7}:|:(:[A-F0-9]{1,4}){7})(?![:.\w])\/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9])/;
         for (const cidr of cidrs) {
-          if (cidr.match(/^([0-9]{1,3}\.){3}[0-9]{1,3}\/\d+$/)) {
+          if (cidr.match(ipv4CidrRegex) || cidr.match(ipv6CidrRegex)) {
             continue;
           }
 
@@ -322,7 +325,8 @@ const SettingsPage = () => {
           let val = null;
           switch (key) {
             case 'm3u-hash-key':
-              val = value.value.split(',');
+              // Split comma-separated string, filter out empty strings
+              val = value.value ? value.value.split(',').filter((v) => v) : [];
               break;
             case 'dvr-pre-offset-minutes':
             case 'dvr-post-offset-minutes':
@@ -353,7 +357,7 @@ const SettingsPage = () => {
       );
       networkAccessForm.setValues(
         Object.keys(NETWORK_ACCESS_OPTIONS).reduce((acc, key) => {
-          acc[key] = networkAccessSettings[key] || '0.0.0.0/0';
+          acc[key] = networkAccessSettings[key] || '0.0.0.0/0,::0/0';
           return acc;
         }, {})
       );
@@ -400,7 +404,17 @@ const SettingsPage = () => {
     loadComskipConfig();
   }, []);
 
+  // Clear success states when switching accordion panels
+  useEffect(() => {
+    setGeneralSettingsSaved(false);
+    setProxySettingsSaved(false);
+    setNetworkAccessSaved(false);
+    setRehashSuccess(false);
+  }, [accordianValue]);
+
   const onSubmit = async () => {
+    setGeneralSettingsSaved(false);
+
     const values = form.getValues();
     const changedSettings = {};
     let m3uHashKeyChanged = false;
@@ -408,12 +422,26 @@ const SettingsPage = () => {
     for (const settingKey in values) {
       // Only compare against existing value if the setting exists
       const existing = settings[settingKey];
+
+      // Convert array values (like m3u-hash-key) to comma-separated strings
+      let stringValue;
+      if (Array.isArray(values[settingKey])) {
+        stringValue = values[settingKey].join(',');
+      } else {
+        stringValue = `${values[settingKey]}`;
+      }
+
+      // Skip empty values to avoid validation errors
+      if (!stringValue) {
+        continue;
+      }
+
       if (!existing) {
         // Create new setting on save
-        changedSettings[settingKey] = `${values[settingKey]}`;
-      } else if (String(values[settingKey]) !== String(existing.value)) {
+        changedSettings[settingKey] = stringValue;
+      } else if (stringValue !== String(existing.value)) {
         // If the user changed the setting's value from what's in the DB:
-        changedSettings[settingKey] = `${values[settingKey]}`;
+        changedSettings[settingKey] = stringValue;
 
         // Check if M3U hash key was changed
         if (settingKey === 'm3u-hash-key') {
@@ -432,20 +460,36 @@ const SettingsPage = () => {
     }
 
     // Update each changed setting in the backend (create if missing)
-    for (const updatedKey in changedSettings) {
-      const existing = settings[updatedKey];
-      if (existing && existing.id) {
-        await API.updateSetting({
-          ...existing,
-          value: changedSettings[updatedKey],
-        });
-      } else {
-        await API.createSetting({
-          key: updatedKey,
-          name: updatedKey.replace(/-/g, ' '),
-          value: changedSettings[updatedKey],
-        });
+    try {
+      for (const updatedKey in changedSettings) {
+        const existing = settings[updatedKey];
+        if (existing && existing.id) {
+          const result = await API.updateSetting({
+            ...existing,
+            value: changedSettings[updatedKey],
+          });
+          // API functions return undefined on error
+          if (!result) {
+            throw new Error('Failed to update setting');
+          }
+        } else {
+          const result = await API.createSetting({
+            key: updatedKey,
+            name: updatedKey.replace(/-/g, ' '),
+            value: changedSettings[updatedKey],
+          });
+          // API functions return undefined on error
+          if (!result) {
+            throw new Error('Failed to create setting');
+          }
+        }
       }
+
+      setGeneralSettingsSaved(true);
+    } catch (error) {
+      // Error notifications are already shown by API functions
+      // Just don't show the success message
+      console.error('Error saving settings:', error);
     }
   };
 
@@ -475,12 +519,19 @@ const SettingsPage = () => {
   const onProxySettingsSubmit = async () => {
     setProxySettingsSaved(false);
 
-    await API.updateSetting({
-      ...settings['proxy-settings'],
-      value: JSON.stringify(proxySettingsForm.getValues()),
-    });
-
-    setProxySettingsSaved(true);
+    try {
+      const result = await API.updateSetting({
+        ...settings['proxy-settings'],
+        value: JSON.stringify(proxySettingsForm.getValues()),
+      });
+      // API functions return undefined on error
+      if (result) {
+        setProxySettingsSaved(true);
+      }
+    } catch (error) {
+      // Error notifications are already shown by API functions
+      console.error('Error saving proxy settings:', error);
+    }
   };
 
   const onComskipUpload = async () => {
@@ -568,29 +619,46 @@ const SettingsPage = () => {
 
   const executeSettingsSaveAndRehash = async () => {
     setRehashConfirmOpen(false);
+    setGeneralSettingsSaved(false);
 
     // Use the stored pending values that were captured before the dialog was shown
     const changedSettings = pendingChangedSettings || {};
 
     // Update each changed setting in the backend (create if missing)
-    for (const updatedKey in changedSettings) {
-      const existing = settings[updatedKey];
-      if (existing && existing.id) {
-        await API.updateSetting({
-          ...existing,
-          value: changedSettings[updatedKey],
-        });
-      } else {
-        await API.createSetting({
-          key: updatedKey,
-          name: updatedKey.replace(/-/g, ' '),
-          value: changedSettings[updatedKey],
-        });
+    try {
+      for (const updatedKey in changedSettings) {
+        const existing = settings[updatedKey];
+        if (existing && existing.id) {
+          const result = await API.updateSetting({
+            ...existing,
+            value: changedSettings[updatedKey],
+          });
+          // API functions return undefined on error
+          if (!result) {
+            throw new Error('Failed to update setting');
+          }
+        } else {
+          const result = await API.createSetting({
+            key: updatedKey,
+            name: updatedKey.replace(/-/g, ' '),
+            value: changedSettings[updatedKey],
+          });
+          // API functions return undefined on error
+          if (!result) {
+            throw new Error('Failed to create setting');
+          }
+        }
       }
-    }
 
-    // Clear the pending values
-    setPendingChangedSettings(null);
+      // Clear the pending values
+      setPendingChangedSettings(null);
+      setGeneralSettingsSaved(true);
+    } catch (error) {
+      // Error notifications are already shown by API functions
+      // Just don't show the success message
+      console.error('Error saving settings:', error);
+      setPendingChangedSettings(null);
+    }
   };
 
   const executeRehashStreamsOnly = async () => {
@@ -711,6 +779,13 @@ const SettingsPage = () => {
                 <Accordion.Panel>
                   <form onSubmit={form.onSubmit(onSubmit)}>
                     <Stack gap="sm">
+                      {generalSettingsSaved && (
+                        <Alert
+                          variant="light"
+                          color="green"
+                          title="Saved Successfully"
+                        />
+                      )}
                       <Switch
                         label="Enable Comskip (remove commercials after recording)"
                         {...form.getInputProps('dvr-comskip-enabled', {
@@ -874,6 +949,13 @@ const SettingsPage = () => {
                 <Accordion.Control>Stream Settings</Accordion.Control>
                 <Accordion.Panel>
                   <form onSubmit={form.onSubmit(onSubmit)}>
+                    {generalSettingsSaved && (
+                      <Alert
+                        variant="light"
+                        color="green"
+                        title="Saved Successfully"
+                      />
+                    )}
                     <Select
                       searchable
                       {...form.getInputProps('default-user-agent')}

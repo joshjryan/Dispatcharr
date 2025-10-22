@@ -134,6 +134,7 @@ else:
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "secret"),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": int(os.environ.get("POSTGRES_PORT", 5432)),
+            "CONN_MAX_AGE": DATABASE_CONN_MAX_AGE,
         }
     }
 
