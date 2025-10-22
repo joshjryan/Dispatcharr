@@ -183,32 +183,12 @@ if [ "$DISPATCHARR_DEBUG" != "true" ]; then
     uwsgi_args+=" --disable-logging"
 fi
 
-# Start Redis before uwsgi to ensure it's available when Django apps initialize
-echo "🚀 Starting Redis..."
-setpriv --reuid=$POSTGRES_USER --regid=$POSTGRES_USER --clear-groups -- redis-server --daemonize yes
-
-# Wait for Redis to be ready
-echo "⏳ Waiting for Redis to be ready..."
-python /app/scripts/wait_for_redis.py
-if [ $? -ne 0 ]; then
-    echo "❌ Redis failed to start properly!"
-    exit 1
-fi
-
-redis_pid=$(pgrep -x redis-server)
-if [ -n "$redis_pid" ]; then
-    echo "✅ Redis started with PID $redis_pid"
-    pids+=("$redis_pid")
-else
-    echo "❌ Redis process not found after startup!"
-    exit 1
-fi
-
-# Launch uwsgi with configurable nice level (default: -10 for high priority)
+# Launch uwsgi with configurable nice level (default: 0 for normal priority)
 # Users can override via UWSGI_NICE_LEVEL environment variable in docker-compose
 # Start with nice as root, then use setpriv to drop privileges to dispatch user
 # This preserves both the nice value and environment variables
-cd /app && nice -n $UWSGI_NICE_LEVEL setpriv --reuid=$POSTGRES_USER --regid=$POSTGRES_USER --clear-groups -- uwsgi $uwsgi_args &
+# Use --keep-groups instead of --clear-groups for LXC compatibility with attach-daemons
+cd /app && nice -n $UWSGI_NICE_LEVEL setpriv --reuid=$POSTGRES_USER --regid=$POSTGRES_USER --keep-groups -- uwsgi $uwsgi_args &
 uwsgi_pid=$!
 echo "✅ uwsgi started with PID $uwsgi_pid (nice $UWSGI_NICE_LEVEL)"
 pids+=("$uwsgi_pid")
