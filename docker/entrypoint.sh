@@ -187,9 +187,7 @@ fi
 # Users can override via UWSGI_NICE_LEVEL environment variable in docker-compose
 # Start with nice as root, then use setpriv to drop privileges to dispatch user
 # This preserves both the nice value and environment variables
-# Use --keep-groups instead of --clear-groups for LXC compatibility with attach-daemons
-cd /app && nice -n $UWSGI_NICE_LEVEL setpriv --reuid=$POSTGRES_USER --regid=$POSTGRES_USER --keep-groups -- uwsgi $uwsgi_args &
-uwsgi_pid=$!
+nice -n $UWSGI_NICE_LEVEL su -p - "$POSTGRES_USER" -c "cd /app && exec uwsgi $uwsgi_args" & uwsgi_pid=$!
 echo "✅ uwsgi started with PID $uwsgi_pid (nice $UWSGI_NICE_LEVEL)"
 pids+=("$uwsgi_pid")
 
